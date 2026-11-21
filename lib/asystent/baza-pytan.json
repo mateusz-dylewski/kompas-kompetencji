@@ -1,0 +1,90 @@
+{
+  "wersja": "1.0",
+  "opis": "Baza pytań i podpowiedzi asystenta przygotowującego przełożonego do rozmowy oceniającej. Pytania są otwarte, oparte na zachowaniach i przykładach. Asystent nie ocenia i nie proponuje wyniku.",
+  "ogolne": [
+    "Jak oceniasz swój wkład w cele zespołu w tym okresie?",
+    "Co ułatwiało, a co utrudniało pracę w tym okresie?",
+    "Które z Twoich działań uważasz za najważniejsze i dlaczego?",
+    "Jakie kompetencje chciałbyś rozwijać w kolejnym okresie?",
+    "Jakiego wsparcia potrzebujesz ode mnie lub z zespołu?"
+  ],
+  "kompetencje": [
+    {
+      "match": "RZETELNOŚĆ",
+      "niski": ["Jak przebiega u Ciebie sprawdzanie wyniku przed przekazaniem zadania dalej?", "Które wymagania albo procedury były dla Ciebie trudne do zachowania i co na to wpłynęło?"],
+      "wysoki": ["Jakie kontrole wprowadziłeś, żeby unikać powtarzających się błędów?", "Które standardy pracy uważasz za najważniejsze i jak je utrzymujesz?"]
+    },
+    {
+      "match": "KOMUNIKACJA",
+      "niski": ["Jak wybierasz sposób przekazania informacji różnym odbiorcom?", "W której sytuacji komunikacja była trudna i co by ją ułatwiło?"],
+      "wysoki": ["Jak sprawdzasz, czy rozmówca zrozumiał przekazaną informację?", "Jak dostosowujesz język do osoby, z którą rozmawiasz?"]
+    },
+    {
+      "match": "WYKORZYSTYWANIE WIEDZY",
+      "niski": ["Jakiej wiedzy lub szkolenia brakowało Ci w tym okresie?", "Jak uczysz się nowych zagadnień, gdy pojawiają się w pracy?"],
+      "wysoki": ["Jak dzielisz się swoją wiedzą z zespołem?", "Jakie doskonalenie zawodowe realizowałeś i jak je wykorzystałeś w pracy?"]
+    },
+    {
+      "match": "ORGANIZACJA PRACY",
+      "niski": ["Jak ustalasz priorytety, gdy zadań jest więcej niż czasu?", "Które terminy były zagrożone i co na to wpłynęło?"],
+      "wysoki": ["Jak planujesz pracę, żeby osiągać cele w terminie?", "Jak reagujesz, gdy plan się zmienia?"]
+    },
+    {
+      "match": "KREATYWNOŚĆ",
+      "niski": ["Czy w tym okresie pojawiły się sytuacje, w których można było zrobić coś inaczej?", "Jakie ograniczenia utrudniały proponowanie nowych rozwiązań?"],
+      "wysoki": ["Które z Twoich pomysłów udało się wdrożyć i z jakim efektem?", "Jak zbierasz pomysły od innych?"]
+    },
+    {
+      "match": "WSPÓŁPRACA",
+      "niski": ["Jak układa się współpraca z osobami z innych komórek?", "Co utrudnia wspólne działanie w zespole?"],
+      "wysoki": ["Jak pomagasz innym w osiąganiu wspólnych celów?", "Jak rozwiązujesz różnice zdań w zespole?"]
+    },
+    {
+      "match": "MYŚLENIE ANALITYCZNE",
+      "niski": ["Jakich danych lub informacji brakowało Ci przy podejmowaniu decyzji?", "Jak weryfikujesz założenia, zanim wyciągniesz wnioski?"],
+      "wysoki": ["Jak doszedłeś do wniosków w trudnej sprawie?", "Jak sprawdzasz, czy analiza jest kompletna?"]
+    },
+    {
+      "match": "NEGOCJOWANIE",
+      "niski": ["W jakiej sytuacji negocjacje nie przyniosły oczekiwanego rezultatu?", "Jak przygotowujesz się do rozmów z drugą stroną?"],
+      "wysoki": ["Jak budujesz porozumienie, gdy interesy są rozbieżne?", "Jak zabezpieczasz interes swój i organizacji?"]
+    },
+    {
+      "match": "WYSTĄPIENIA PUBLICZNE",
+      "niski": ["Jakie wystąpienia były dla Ciebie wyzwaniem i dlaczego?", "Jak przygotowujesz się do wystąpienia przed grupą?"],
+      "wysoki": ["Jak angażujesz słuchaczy podczas prezentacji?", "Jak radzisz sobie z pytaniami, na które nie znasz odpowiedzi od razu?"]
+    },
+    {
+      "match": "ORIENTACJA NA KLIENTA",
+      "niski": ["Jak sprawdzasz, czy obsłużony interesant otrzymał to, czego potrzebował?", "Które sytuacje z interesantami były trudne i co by je ułatwiło?"],
+      "wysoki": ["Jak wyjaśniasz skomplikowane sprawy w prostych słowach?", "Jak wychodzisz naprzeciw potrzebom osób, które się do Ciebie zgłaszają?"]
+    },
+    {
+      "match": "RADZENIE SOBIE W SYTUACJACH KRYZYSOWYCH",
+      "niski": ["Jak reagujesz, gdy sytuacja wymaga szybkiej decyzji?", "Jakiego wsparcia brakowało w trudnych chwilach?"],
+      "wysoki": ["Jak zachowujesz spokój i porządek działania w kryzysie?", "Jak wyciągasz wnioski po zakończeniu trudnej sytuacji?"]
+    },
+    {
+      "match": "ZARZĄDZANIE STRATEGICZNE",
+      "niski": ["Jak łączysz bieżące zadania z celami dłuższymi?", "Które priorytety strategiczne były dla Ciebie mniej jasne?"],
+      "wysoki": ["Jak przekładasz cele strategiczne na plan działania zespołu?", "Jak monitorujesz, czy działania prowadzą do celu?"]
+    },
+    {
+      "match": "ZARZĄDZANIE LUDŹMI",
+      "niski": ["Jak wspierasz rozwój osób w zespole?", "Jak przekazujesz informację zwrotną, gdy coś nie idzie zgodnie z planem?"],
+      "wysoki": ["Jak delegujesz zadania i pilnujesz, żeby odpowiadały kompetencjom osób?", "Jak budujesz zaangażowanie zespołu?"]
+    },
+    {
+      "match": "PODEJMOWANIE DECYZJI",
+      "niski": ["Jakie informacje były potrzebne, żeby podjąć decyzję, a których zabrakło?", "Co utrudniało podjęcie decyzji w terminie?"],
+      "wysoki": ["Jak przyjmujesz odpowiedzialność za decyzje i ich skutki?", "Jak konsultujesz decyzje z osobami, których dotyczą?"]
+    }
+  ],
+  "zasady": [
+    "Pytania otwarte: zaczynają się od jak, co, kiedy, nie od czy (chyba że chodzi o fakt).",
+    "Pytamy o zachowania i przykłady, nigdy o cechy osoby (nie „jesteś leniwy”).",
+    "Nie sugerujemy odpowiedzi ani wyniku. Nie mówimy, jaką ocenę przyznać.",
+    "Przy wysokim wyniku też pytamy: docenienie i utrzymanie działań, nie tylko kontrola.",
+    "Gdy przy wskaźniku nie ma przykładu, pytamy o sytuację, zamiast zakładać brak działania."
+  ]
+}

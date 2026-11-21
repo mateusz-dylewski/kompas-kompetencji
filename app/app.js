@@ -186,6 +186,7 @@
   async function load() {
     const me = await api("GET", "/api/me");
     S.user = me.user; S.ai = me.ai;
+    S.assistant = await api("GET", "/api/assistant");
     const st = await api("GET", "/api/settings"); S.modules = Object.fromEntries(st.modules.map(x => [x.key, x.on])); S.moduleList = st.modules;
     const m = await fetch("/api/model").then(r => r.json()); S.mandB = m.mandB || []; S.mandC = m.mandC || []; S.maxExtra = m.maxExtra || 3;
     await refreshData();
@@ -762,18 +763,23 @@
     return list.length ? `<div class="ev-mini"><span class="muted">Oceny cząstkowe kwartalne w okresie oceny:</span><ul class="c">${list.map(p => `<li>${partialText(p)}</li>`).join("")}</ul></div>` : "";
   }
   // Podpowiedzi do przemyślenia przed spotkaniem: reguły z ocen, bez decyzji i bez oceny osoby
+  // Podpowiedzi do przemyślenia przed spotkaniem: pytania z bazy (lib/asystent/baza-pytan.json), bez decyzji
+  const bankFor = k => (S.assistant?.kompetencje || []).find(x => String(k).toUpperCase().startsWith(x.match.slice(0, 12)));
   function prepPanel(c) {
     const sc = scoreLocal(c);
-    const ranked = Object.entries(sc).filter(([, v]) => v.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
+    const ranked = Object.entries(sc).filter(([, v]) => v.avg !== null).sort((a, b) => a[1].avg - b[1].avg || (a[0] < b[0] ? -1 : 1));
     if (!ranked.length) return `<p class="muted">Podpowiedzi pojawią się po ocenieniu wskaźników.</p>`;
     const low = ranked.slice(0, 2), high = ranked.slice(-1);
     const weakInd = k => (MODEL.find(m => m.k === k)?.w || []).map((w, wi) => ({ w: w.w, r: c.ratings[k + "|" + wi] })).filter(o => o.r && o.r.lvl !== "none" && o.r.lvl !== undefined && o.r.lvl <= 1);
+    const qs = (list, n = 1) => (list || []).slice(0, n);
+    const gen = (S.assistant?.ogolne || []).slice(0, 2);
     return `<ul class="c">
-      ${low.map(([k, v]) => `<li><b>${esc(nameOf(k))}</b> (średnio ${fmt(v.avg)} pkt): zapytaj, co wpłynęło na ten wynik i jakich warunków brakowało.${weakInd(k).length ? ` Do omówienia: ${weakInd(k).slice(0, 2).map(o => `„${esc(o.w.slice(0, 60))}”`).join(", ")}.` : ""}</li>`).join("")}
-      ${high.map(([k]) => `<li><b>${esc(nameOf(k))}</b>: warto docenić konkretne działania i zapytać, jak je utrzymać.</li>`).join("")}
+      ${low.map(([k, v]) => { const b = bankFor(k); return `<li><b>${esc(nameOf(k))}</b> (średnio ${fmt(v.avg)} pkt) – zapytaj: ${qs(b?.niski).map(q => `„${esc(q)}”`).join(" ")}${weakInd(k).length ? ` Do omówienia: ${weakInd(k).slice(0, 2).map(o => `„${esc(o.w.slice(0, 60))}”`).join(", ")}.` : ""}</li>`; }).join("")}
+      ${high.map(([k]) => { const b = bankFor(k); return `<li><b>${esc(nameOf(k))}</b> – warto docenić i zapytać: ${qs(b?.wysoki).map(q => `„${esc(q)}”`).join(" ")}</li>`; }).join("")}
+      ${gen.map(q => `<li>Ogólnie: „${esc(q)}”</li>`).join("")}
       <li>Jeśli przy wskaźniku nie ma przykładu, zapytaj o sytuację z okresu zamiast zakładać brak działania.</li>
     </ul>
-    <p class="note">To podpowiedzi do przemyślenia, nie ocena. Decyzję podejmujesz Ty, a rozmowa powinna opierać się na przykładach.</p>`;
+    <p class="note">To podpowiedzi do przemyślenia, nie ocena. Decyzję podejmujesz Ty. Pytania pochodzą z jawnej bazy: zobacz instrukcję asystenta.</p>`;
   }
   function talkStep() {
     const c = S.cur;

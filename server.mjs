@@ -11,6 +11,8 @@ import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, E
 import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS, addMonths, lastPeriodic } from './lib/cycle.mjs';
 import { demoConfig, DEMO_MANAGER, DEMO_EMPLOYEE } from './lib/seed-config.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
+// Baza pytań asystenta (jedno źródło dla UI, API i promptów AI); opis: docs/asystent-instrukcja.md
+const ASSISTANT = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib', 'asystent', 'baza-pytan.json'), 'utf8'));
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT !== undefined && process.env.PORT !== '' ? Number(process.env.PORT) : 8080; // PORT=0 → losowy port (testy)
@@ -403,7 +405,7 @@ function evalSummaryForAI(ev) {
   }
   return lines.join('\n');
 }
-const RULES = `Zasady: nie wystawiasz ocen i nie podejmujesz decyzji – to należy do przełożonego. Nie oceniasz osoby, tylko zachowania. Odpowiadasz po polsku, zwięźle, w punktach. Nie podajesz imion ani danych osobowych.`;
+const RULES = `Zasady: nie wystawiasz ocen i nie podejmujesz decyzji – to należy do przełożonego. Nie oceniasz osoby, tylko zachowania. Odpowiadasz po polsku, zwięźle, w punktach. Nie podajesz imion ani danych osobowych. Pytania formułujesz według zasad: ${ASSISTANT.zasady.join(' ')}`;
 
 // Rytm miesięczny demo (fikcyjny): check-iny z poprzednich miesięcy, feedback, oceny cząstkowe za bieżący kwartał
 function seedRhythm(mgr, emps) {
@@ -490,6 +492,7 @@ route('PUT', '/api/settings', async (req, res, u) => {
   }
   send(res, 200, { ok: true });
 });
+route('GET', '/api/assistant', async (req, res) => send(res, 200, ASSISTANT));
 route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN,
   cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS } }));
 // Terminy: ostatnia ocena okresowa pracownika, najwcześniejszy termin kolejnej (6 mies.) i termin cyklu (24 mies.)
