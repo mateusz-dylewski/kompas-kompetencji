@@ -25,6 +25,8 @@
     lifebuoy: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M5 5l4 4M15 15l4 4M19 5l-4 4M9 15l-4 4"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
     signpost: '<path d="M12 3v18"/><path d="M12 5h7l2 2-2 2h-7"/><path d="M12 11H5l-2 2 2 2h7"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     chart2: '<path d="M4 19h16"/><path d="M6 15l4-4 3 3 5-6"/>',
   };
   // Mapowanie kompetencji (prefiks nazwy z modelu) → ikona

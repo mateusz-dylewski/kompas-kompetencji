@@ -7,6 +7,7 @@
   const avatar = (src, name, cls = "av") => src
     ? `<img class="${cls}" src="${esc(src)}" alt="" width="40" height="40" loading="lazy">`
     : `<span class="${cls} av-ph" aria-hidden="true">${esc(String(name || "?").split(" ").map(x => x[0]).slice(0, 2).join(""))}</span>`;
+  const actBtn = (icon, label, attrs, cls = "g") => `<button class="btn sm ${cls} act-btn" ${attrs}>${KK_ICON(icon)}<span>${label}</span></button>`;
   const compIc = k => KK_COMP_ICON(k, "ic-svg comp-ic");
   const fmt = n => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
   const MODEL = window.KK_MODEL || [];
@@ -282,7 +283,7 @@
       const edit = isMgr && e.status === "draft";
       return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
         <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
-        <td style="text-align:right"><button class="btn sm g" data-act="${edit ? "openEval" : "readEval"}" data-id="${e.id}">${edit ? "Dokończ" : "Podgląd"}</button></td></tr>`;
+        <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}"`)}</td></tr>`;
     }).join("");
     return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th>Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
@@ -298,8 +299,10 @@
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div></div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td>
           <td style="text-align:right">${t.status === "none"
-            ? `<button class="btn sm" data-act="newEval" data-emp="${t.id}">Utwórz ocenę</button>`
-            : `<button class="btn sm g" data-act="openEval" data-id="${t.evalId}">${t.status === "draft" ? "Dokończ" : t.status === "submitted" ? "Omów" : "Otwórz"}</button>`}</td></tr>`).join("");
+            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
+            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}"`)
+            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}"`)
+            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}"`)}</td></tr>`).join("");
       return `
         <section class="next card anim"><div class="next-ic" aria-hidden="true">${KK_ICON("arrow")}</div>
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>

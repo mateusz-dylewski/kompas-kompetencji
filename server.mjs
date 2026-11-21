@@ -455,7 +455,7 @@ route('GET', '/api/audit', async (req, res, u) => {
 });
 
 // ---------- Serwer ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 const SECURITY = {
   'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
@@ -467,7 +467,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
     if (!url.pathname.startsWith('/api/')) {
-      const isAsset = /^\/app\/assets\/(faces\/)?[a-z0-9-]+\.(svg|png|jpg)$/.test(url.pathname);
+      const isAsset = /^\/app\/assets\/(faces\/|fonts\/)?[a-z0-9-]+\.(svg|png|jpg|woff2)$/.test(url.pathname);
       if (!STATIC.has(url.pathname) && !isAsset) return send(res, 404, { error: 'not_found' }, SECURITY);
       const file = path.join(ROOT, url.pathname === '/' ? 'index.html' : url.pathname);
       const data = fs.readFileSync(file);
