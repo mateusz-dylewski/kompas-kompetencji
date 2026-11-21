@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { buildXml, computeResults } from './lib/documents.mjs';
+import { buildXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -18,8 +18,10 @@ const K_MIN = 5; // minimalna liczba osób do pokazania agregatów zespołu
 const SESSION_MS = 8 * 3600 * 1000;
 
 // ---------- Baza danych ----------
-fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
-const db = new DatabaseSync(path.join(ROOT, 'data', 'kompas.db'));
+// KK_DATA_DIR: katalog bazy i klucza podpisu (domyślnie ./data, nie commitować); testy używają katalogu tymczasowego
+const DATA_DIR = path.resolve(process.env.KK_DATA_DIR || path.join(ROOT, 'data'));
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const db = new DatabaseSync(path.join(DATA_DIR, 'kompas.db'));
 db.exec(`
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
@@ -39,6 +41,8 @@ for (const sql of [
   'ALTER TABLE evals ADD COLUMN objection_text TEXT',
   'ALTER TABLE audit ADD COLUMN prev_hash TEXT',
   'ALTER TABLE audit ADD COLUMN hash TEXT',
+  'ALTER TABLE audit ADD COLUMN prev_value TEXT',
+  'ALTER TABLE audit ADD COLUMN new_value TEXT',
 ]) { try { db.exec(sql); } catch (_) { /* już istnieje */ } }
 db.exec(`
 CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, signer_id INTEGER NOT NULL,
@@ -47,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_
   model TEXT, input_sha256 TEXT, output_text TEXT, source TEXT, at TEXT NOT NULL);
 `);
 // Klucz do podpisów mockowych (lokalny, w data/ – nie trafia do repo)
-const KEY_FILE = path.join(ROOT, 'data', 'sign.key');
+const KEY_FILE = path.join(DATA_DIR, 'sign.key');
 if (!fs.existsSync(KEY_FILE)) fs.writeFileSync(KEY_FILE, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
 const SIGN_KEY = fs.readFileSync(KEY_FILE, 'utf8').trim();
 
@@ -60,8 +64,7 @@ const MAND_B = ['ZARZĄDZANIE LUDŹMI', 'PODEJMOWANIE DECYZJI', 'ORGANIZACJA PRA
 const MAND_C = ['WYKORZYSTYWANIE WIEDZY', 'RZETELNOŚĆ', 'ORGANIZACJA PRACY', 'WSPÓŁPRACA', 'KOMUNIKACJA'];
 const mandFor = typ => (typ === 'C' ? MAND_C : typ === 'B' ? MAND_B : []);
 const MAX_EXTRA = 3;
-const PTS5 = [1, 3, 5, 7, 9];
-const PTS3 = [3, 5, 7];
+// PTS5 (1/3/5/7/9) i PTS3 (3/5/7 – pierwsza ocena, do weryfikacji z przepisami z 2015 r.) są w lib/documents.mjs
 
 const now = () => new Date().toISOString();
 const hashPass = (pw, salt = crypto.randomBytes(16).toString('hex')) =>
@@ -72,13 +75,27 @@ const checkPass = (pw, stored) => {
   const b = Buffer.from(hash);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
-// Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje)
-const auditHash = (prev, uid, action, target, at) => crypto.createHash('sha256').update([prev || '', uid ?? '', action, target, at].join('|')).digest('hex');
-const audit = (uid, action, target = '') => {
+// Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje).
+// Zmiany ocen, dowodów i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
+// Wpisy bez wartości liczą skrót jak dotąd, więc starsze dzienniki weryfikują się bez zmian.
+const auditHash = (prev, uid, action, target, at, pv = null, nv = null) => crypto.createHash('sha256')
+  .update([prev || '', uid ?? '', action, target, at, ...(pv !== null || nv !== null ? [pv ?? '', nv ?? ''] : [])].join('|')).digest('hex');
+const audit = (uid, action, target = '', prevVal, newVal) => {
   const at = now();
+  const pv = prevVal === undefined ? null : JSON.stringify(prevVal);
+  const nv = newVal === undefined ? null : JSON.stringify(newVal);
   const prev = db.prepare('SELECT hash FROM audit ORDER BY id DESC LIMIT 1').get()?.hash || '';
-  const hash = auditHash(prev, uid, action, String(target), at);
-  db.prepare('INSERT INTO audit(user_id,action,target,at,prev_hash,hash) VALUES(?,?,?,?,?,?)').run(uid, action, String(target), at, prev, hash);
+  const hash = auditHash(prev, uid, action, String(target), at, pv, nv);
+  db.prepare('INSERT INTO audit(user_id,action,target,at,prev_hash,hash,prev_value,new_value) VALUES(?,?,?,?,?,?,?,?)')
+    .run(uid ?? null, action, String(target), at, prev, hash, pv, nv);
+};
+// Różnica dwóch obiektów płaskich (klucz → [stara, nowa]); używana do zapisu zmian w dzienniku
+const diffObj = (a = {}, b = {}) => {
+  const prev = {}, next = {};
+  for (const k of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) {
+    if (JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k])) { prev[k] = a?.[k] ?? null; next[k] = b?.[k] ?? null; }
+  }
+  return Object.keys(next).length ? { prev, next } : null;
 };
 const docHash = ev => {
   const data = typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data || {});
@@ -117,12 +134,36 @@ function seed() {
       ratings[`${c.k}|${wi}`] = { lvl, ex: 'Przykład z okresu oceny (dane demonstracyjne).' };
     }));
     const data = { criteria, ratings, dev: 'Szkolenie z analizy danych do końca kwartału.' };
+    if (typ !== 'pierwsza') { // dane fikcyjne: oceny cząstkowe „przyznane” przez oceniającego w scenariuszu demo
+      data.schema = EVAL_SCHEMA; data.partials = {};
+      for (const k of criteria) data.partials[k] = { pts: PTS5[Math.floor(rnd() * 3) + 2] };
+      if (status !== 'draft') { const r = computeResults({ typ, data }, MODEL); data.wynik = r.wynik; data.wynikSource = 'wyliczony'; data.wynikReasons = r.wynikReasons; }
+    }
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,created) VALUES(?,?,?,?,?,?,?,?,?)');
   emps.forEach((eid, i) => insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', i % 3 === 0 ? 1 : 0, 20 + i * 12, now()));
 }
 seed();
+migrateEvalSchema();
+
+// Migracja kształtu danych oceny do wersji 2 (oceny cząstkowe B/C przyznaje oceniający, wynik wyliczany).
+// Szkice B/C bez pola schema dostają schema=2 i puste data.partials – oceniający musi przyznać oceny cząstkowe.
+// Oceny złożone sprzed migracji zostają bez zmian (podpisany skrót treści), ich oceny cząstkowe to średnie wskaźników.
+function migrateEvalSchema() {
+  const rows = db.prepare("SELECT id,typ,data FROM evals WHERE status='draft' AND typ IN ('B','C')").all();
+  let n = 0;
+  for (const r of rows) {
+    const d = JSON.parse(r.data || '{}');
+    if (Number(d.schema) >= EVAL_SCHEMA) continue;
+    const prev = { schema: d.schema ?? null, wynik: d.wynik ?? null };
+    d.schema = EVAL_SCHEMA; d.partials = {}; delete d.wynik;
+    db.prepare('UPDATE evals SET data=? WHERE id=?').run(JSON.stringify(d), r.id);
+    audit(null, 'migrate_eval_schema2', r.id, prev, { schema: EVAL_SCHEMA, partials: {} });
+    n++;
+  }
+  if (n) console.log(`Migracja: ${n} szkic(e) ocen okresowych przeniesiono do schematu ${EVAL_SCHEMA}.`);
+}
 
 // ---------- Sesje ----------
 const sessions = new Map(); // token -> { uid, exp }
@@ -147,19 +188,13 @@ const readJson = req => new Promise((ok, bad) => {
 });
 const str = (x, max = 500) => (typeof x === 'string' ? x.trim().slice(0, max) : '');
 const publicUser = u => u && ({ id: u.id, email: u.email, name: u.name, role: u.role, position: u.position, unit: u.unit, avatar: u.avatar || null });
-const ptsFor = (typ, lvl) => (lvl === 'none' ? null : typ === 'pierwsza' ? PTS3[lvl - 1] : PTS5[lvl]);
 
-// Oblicza średnie punktów per kompetencja z ocen
+const parseData = ev => (typeof ev.data === 'string' ? JSON.parse(ev.data || '{}') : (ev.data || {}));
+// Ocena cząstkowa per kompetencja (B/C: przyznana przez oceniającego; pierwsza i dane sprzed migracji: średnia wskaźników)
 function scoreEval(ev) {
-  const data = typeof ev.data === 'string' ? JSON.parse(ev.data || '{}') : (ev.data || {});
-  const out = {};
-  for (const k of data.criteria || []) {
-    const comp = MODEL.find(c => c.k === k); if (!comp) continue;
-    const pts = comp.w.map((_, wi) => data.ratings?.[`${k}|${wi}`]).filter(r => r && r.lvl !== 'none' && r.lvl !== undefined)
-      .map(r => ptsFor(ev.typ, r.lvl));
-    out[k] = { avg: pts.length ? pts.reduce((a, b) => a + b, 0) / pts.length : null, n: pts.length, total: comp.w.length };
-  }
-  return out;
+  const data = parseData(ev);
+  const res = computeResults({ ...ev, data: { ...data, criteria: (data.criteria || []).filter(k => MODEL_KEYS.has(k)) } }, MODEL);
+  return Object.fromEntries(res.crit.map(c => [c.key, { avg: c.partial, n: c.rows.filter(r => r.pts !== null).length, total: c.rows.length }]));
 }
 const evalRow = ev => ({ ...ev, data: JSON.parse(ev.data || '{}') });
 
@@ -180,13 +215,26 @@ function sanitizeData(input, typ) {
       ratings[key] = { lvl: r.lvl, ex: str(r.ex, 1200) };
   }
   const date = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
-  const wynik = ['pozytywna', 'negatywna'].includes(input?.wynik) ? input.wynik : '';
-  return { criteria, ratings, dev: str(input?.dev, 2000), rozmowa: date(input?.rozmowa), terminOceny: date(input?.terminOceny),
-    uzasadnienie: str(input?.uzasadnienie, 4000), wynik };
+  const out = { criteria, ratings, dev: str(input?.dev, 2000), rozmowa: date(input?.rozmowa), terminOceny: date(input?.terminOceny),
+    uzasadnienie: str(input?.uzasadnienie, 4000) };
+  if (typ === 'pierwsza') {
+    // pierwsza ocena: wynik wskazuje oceniający (zasady z 2015 r. do weryfikacji)
+    out.wynik = ['pozytywna', 'negatywna'].includes(input?.wynik) ? input.wynik : '';
+  } else {
+    // ocena okresowa: oceny cząstkowe 1/3/5/7/9 przyznaje oceniający; wyniku nie wpisuje się – jest wyliczany (§ 11)
+    out.schema = EVAL_SCHEMA;
+    out.partials = {};
+    const src2 = input?.partials && typeof input.partials === 'object' ? input.partials : {};
+    for (const k of criteria) {
+      const pts = Number(src2[k]?.pts);
+      if (PTS5.includes(pts)) out.partials[k] = { pts };
+    }
+  }
+  return out;
 }
 // Walidacja do złożenia oceny
 function missingForSubmit(ev) {
-  const data = typeof ev.data === 'string' ? JSON.parse(ev.data || '{}') : (ev.data || {});
+  const data = parseData(ev);
   const miss = [];
   for (const k of data.criteria || []) {
     const comp = MODEL.find(c => c.k === k);
@@ -195,6 +243,11 @@ function missingForSubmit(ev) {
       if (!r) miss.push(`${comp.k}: wskaźnik ${wi + 1} nieoceniony`);
       else if (r.lvl !== 'none' && !(r.ex || '').trim()) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez uzasadnienia`);
     });
+    if (isSchema2(ev.typ, data) && !PTS5.includes(Number(data.partials?.[k]?.pts))) miss.push(`${comp.k}: brak oceny cząstkowej (1/3/5/7/9 pkt)`);
+  }
+  if (ev.typ !== 'pierwsza') {
+    const res = computeResults({ ...ev, data }, MODEL);
+    if (res.wynik === 'negatywna' && !(data.uzasadnienie || '').trim()) miss.push('Uzasadnienie jest obowiązkowe przy ocenie negatywnej');
   }
   return miss;
 }
@@ -390,8 +443,16 @@ route('PUT', '/api/evals/:id', async (req, res, u, p) => {
   if (ev.status !== 'draft') return fail(res, 409, 'Ocena jest już złożona i nie można jej edytować.');
   const b = await readJson(req);
   const data = sanitizeData(b.data, ev.typ);
+  const pf = str(b.periodFrom, 10) || ev.period_from, pt = str(b.periodTo, 10) || ev.period_to;
   db.prepare('UPDATE evals SET data=?, period_from=?, period_to=?, updated=? WHERE id=?')
-    .run(JSON.stringify(data), str(b.periodFrom, 10) || ev.period_from, str(b.periodTo, 10) || ev.period_to, now(), ev.id);
+    .run(JSON.stringify(data), pf, pt, now(), ev.id);
+  // Dziennik: tylko zmienione pola (wskaźniki, oceny cząstkowe, pola formularza), z poprzednią i nową wartością
+  const old = parseData(ev);
+  const flat = (d, from, to) => ({ ...Object.fromEntries(Object.entries(d.ratings || {}).map(([k, v]) => [`ratings.${k}`, v])),
+    ...Object.fromEntries(Object.entries(d.partials || {}).map(([k, v]) => [`partials.${k}`, v.pts])),
+    criteria: d.criteria, dev: d.dev, rozmowa: d.rozmowa, terminOceny: d.terminOceny, uzasadnienie: d.uzasadnienie, wynik: d.wynik, periodFrom: from, periodTo: to });
+  const ch = diffObj(flat(old, ev.period_from, ev.period_to), flat(data, pf, pt));
+  if (ch) audit(u.id, 'update_eval', ev.id, ch.prev, ch.next);
   send(res, 200, { ok: true, missing: missingForSubmit({ ...ev, data: JSON.stringify(data) }) });
 });
 route('POST', '/api/evals/:id/submit', async (req, res, u, p) => {
@@ -400,8 +461,14 @@ route('POST', '/api/evals/:id/submit', async (req, res, u, p) => {
   if (ev.status !== 'draft') return fail(res, 409, 'Ocena już złożona.');
   const miss = missingForSubmit(ev);
   if (miss.length) return fail(res, 422, 'Ocena nie jest kompletna.', { missing: miss.slice(0, 50) });
-  db.prepare("UPDATE evals SET status='submitted', updated=? WHERE id=?").run(now(), ev.id);
-  audit(u.id, 'submit_eval', ev.id);
+  // Wynik oceny okresowej zapisujemy jako wartość wyliczoną z ocen cząstkowych (§ 11), nie wpisywaną ręcznie
+  const data = parseData(ev);
+  if (isSchema2(ev.typ, data)) {
+    const r = computeResults({ ...ev, data }, MODEL);
+    data.wynik = r.wynik; data.wynikSource = 'wyliczony'; data.wynikReasons = r.wynikReasons;
+  }
+  db.prepare("UPDATE evals SET status='submitted', data=?, updated=? WHERE id=?").run(JSON.stringify(data), now(), ev.id);
+  audit(u.id, 'submit_eval', ev.id, { status: ev.status }, { status: 'submitted', wynik: data.wynik ?? null });
   send(res, 200, { ok: true });
 });
 route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
@@ -409,9 +476,9 @@ route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
   if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
   if (ev.status !== 'submitted') return fail(res, 409, 'Najpierw złóż ocenę.');
   const b = await readJson(req);
-  const data = JSON.parse(ev.data); data.dev = str(b.dev, 2000) || data.dev;
+  const data = JSON.parse(ev.data); const prevDev = data.dev ?? null; data.dev = str(b.dev, 2000) || data.dev;
   db.prepare("UPDATE evals SET status='discussed', data=?, updated=? WHERE id=?").run(JSON.stringify(data), now(), ev.id);
-  audit(u.id, 'discuss_eval', ev.id);
+  audit(u.id, 'discuss_eval', ev.id, { status: ev.status, dev: prevDev }, { status: 'discussed', dev: data.dev ?? null });
   send(res, 200, { ok: true });
 });
 
@@ -491,12 +558,12 @@ route('POST', '/api/ai/development', async (req, res, u) => {
 
 // Dziennik zdarzeń – przegląd dla przełożonego (zgodność z RODO / audyt)
 route('GET', '/api/audit', async (req, res, u) => {
-  const rows = db.prepare('SELECT action,target,at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 100').all(u.id);
+  const rows = db.prepare('SELECT action,target,at,substr(prev_value,1,300) AS prev_value,substr(new_value,1,300) AS new_value FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 100').all(u.id);
   // Weryfikacja łańcucha: każdy wpis musi pasować do skrótu poprzedniego
-  const all = db.prepare('SELECT id,user_id,action,target,at,prev_hash,hash FROM audit ORDER BY id').all();
+  const all = db.prepare('SELECT id,user_id,action,target,at,prev_hash,hash,prev_value,new_value FROM audit ORDER BY id').all();
   let prev = '', broken = null;
   for (const r of all) {
-    if (r.hash && (r.prev_hash !== prev || auditHash(prev, r.user_id, r.action, r.target, r.at) !== r.hash)) { broken = r.id; break; }
+    if (r.hash && (r.prev_hash !== prev || auditHash(prev, r.user_id, r.action, r.target, r.at, r.prev_value, r.new_value) !== r.hash)) { broken = r.id; break; }
     if (r.hash) prev = r.hash;
   }
   const aiRows = db.prepare('SELECT eval_id,action,model,source,at,substr(output_text,1,400) AS output FROM ai_log WHERE user_id=? ORDER BY id DESC LIMIT 50').all(u.id);
@@ -595,7 +662,7 @@ const server = http.createServer(async (req, res) => {
     if (code === 500) console.error(e);
     fail(res, code, code === 500 ? 'Błąd serwera.' : 'Nieprawidłowe dane.');
   }
-}).listen(PORT, '127.0.0.1', () => console.log(`Kompas Kompetencji: http://localhost:${PORT}  (AI: ${AI_URL}, model ${AI_MODEL})`));
+}).listen(PORT, '127.0.0.1', () => console.log(`Kompas Kompetencji: http://localhost:${server.address().port}  (AI: ${AI_URL}, model ${AI_MODEL})`));
 
 // Wygaszanie sesji
 setInterval(() => { const t = Date.now(); for (const [k, s] of sessions) if (s.exp < t) sessions.delete(k); }, 60000).unref();

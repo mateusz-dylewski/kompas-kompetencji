@@ -15,8 +15,12 @@
   const STATUS = { draft: ["Szkic", "wr"], submitted: ["Złożona", "info"], discussed: ["Omówiona", "ok"], none: ["Brak oceny", ""] };
   const LEVELS5 = ["Znacznie poniżej", "Poniżej", "Na poziomie", "Powyżej", "Znacznie powyżej"];
   const PTS5 = [1, 3, 5, 7, 9];
-  const PTS3 = [3, 5, 7];
+  const PTS3 = [3, 5, 7]; // pierwsza ocena – skala do weryfikacji z przepisami z 2015 r.
   const LEVELS3 = ["Poniżej", "Na poziomie", "Powyżej"];
+  // Te same reguły co lib/documents.mjs (§ 11 rozporządzenia z 4.04.2016): przedziały średniej i ocena negatywna
+  const BANDS = [[2, "znacznie poniżej oczekiwań"], [4, "poniżej oczekiwań"], [6, "na poziomie oczekiwań"], [8, "powyżej oczekiwań"], [9, "znacznie powyżej oczekiwań"]];
+  const levelFor = a => (a === null || a === undefined ? "—" : a <= 2 ? BANDS[0][1] : (BANDS.find(([m]) => a <= m) || BANDS[4])[1]);
+  const isS2 = (typ, data) => typ !== "pierwsza" && Number(data && data.schema) >= 2;
 
   // Ekrany rozumiane przez użytkownika: każdy ma tytuł i jedno zdanie „po co”
   const PAGES = {
@@ -91,15 +95,29 @@
   }
   const scoreBars = scores => Object.entries(scores).map(([k, v]) => `
     <div class="sb"><div class="row"><span class="sb-l">${compIc(k)}${esc(nameOf(k))}</span><span class="muted">${v.avg === null ? "brak" : fmt(v.avg) + " pkt"}</span></div>${bar(v.avg)}</div>`).join("");
+  // Ocena cząstkowa per kompetencja: B/C – przyznana przez oceniającego (data.partials); pierwsza ocena – średnia wskaźników
   function scoreLocal(c) {
-    const out = {};
+    const out = {}, s2 = isS2(c.typ, c.data);
     MODEL.filter(m => c.criteria.includes(m.k)).forEach(m => {
       const pts = m.w.map((_, wi) => c.ratings[m.k + "|" + wi]).filter(r => r && r.lvl !== "none" && r.lvl !== undefined)
         .map(r => c.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]);
-      out[m.k] = { avg: pts.length ? pts.reduce((a, b) => a + b, 0) / pts.length : null, n: pts.length, total: m.w.length };
+      const ind = pts.length ? pts.reduce((a, b) => a + b, 0) / pts.length : null;
+      const p = Number(c.data && c.data.partials && c.data.partials[m.k] && c.data.partials[m.k].pts);
+      out[m.k] = { avg: s2 ? (PTS5.includes(p) ? p : null) : ind, n: pts.length, total: m.w.length, dist: pts };
     });
     return out;
   }
+  // Wynik oceny okresowej wyliczany z ocen cząstkowych (§ 11 ust. 4) – nie wybiera się go ręcznie
+  function verdictLocal(scores) {
+    const vals = Object.values(scores);
+    if (!vals.length || vals.some(v => v.avg === null)) return { wynik: null, reasons: [] };
+    const avg = vals.reduce((a, v) => a + v.avg, 0) / vals.length, reasons = [];
+    if (avg <= 4) reasons.push(`ogólny poziom: ${levelFor(avg)}`);
+    const low = vals.filter(v => v.avg <= 2).length;
+    if (low) reasons.push(`ocena cząstkowa „znacznie poniżej oczekiwań” w ${low} kryt.`);
+    return { wynik: reasons.length ? "negatywna" : "pozytywna", reasons, avg };
+  }
+  const distText = pts => { const n = {}; pts.forEach(p => { n[p] = (n[p] || 0) + 1; }); return Object.keys(n).sort((a, b) => a - b).map(p => `${n[p]}× ${p} pkt`).join(", ") || "brak ocenionych wskaźników"; };
   const timeline = st => {
     const s2 = st === "submitted" || st === "discussed", s3 = st === "discussed";
     const seg = (on, label) => `<div class="tl-seg"><div class="dot ${on ? "on" : ""}"></div><small>${label}</small></div>`;
@@ -408,7 +426,18 @@
           </div>
           <label class="f" for="${exId}">Przykład z okresu</label>
           <textarea id="${exId}" data-ex="${esc(id)}" placeholder="Sytuacja, działanie, rezultat">${esc(r.ex || "")}</textarea></div>`;
-      }).join("")}`;
+      }).join("")}${isS2(c.typ, c.data) ? partialCard(comp) : ""}`;
+  }
+  // Ocena cząstkowa za kryterium – przyznaje oceniający (skala 1/3/5/7/9), system jej nie podpowiada
+  function partialCard(comp) {
+    const c = S.cur, sc = scoreLocal(c)[comp.k] || { dist: [] };
+    const cur = Number(c.data.partials && c.data.partials[comp.k] && c.data.partials[comp.k].pts);
+    const ro = c.status !== "draft" ? "disabled" : "";
+    return `<div class="card ind-card"><h3 id="pc-${esc(comp.k.length)}">Ocena cząstkowa: ${esc(nameOf(comp.k))}</h3>
+      <p class="muted">Ocenę cząstkową za kryterium przyznajesz Ty. Dla orientacji: poziomy wskaźników – ${esc(distText(sc.dist))}.</p>
+      <div class="lv" role="radiogroup" aria-label="Ocena cząstkowa: ${esc(nameOf(comp.k))}">
+      ${LEVELS5.map((lab, i) => `<label><input type="radio" name="partial-${esc(comp.k)}" value="${PTS5[i]}" data-partial="${esc(comp.k)}" ${cur === PTS5[i] ? "checked" : ""} ${ro}><span><b>${PTS5[i]} pkt</b> ${lab}</span></label>`).join("")}
+      </div></div>`;
   }
   function talkStep() {
     const c = S.cur;
@@ -429,6 +458,7 @@
     const c = S.cur;
     const scores = scoreLocal(c);
     const rated = Object.values(scores).filter(v => v.avg !== null);
+    // średnia ocen cząstkowych (§ 11 ust. 1) – wyświetlana w podsumowaniu oceny okresowej
     const overall = rated.length ? rated.reduce((a, v) => a + v.avg, 0) / rated.length : null;
     const miss = c.missing || [];
     const canSubmit = c.status === "draft" && miss.length === 0 && c.criteria.length > 0;
@@ -440,10 +470,10 @@
       </div>
       <label class="f" for="fUzas">Uzasadnienie oceny (obowiązkowe przy ocenie negatywnej)</label>
       <textarea id="fUzas" data-field="uzasadnienie" ${ro}>${esc(d.uzasadnienie || "")}</textarea>
-      <fieldset style="border:0;padding:0;margin:12px 0 0"><legend class="f">Ocena okresowa</legend>
+      ${isS2(c.typ, d) ? verdictBox(scores) : `<fieldset style="border:0;padding:0;margin:12px 0 0"><legend class="f">${c.typ === "pierwsza" ? "Wynik pierwszej oceny" : "Ocena okresowa"}</legend>
         <label class="choice"><input type="radio" name="wynik" value="pozytywna" data-field="wynik" ${d.wynik === "pozytywna" ? "checked" : ""} ${ro}><span><b>Pozytywna</b></span></label>
         <label class="choice"><input type="radio" name="wynik" value="negatywna" data-field="wynik" ${d.wynik === "negatywna" ? "checked" : ""} ${ro}><span><b>Negatywna</b></span></label>
-      </fieldset></div>
+      </fieldset>`}</div>
       ${docLinks(c.id)}`;
     return form + `<div class="card"><h2>Podsumowanie</h2>
       <p>Średnia: <b data-to="${overall ?? 0}" data-dec="1">${overall === null ? "—" : fmt(overall)}</b> pkt</p>
@@ -459,6 +489,12 @@
     ${c.status !== "draft" ? `<div class="card" id="sigBox"><h2>Podpisy i zapoznanie</h2><p class="muted">Ładowanie…</p></div>` : ""}
     ${c.status === "discussed" ? `<div class="note">Ocena omówiona. Wnioski rozwojowe: ${esc(c.data.dev || "—")}</div>` : ""}`;
   }
+  function verdictBox(scores) {
+    const v = verdictLocal(scores);
+    if (!v.wynik) return `<div class="note" role="status"><b>Ocena okresowa:</b> zostanie wyliczona po przyznaniu ocen cząstkowych we wszystkich kryteriach (§ 11 rozporządzenia).</div>`;
+    return `<div class="note ${v.wynik === "negatywna" ? "warn" : ""}" role="status"><b>Ocena okresowa (wyliczona wg § 11): ${v.wynik.toUpperCase()}</b>
+      <br>Średnia ocen cząstkowych ${fmt(v.avg)} pkt – ${esc(levelFor(v.avg))}.${v.reasons.length ? `<br>Podstawa oceny negatywnej (§ 11 ust. 4): ${esc(v.reasons.join("; "))}. Uzasadnienie jest obowiązkowe.` : ""}</div>`;
+  }
   function docLinks(id) {
     const base = `/api/evals/${id}/document`;
     return `<div class="docs"><h3>Dokumenty</h3><p class="muted">Arkusz generowany z danych tej oceny. Podgląd i pobieranie w PDF lub XML.</p>
@@ -470,11 +506,11 @@
   }
   function evalReadPage() {
     const e = S.readEval; if (!e) return `<p class="muted">Ładowanie…</p>`;
-    const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ });
+    const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ, data: e.data });
     const items = MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => `
       <div class="card"><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}</div>`).join("");
     return `<div class="card"><div class="row"><h2>${esc(TYP[e.typ])}</h2>${pill(e.status)}</div>
-      <p class="muted">Okres ${esc(e.period_from || "")} – ${esc(e.period_to || "")}</p>
+      <p class="muted">Okres ${esc(e.period_from || "")} – ${esc(e.period_to || "")}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11)" : ""}` : ""}</p>
       <div class="grid two"><div>${radar(scores)}</div><div>${scoreBars(scores)}</div></div></div>
       ${items}
       ${e.data.dev ? `<div class="card"><h2>Wnioski rozwojowe</h2><p>${esc(e.data.dev)}</p></div>` : ""}
@@ -657,6 +693,10 @@
         S.cur.criteria = [...S.cur.criteria, k];
       } else S.cur.criteria = S.cur.criteria.filter(x => x !== k);
       S.cur.data.criteria = S.cur.criteria; queueSave(); render(); return;
+    }
+    if (t.dataset.partial && S.cur) {
+      S.cur.data.partials = { ...(S.cur.data.partials || {}), [t.dataset.partial]: { pts: +t.value } };
+      queueSave(); render(); return;
     }
     if (t.dataset.rate && S.cur) {
       const v = t.value === "none" ? "none" : +t.value;

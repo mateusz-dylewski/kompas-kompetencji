@@ -4,13 +4,24 @@ Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika służby cywil
 
 ## Uruchomienie
 
-Wymagania: Node.js 22.5+ (zero zależności npm).
+Wymagania: Node.js 22.13+ (wbudowany `node:sqlite` bez flagi). Serwer nie ma zależności npm. Generator PDF używa `pdf-lib` i fontów z `package.json` (`npm install`).
 
 ```bash
+npm install
 node server.mjs
 ```
 
 Otwórz http://localhost:8080.
+
+Zmienne: `PORT` (domyślnie 8080), `KK_DATA_DIR` (katalog bazy i klucza podpisu, domyślnie `./data`).
+
+## Testy
+
+```bash
+npm test
+```
+
+Testy używają wbudowanego `node:test`, bez dodatkowych zależności. `test/documents.test.mjs` sprawdza obliczenia oceny: skalę 1/3/5/7/9, średnią, przedziały z § 11 ust. 1 pkt 2, ocenę negatywną z § 11 ust. 4 i brak danych.
 
 ## Konta demonstracyjne
 
@@ -54,12 +65,23 @@ Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostę
 - `app/kompetencje.js` – model kompetencji (14 kompetencji, 49 wskaźników) z Arkusza/modelu.
 - `data/kompas.db` – baza SQLite (tworzona automatycznie, nie commituj).
 
+## Obliczenia oceny okresowej (Arkusz B i C)
+
+- **Oceny cząstkowe** za każde kryterium przyznaje oceniający w skali 1/3/5/7/9 (pole `data.partials`). Poziomy wskaźników i przykłady są materiałem pomocniczym. System nie wylicza z nich oceny cząstkowej i nie podpowiada jej.
+- **Średnia i poziom:** średnia arytmetyczna ocen cząstkowych oraz przedziały z § 11 ust. 1 pkt 2 (do 2 pkt włącznie: znacznie poniżej; >2–4: poniżej; >4–6: na poziomie; >6–8: powyżej; >8–9: znacznie powyżej).
+- **Wynik jest wyliczany, a nie wpisywany:** ocena jest negatywna, gdy poziom ogólny to „poniżej” lub „znacznie poniżej oczekiwań”, a także gdy którakolwiek ocena cząstkowa to „znacznie poniżej oczekiwań” (§ 11 ust. 4). Przy złożeniu oceny wynik zapisuje się w `data.wynik` z `data.wynikSource = "wyliczony"`. Przy ocenie negatywnej uzasadnienie jest obowiązkowe.
+- **Pierwsza ocena:** skala 3/5/7 i ręczny wybór wyniku zostają bez zmian. Są oznaczone jako **„do weryfikacji z przepisami z 2015 r.”**.
+
+### Migracja danych: schemat oceny 2
+
+Przy starcie serwer przenosi **szkice** ocen B/C bez pola `schema` do `schema: 2`: dodaje puste `partials` i usuwa ręcznie wpisany `wynik`. Oceniający musi wtedy przyznać oceny cząstkowe. Każdy taki szkic dostaje wpis `migrate_eval_schema2` w dzienniku. **Ocen złożonych nie zmieniamy**, bo ich treść jest podpisana skrótem. Ich oceny cząstkowe pozostają średnimi wskaźników, a wynik to ten wpisany przez oceniającego (`wynikSource: reczny_sprzed_migracji`).
+
 ## Ograniczenia prototypu
 
 - Brak HTTPS i rotacji sesji; sesje w pamięci serwera.
 - Brak rejestracji kont przez system zewnętrzny; konta zakłada przełożony.
 - Limit kryteriów dodatkowych (3) do potwierdzenia z rozporządzeniem.
-- Mapowanie poziomów pierwszej oceny (3/5/7 pkt) na opisy modelu wymaga weryfikacji z Arkuszem A.
+- Mapowanie poziomów pierwszej oceny (3/5/7 pkt) na opisy modelu wymaga weryfikacji z Arkuszem A. Skala 3/5/7 jest oznaczona w kodzie jako „do weryfikacji z przepisami z 2015 r.”.
 
 ## Dokumenty: arkusze PDF i XML
 
