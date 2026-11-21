@@ -328,3 +328,6 @@ input[type="checkbox"]:disabled:checked::after{border-color:#fff}
 /* Podświetlenie pozycji pod kursorem */
 .kk-sel-list li:hover{background:#e8f1fb}
 .kk-sel-list li[aria-selected="true"]:hover{background:var(--navy);color:#fff}
+/* Ikony kompetencji na zaznaczonym (granatowym) kafelku są białe, a nie granatowe */
+.choice:has(input:checked) .comp-ic,.choice:has(input:checked) .ic-svg{color:#fff}
+.choice:has(input:disabled) .comp-ic{color:var(--navy)}
