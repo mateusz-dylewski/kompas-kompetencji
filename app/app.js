@@ -897,7 +897,7 @@
     const r = await api("GET", `/api/evals/${id}`);
     const e = r.eval;
     S.cur = { id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id, evidence: [],
-      empName: r.employee?.name || "", empAvatar: r.employee?.avatar || null, data: e.data, criteria: e.data.criteria || [], ratings: e.data.ratings || {},
+      empName: r.employee?.name || "", empAvatar: r.employee?.avatar || null, data: e.data, criteria: [...new Set([...MODEL.map(m => m.k).filter(k => e.typ !== "pierwsza" && isMand(k, e.typ)), ...(e.data.criteria || [])])], ratings: e.data.ratings || {},
       step: 0, missing: r.missing || [], aiText: "", aiSource: "", timing: r.timing || null };
     S.maxExtra = 3;
     await refreshWizardEvidence();

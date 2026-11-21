@@ -281,7 +281,9 @@ const evalRow = ev => ({ ...ev, data: JSON.parse(ev.data || '{}') });
 
 // Walidacja danych oceny z formularza
 function sanitizeData(input, typ) {
-  const criteria = (Array.isArray(input?.criteria) ? input.criteria : []).filter(k => MODEL_KEYS.has(k));
+  // Kryteria obowiązkowe B/C są zawsze zaznaczone (nie da się ich pominąć)
+  const mandKeys = typ === 'B' || typ === 'C' ? MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m))).map(c => c.k) : [];
+  const criteria = [...new Set([...mandKeys, ...(Array.isArray(input?.criteria) ? input.criteria : []).filter(k => MODEL_KEYS.has(k))])];
   const ratings = {};
   const src = input?.ratings && typeof input.ratings === 'object' ? input.ratings : {};
   for (const [key, r] of Object.entries(src)) {
