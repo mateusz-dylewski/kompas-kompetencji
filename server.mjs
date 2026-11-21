@@ -11,6 +11,7 @@ import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, E
 import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS, addMonths, lastPeriodic } from './lib/cycle.mjs';
 import { demoConfig, DEMO_MANAGER, DEMO_EMPLOYEE } from './lib/seed-config.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
+import { securityConfig, clientIp, passwordProblem } from './lib/security.mjs';
 // Baza pytań asystenta (jedno źródło dla UI, API i promptów AI); opis: docs/asystent-instrukcja.md
 const ASSISTANT = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib', 'asystent', 'baza-pytan.json'), 'utf8'));
 
@@ -22,14 +23,22 @@ const K_MIN = 5; // minimalna liczba osób do pokazania agregatów zespołu
 const SESSION_MS = 8 * 3600 * 1000;
 const DEMO = demoConfig(); // hasła demo z konfiguracji seedu (KK_DEMO_PASSWORD; domyślne tylko lokalnie)
 const PROD = DEMO.mode === 'production';
-// Limit prób logowania: 5 nieudanych w 10 minut na adres IP i na e-mail
-const LOGIN_MAX_FAILS = 5, LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const SEC = securityConfig(); // KK_PUBLIC_ORIGIN, KK_TRUSTED_PROXY, KK_SIGN_KEY, KK_AUDIT_KEY (lib/security.mjs)
+// Limit prób logowania (okno 10 minut), tak by nie dało się zablokować cudzego konta ani całego biura:
+//   para IP + e-mail: 5 nieudanych → blokada tej pary; adres IP: 50 nieudanych → blokada adresu;
+//   e-mail (z wielu adresów): od 10 nieudanych rosnące odstępy między próbami (1, 2, 4… s, maks. 60 s)
+const LOGIN_PAIR_MAX = 5, LOGIN_IP_MAX = 50, LOGIN_EMAIL_SOFT = 10, LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const ACTIVATION_MS = 24 * 3600 * 1000;
 
 // ---------- Baza danych ----------
-// KK_DATA_DIR: katalog bazy i klucza podpisu (domyślnie ./data, nie commitować); testy używają katalogu tymczasowego
+// KK_DATA_DIR: katalog bazy (domyślnie ./data, nie commitować); testy używają katalogu tymczasowego.
+// Pliki tworzymy tylko dla właściciela procesu (katalog 0700, pliki 0600).
 const DATA_DIR = path.resolve(process.env.KK_DATA_DIR || path.join(ROOT, 'data'));
-fs.mkdirSync(DATA_DIR, { recursive: true });
+process.umask(0o077);
+fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+fs.chmodSync(DATA_DIR, 0o700);
 const db = new DatabaseSync(path.join(DATA_DIR, 'kompas.db'));
+for (const f of fs.readdirSync(DATA_DIR)) { try { fs.chmodSync(path.join(DATA_DIR, f), 0o600); } catch (_) { /* np. katalog outbox */ } }
 db.exec(`
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
@@ -83,10 +92,45 @@ CREATE TABLE IF NOT EXISTS partial_ratings(id INTEGER PRIMARY KEY, employee_id I
   competency TEXT NOT NULL, pts INTEGER NOT NULL CHECK(pts IN (1,3,5,7,9)), justification TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
   created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(employee_id, quarter, competency));
 `);
-// Klucz do podpisów mockowych (lokalny, w data/ – nie trafia do repo)
-const KEY_FILE = path.join(DATA_DIR, 'sign.key');
-if (!fs.existsSync(KEY_FILE)) fs.writeFileSync(KEY_FILE, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
-const SIGN_KEY = fs.readFileSync(KEY_FILE, 'utf8').trim();
+// Klucze: w produkcji wyłącznie ze zmiennych (KK_SIGN_KEY, KK_AUDIT_KEY – z menedżera sekretów, poza katalogiem danych).
+// Lokalnie, gdy zmiennych brak: pliki w data/ (0600, poza repozytorium).
+const fileKey = name => {
+  const f = path.join(DATA_DIR, name);
+  if (!fs.existsSync(f)) fs.writeFileSync(f, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  return fs.readFileSync(f, 'utf8').trim();
+};
+const SIGN_KEY = SEC.signKey || fileKey('sign.key');
+const AUDIT_KEY = SEC.auditKey || fileKey('audit.key');
+
+// Konta: hasło ustala pracownik (link aktywacyjny); must_change wymusza zmianę hasła nadanego przez kogoś innego
+try {
+  db.exec('ALTER TABLE users ADD COLUMN must_change INTEGER NOT NULL DEFAULT 0');
+  // Migracja: konta założone przez przełożonego z hasłem początkowym (przed P0) muszą zmienić hasło
+  db.exec("UPDATE users SET must_change=1 WHERE id IN (SELECT CAST(target AS INTEGER) FROM audit WHERE action='create_employee')");
+} catch (_) { /* kolumna już istnieje */ }
+db.exec(`CREATE TABLE IF NOT EXISTS activation(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, token_sha256 TEXT NOT NULL UNIQUE,
+  exp TEXT NOT NULL, used_at TEXT, created_by INTEGER, created TEXT NOT NULL)`);
+
+// Dziennik: pieczęć HMAC każdego wpisu (klucz spoza bazy) i blokada UPDATE/DELETE na poziomie bazy
+try { db.exec('ALTER TABLE audit ADD COLUMN mac TEXT'); } catch (_) { /* już istnieje */ }
+const auditMac = r => crypto.createHmac('sha256', AUDIT_KEY)
+  .update(JSON.stringify([r.id, r.user_id ?? null, r.action, r.target ?? null, r.at, r.prev_hash ?? null, r.hash ?? null, r.prev_value ?? null, r.new_value ?? null])).digest('hex');
+{
+  // Wpisy sprzed migracji pieczętujemy raz (lokalnie automatycznie, w produkcji tylko z KK_AUDIT_MIGRATE=1).
+  const legacy = db.prepare('SELECT * FROM audit WHERE mac IS NULL ORDER BY id').all();
+  if (legacy.length && SEC.auditMigrate) {
+    db.exec('DROP TRIGGER IF EXISTS audit_no_update');
+    const up = db.prepare('UPDATE audit SET mac=? WHERE id=?');
+    for (const r of legacy) up.run(auditMac(r), r.id);
+    console.log(`Dziennik: opieczętowano HMAC ${legacy.length} wcześniejszych wpisów.`);
+  } else if (legacy.length) {
+    console.warn(`Dziennik: ${legacy.length} wpisów bez pieczęci HMAC – weryfikacja zgłosi naruszenie. Jednorazowa migracja: KK_AUDIT_MIGRATE=1.`);
+  }
+}
+db.exec(`
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'Dziennik zdarzeń: tylko dopisywanie'); END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'Dziennik zdarzeń: tylko dopisywanie'); END;
+`);
 
 // Model kompetencji (ten sam plik co w przeglądarce)
 const MODEL = JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'kompetencje.js'), 'utf8')
@@ -116,11 +160,15 @@ const modOn = key => settingVal(key) === '1';
 const modeOffFor = pathname => Object.entries(MODULES).find(([k, m]) => m.prefixes.some(pre => pathname.startsWith(pre)) && !modOn(k))?.[0] || null;
 const hashPass = (pw, salt = crypto.randomBytes(16).toString('hex')) =>
   `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`;
+// Konto bez hasła (przed aktywacją) ma pass=''. Fałszywy hash wyrównuje czas odpowiedzi,
+// gdy konta nie ma albo nie jest aktywne – po czasie nie da się poznać, które adresy istnieją.
+const DUMMY_PASS = hashPass(crypto.randomBytes(16).toString('hex'));
 const checkPass = (pw, stored) => {
-  const [salt, hash] = stored.split(':');
-  const a = Buffer.from(crypto.scryptSync(pw, salt, 64).toString('hex'));
+  const usable = typeof stored === 'string' && /^[0-9a-f]{32}:[0-9a-f]{128}$/.test(stored);
+  const [salt, hash] = (usable ? stored : DUMMY_PASS).split(':');
+  const a = Buffer.from(crypto.scryptSync(String(pw), salt, 64).toString('hex'));
   const b = Buffer.from(hash);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return usable && a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 // Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje).
 // Zmiany ocen, dowodów i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
@@ -131,10 +179,13 @@ const audit = (uid, action, target = '', prevVal, newVal) => {
   const at = now();
   const pv = prevVal === undefined ? null : JSON.stringify(prevVal);
   const nv = newVal === undefined ? null : JSON.stringify(newVal);
-  const prev = db.prepare('SELECT hash FROM audit ORDER BY id DESC LIMIT 1').get()?.hash || '';
+  const last = db.prepare('SELECT id,hash FROM audit ORDER BY id DESC LIMIT 1').get();
+  const prev = last?.hash || '';
   const hash = auditHash(prev, uid, action, String(target), at, pv, nv);
-  db.prepare('INSERT INTO audit(user_id,action,target,at,prev_hash,hash,prev_value,new_value) VALUES(?,?,?,?,?,?,?,?)')
-    .run(uid ?? null, action, String(target), at, prev, hash, pv, nv);
+  // Identyfikator nadajemy jawnie (serwer jednowątkowy), bo pieczęć HMAC go obejmuje, a UPDATE na audit jest zablokowany
+  const row = { id: (last?.id || 0) + 1, user_id: uid ?? null, action, target: String(target), at, prev_hash: prev, hash, prev_value: pv, new_value: nv };
+  db.prepare('INSERT INTO audit(id,user_id,action,target,at,prev_hash,hash,prev_value,new_value,mac) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(row.id, row.user_id, action, row.target, at, prev, hash, pv, nv, auditMac(row));
 };
 // Różnica dwóch obiektów płaskich (klucz → [stara, nowa]); używana do zapisu zmian w dzienniku
 const diffObj = (a = {}, b = {}) => {
@@ -241,13 +292,17 @@ function migrateEvalSchema() {
 
 // ---------- Sesje ----------
 const sessions = new Map(); // token -> { uid, exp }
+// Cookie sesji: lokalnie kk_sid, w produkcji __Host-kk_sid (Secure, Path=/, bez Domain)
+const sidFrom = req => new RegExp(`(?:^|;\\s*)${SEC.cookieName}=([a-f0-9]{64})`).exec(req.headers.cookie || '')?.[1] || null;
 function sessionUser(req) {
-  const m = /(?:^|;\s*)kk_sid=([a-f0-9]{64})/.exec(req.headers.cookie || '');
-  if (!m) return null;
-  const s = sessions.get(m[1]);
-  if (!s || s.exp < Date.now()) { sessions.delete(m[1]); return null; }
-  return db.prepare('SELECT id,email,name,role,position,unit,manager_id,avatar FROM users WHERE id=?').get(s.uid) || null;
+  const sid = sidFrom(req);
+  if (!sid) return null;
+  const s = sessions.get(sid);
+  if (!s || s.exp < Date.now()) { sessions.delete(sid); return null; }
+  return db.prepare('SELECT id,email,name,role,position,unit,manager_id,avatar,must_change FROM users WHERE id=?').get(s.uid) || null;
 }
+// Unieważnia sesje użytkownika (np. po zmianie hasła), z wyjątkiem bieżącej
+const dropSessions = (uid, keep = null) => { for (const [k, s] of sessions) if (s.uid === uid && k !== keep) sessions.delete(k); };
 
 // ---------- Pomocnicze ----------
 const send = (res, code, obj, extra = {}) => {
@@ -273,7 +328,7 @@ const qs = req => new URL(req.url, 'http://x').searchParams;
 const teamMember = (u, empId) => (u.role === 'przelozony' ? db.prepare("SELECT id,name FROM users WHERE id=? AND manager_id=? AND role='pracownik'").get(Number(empId), u.id) || null : null);
 // Walidacja: zwraca { value, errors }; errors to mapa pole → komunikat (kod 400 „Nieprawidłowe dane.”)
 const invalid = (res, errors, msg = 'Nieprawidłowe dane.') => fail(res, 400, msg, { fields: errors });
-const publicUser = u => u && ({ id: u.id, email: u.email, name: u.name, role: u.role, position: u.position, unit: u.unit, avatar: u.avatar || null });
+const publicUser = u => u && ({ id: u.id, email: u.email, name: u.name, role: u.role, position: u.position, unit: u.unit, avatar: u.avatar || null, mustChange: !!u.must_change });
 
 const parseData = ev => (typeof ev.data === 'string' ? JSON.parse(ev.data || '{}') : (ev.data || {}));
 // Ocena cząstkowa per kompetencja (B/C: przyznana przez oceniającego; pierwsza i dane sprzed migracji: średnia wskaźników)
@@ -444,44 +499,118 @@ migrateEvalSchema();
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
-// Nieudane logowania: klucz (ip:… / email:…) → znaczniki czasu z ostatnich 10 minut (pamięć serwera)
+// Nieudane próby: klucz (p:IP|e-mail, ip:IP, e:e-mail) → znaczniki czasu z okna 10 minut (pamięć serwera, maks. 10 000 kluczy)
 const loginFails = new Map();
+const LOGIN_KEYS_MAX = 10000;
 const recentFails = key => (loginFails.get(key) || []).filter(t => Date.now() - t < LOGIN_WINDOW_MS);
-const retryAfter = keys => {
-  let wait = 0;
-  for (const k of keys) { const r = recentFails(k); if (r.length >= LOGIN_MAX_FAILS) wait = Math.max(wait, Math.ceil((r[0] + LOGIN_WINDOW_MS - Date.now()) / 1000)); }
-  return wait;
+const noteFail = key => {
+  if (!loginFails.has(key) && loginFails.size >= LOGIN_KEYS_MAX) loginFails.delete(loginFails.keys().next().value);
+  loginFails.set(key, [...recentFails(key), Date.now()].slice(-LOGIN_IP_MAX));
 };
-const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${PROD ? '; Secure' : ''}`;
-const sidFrom = req => /(?:^|;\s*)kk_sid=([a-f0-9]{64})/.exec(req.headers.cookie || '')?.[1] || null;
+const reqIp = req => clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'], SEC.trustedProxies);
+const loginKeys = (ip, email) => ({ pair: `p:${ip}|${email}`, ip: `ip:${ip}`, email: `e:${email}` });
+// Sekundy do kolejnej dozwolonej próby (0 = można próbować)
+function loginWait(k) {
+  const t = Date.now(); let wait = 0;
+  const pair = recentFails(k.pair), ipF = recentFails(k.ip), em = recentFails(k.email);
+  if (pair.length >= LOGIN_PAIR_MAX) wait = Math.max(wait, pair[pair.length - LOGIN_PAIR_MAX] + LOGIN_WINDOW_MS - t);
+  if (ipF.length >= LOGIN_IP_MAX) wait = Math.max(wait, ipF[ipF.length - LOGIN_IP_MAX] + LOGIN_WINDOW_MS - t);
+  if (em.length >= LOGIN_EMAIL_SOFT) {
+    const gap = Math.min(60000, 1000 * 2 ** (em.length - LOGIN_EMAIL_SOFT));
+    wait = Math.max(wait, em[em.length - 1] + gap - t);
+  }
+  return Math.max(0, Math.ceil(wait / 1000));
+}
+const tooMany = (res, wait) => send(res, 429, { error: `Zbyt wiele nieudanych prób. Spróbuj ponownie za ${wait < 60 ? `${wait} s` : `${Math.ceil(wait / 60)} min`}.` }, { 'retry-after': String(wait) });
+// W dzienniku zapisujemy login tylko, gdy to istniejące konto (omyłkowo wpisane hasło nie trafi do dziennika)
+const loginLabel = (email, u) => (u ? email : '[nieznany login]');
+const COOKIE = SEC.cookieName, cookieFlags = SEC.cookieFlags;
 route('POST', '/api/login', async (req, res) => {
   const b = await readJson(req);
   const email = str(b.email, 200).toLowerCase();
-  const keys = [`ip:${req.socket.remoteAddress || ''}`, `email:${email}`];
-  const wait = retryAfter(keys);
-  if (wait) {
-    audit(null, 'login_blocked', email);
-    return send(res, 429, { error: `Zbyt wiele nieudanych prób logowania. Spróbuj ponownie za ${Math.ceil(wait / 60)} min.` }, { 'retry-after': String(wait) });
-  }
+  const k = loginKeys(reqIp(req), email);
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
-  if (!u || !checkPass(String(b.password || ''), u.pass)) {
-    for (const k of keys) loginFails.set(k, [...recentFails(k), Date.now()]);
-    audit(null, 'login_fail', email);
+  const wait = loginWait(k);
+  if (wait) {
+    audit(null, 'login_blocked', loginLabel(email, u));
+    return tooMany(res, wait);
+  }
+  // checkPass liczy scrypt zawsze (także bez konta) – stały czas odpowiedzi
+  if (!checkPass(String(b.password || ''), u?.pass) || !u) {
+    for (const key of Object.values(k)) noteFail(key);
+    audit(null, 'login_fail', loginLabel(email, u));
     return fail(res, 401, 'Nieprawidłowy e-mail lub hasło.');
   }
-  loginFails.delete(`email:${email}`);
+  loginFails.delete(k.pair);
   // Rotacja sesji: poprzedni identyfikator z tej przeglądarki jest unieważniany, zawsze wydajemy nowy
   const old = sidFrom(req);
   if (old) sessions.delete(old);
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, { uid: u.id, exp: Date.now() + SESSION_MS });
   audit(u.id, 'login', old ? 'session_rotated' : '');
-  send(res, 200, { user: publicUser(u) }, { 'set-cookie': `kk_sid=${token}; ${cookieFlags}; Max-Age=${SESSION_MS / 1000}` });
+  send(res, 200, { user: publicUser(u) }, { 'set-cookie': `${COOKIE}=${token}; ${cookieFlags}; Max-Age=${SESSION_MS / 1000}` });
 });
 route('POST', '/api/logout', async (req, res) => {
   const sid = sidFrom(req);
   if (sid) sessions.delete(sid);
-  send(res, 200, { ok: true }, { 'set-cookie': `kk_sid=; ${cookieFlags}; Max-Age=0` });
+  send(res, 200, { ok: true }, { 'set-cookie': `${COOKIE}=; ${cookieFlags}; Max-Age=0` });
+});
+
+// ---------- Aktywacja konta i zmiana hasła ----------
+// Link aktywacyjny: token 256 bitów, w bazie tylko SHA-256, ważny 24 h, jednorazowy.
+// Dostarczenie: skrzynka nadawcza data/outbox/ (symulacja e-maila do pracownika; w produkcji do zastąpienia SMTP lub SSO).
+// Przełożony nie dostaje linku w trybie produkcyjnym – nie może ustawić hasła za pracownika.
+const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
+const appOrigin = req => SEC.publicOrigin || `http://${String(req.headers.host || 'localhost').replace(/[^a-z0-9.:[\]-]/gi, '')}`;
+function issueActivation(req, user, byId) {
+  const token = crypto.randomBytes(32).toString('hex'), exp = new Date(Date.now() + ACTIVATION_MS).toISOString();
+  db.prepare('DELETE FROM activation WHERE user_id=? AND used_at IS NULL').run(user.id);
+  db.prepare('INSERT INTO activation(user_id,token_sha256,exp,created_by,created) VALUES(?,?,?,?,?)').run(user.id, sha256(token), exp, byId, now());
+  const link = `${appOrigin(req)}/#aktywacja=${token}`;
+  const outbox = path.join(DATA_DIR, 'outbox');
+  fs.mkdirSync(outbox, { recursive: true, mode: 0o700 });
+  fs.appendFileSync(path.join(outbox, 'aktywacje.jsonl'), JSON.stringify({ to: user.email, subject: 'Kompas Kompetencji: aktywacja konta', link, exp, at: now() }) + '\n', { mode: 0o600 });
+  audit(byId, 'activation_issued', user.id, null, { exp });
+  return { expires: exp, delivered: 'outbox', ...(PROD ? {} : { link }) };
+}
+route('POST', '/api/activate', async (req, res) => {
+  const b = await readJson(req);
+  const k = loginKeys(reqIp(req), '[aktywacja]');
+  const wait = loginWait(k);
+  if (wait) return tooMany(res, wait);
+  const token = typeof b.token === 'string' && /^[a-f0-9]{64}$/.test(b.token) ? b.token : null;
+  const row = token && db.prepare('SELECT * FROM activation WHERE token_sha256=?').get(sha256(token));
+  if (!row || row.used_at || row.exp < now()) {
+    noteFail(k.pair); noteFail(k.ip);
+    return fail(res, 400, 'Link aktywacyjny jest nieprawidłowy, wykorzystany albo wygasł. Poproś przełożonego o nowy.');
+  }
+  const u = db.prepare('SELECT id,email FROM users WHERE id=?').get(row.user_id);
+  const problem = passwordProblem(b.password, u.email);
+  if (problem) return invalid(res, { password: problem }, problem);
+  db.prepare('UPDATE users SET pass=?, must_change=0 WHERE id=?').run(hashPass(String(b.password)), u.id);
+  db.prepare('UPDATE activation SET used_at=? WHERE id=?').run(now(), row.id);
+  dropSessions(u.id);
+  audit(u.id, 'account_activated', u.id);
+  send(res, 200, { ok: true, email: u.email });
+});
+route('POST', '/api/password', async (req, res, u) => {
+  const b = await readJson(req);
+  const k = loginKeys(reqIp(req), u.email);
+  const wait = loginWait(k);
+  if (wait) return tooMany(res, wait);
+  const full = db.prepare('SELECT pass FROM users WHERE id=?').get(u.id);
+  if (!checkPass(String(b.current || ''), full.pass)) {
+    noteFail(k.pair); noteFail(k.ip);
+    audit(u.id, 'password_change_fail', u.id);
+    return invalid(res, { current: 'Nieprawidłowe obecne hasło.' }, 'Nieprawidłowe obecne hasło.');
+  }
+  if (String(b.next || '') === String(b.current || '')) return invalid(res, { next: 'Nowe hasło musi się różnić od obecnego.' }, 'Nowe hasło musi się różnić od obecnego.');
+  const problem = passwordProblem(b.next, u.email);
+  if (problem) return invalid(res, { next: problem }, problem);
+  db.prepare('UPDATE users SET pass=?, must_change=0 WHERE id=?').run(hashPass(String(b.next)), u.id);
+  dropSessions(u.id, sidFrom(req));
+  audit(u.id, 'password_change', u.id);
+  send(res, 200, { ok: true });
 });
 // Konta demo na ekranie logowania (tylko lokalnie). Hasło podajemy wyłącznie, gdy to publiczna wartość domyślna.
 route('GET', '/api/demo', async (req, res) => send(res, 200, DEMO.seed && !PROD
@@ -529,7 +658,7 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     });
   }
   // Dashboard przełożonego
-  const team = db.prepare('SELECT id,name,position,avatar FROM users WHERE manager_id=? ORDER BY name').all(u.id);
+  const team = db.prepare("SELECT id,name,position,avatar,pass='' AS pending FROM users WHERE manager_id=? ORDER BY name").all(u.id);
   const evals = db.prepare('SELECT * FROM evals WHERE evaluator_id=? ORDER BY updated DESC').all(u.id).map(evalRow);
   const byEmp = {};
   for (const e of evals) if (!byEmp[e.employee_id]) byEmp[e.employee_id] = e; // najnowsza ocena per pracownik
@@ -540,7 +669,7 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     counts[st]++;
     const tc = timingCheck(empEvals(t.id), today());
     return { id: t.id, name: t.name, position: t.position, avatar: t.avatar || null, status: st, evalId: e?.id || null, typ: e?.typ || null, updated: e?.updated || null,
-      nextDue: tc.nextDue, earliestNext: tc.earliest };
+      nextDue: tc.nextDue, earliestNext: tc.earliest, pending: !!t.pending };
   });
   // Agregaty tylko przy n >= K_MIN (ochrona przed identyfikacją)
   const done = Object.values(byEmp).filter(e => e.status !== 'draft');
@@ -578,14 +707,25 @@ route('GET', '/api/dashboard', async (req, res, u) => {
 route('POST', '/api/employees', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Tylko przełożony może dodawać pracowników.');
   const b = await readJson(req);
-  const email = str(b.email, 200).toLowerCase(), name = str(b.name, 120), pw = String(b.password || '');
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !name || pw.length < 10) return fail(res, 400, 'Podaj e-mail, imię i nazwisko oraz hasło (min. 10 znaków).');
+  // Hasło ustala wyłącznie pracownik (link aktywacyjny) – przełożony nie może znać hasła ocenianego (art. 83: zapoznanie, sprzeciw)
+  if (b.password !== undefined) return invalid(res, { password: 'Hasło ustala pracownik przez link aktywacyjny.' }, 'Hasło ustala pracownik przez link aktywacyjny.');
+  const email = str(b.email, 200).toLowerCase(), name = str(b.name, 120);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !name) return fail(res, 400, 'Podaj e-mail i imię i nazwisko.');
+  let id;
   try {
-    const id = db.prepare('INSERT INTO users(email,name,role,position,unit,manager_id,pass) VALUES(?,?,?,?,?,?,?)')
-      .run(email, name, 'pracownik', str(b.position, 120), str(b.unit, 120), u.id, hashPass(pw)).lastInsertRowid;
-    audit(u.id, 'create_employee', id);
-    send(res, 201, { id });
-  } catch { fail(res, 409, 'Konto z tym adresem już istnieje.'); }
+    id = Number(db.prepare('INSERT INTO users(email,name,role,position,unit,manager_id,pass) VALUES(?,?,?,?,?,?,?)')
+      .run(email, name, 'pracownik', str(b.position, 120), str(b.unit, 120), u.id, '').lastInsertRowid);
+  } catch { return fail(res, 409, 'Konto z tym adresem już istnieje.'); }
+  audit(u.id, 'create_employee', id);
+  send(res, 201, { id, activation: issueActivation(req, { id, email }, u.id) });
+});
+// Nowy link aktywacyjny (np. po wygaśnięciu) – tylko dla nieaktywowanego konta z zespołu
+route('POST', '/api/employees/:id/activation', async (req, res, u, p) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  const emp = db.prepare("SELECT id,email,pass FROM users WHERE id=? AND manager_id=? AND role='pracownik'").get(p.id, u.id);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  if (emp.pass) return fail(res, 409, 'Konto jest już aktywne.');
+  send(res, 201, { activation: issueActivation(req, emp, u.id) });
 });
 
 // Oceny
@@ -1200,12 +1340,16 @@ route('POST', '/api/ai/checkin', async (req, res, u) => {
 // Dziennik zdarzeń – przegląd dla przełożonego (zgodność z RODO / audyt)
 route('GET', '/api/audit', async (req, res, u) => {
   const rows = db.prepare('SELECT action,target,at,substr(prev_value,1,300) AS prev_value,substr(new_value,1,300) AS new_value FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 100').all(u.id);
-  // Weryfikacja łańcucha: każdy wpis musi pasować do skrótu poprzedniego
-  const all = db.prepare('SELECT id,user_id,action,target,at,prev_hash,hash,prev_value,new_value FROM audit ORDER BY id').all();
-  let prev = '', broken = null;
+  // Weryfikacja: łańcuch skrótów (każdy wpis pasuje do poprzedniego) i pieczęć HMAC każdego wpisu (klucz spoza bazy).
+  // Bez klucza nie da się przeliczyć pieczęci po zmianie wpisu ani usunąć wpisu bez śladu (przerwany łańcuch i numeracja).
+  const all = db.prepare('SELECT * FROM audit ORDER BY id').all();
+  let prev = '', broken = null, lastId = 0;
   for (const r of all) {
-    if (r.hash && (r.prev_hash !== prev || auditHash(prev, r.user_id, r.action, r.target, r.at, r.prev_value, r.new_value) !== r.hash)) { broken = r.id; break; }
+    const chainBad = r.hash && (r.prev_hash !== prev || auditHash(prev, r.user_id, r.action, r.target, r.at, r.prev_value, r.new_value) !== r.hash);
+    const macBad = !r.mac || r.mac.length !== 64 || !crypto.timingSafeEqual(Buffer.from(r.mac), Buffer.from(auditMac(r)));
+    if (chainBad || macBad || r.id !== lastId + 1) { broken = r.id; break; }
     if (r.hash) prev = r.hash;
+    lastId = r.id;
   }
   const aiRows = db.prepare('SELECT eval_id,action,model,source,at,substr(output_text,1,400) AS output FROM ai_log WHERE user_id=? ORDER BY id DESC LIMIT 50').all(u.id);
   send(res, 200, { audit: rows, chainOk: broken === null, brokenAt: broken, ai: aiRows });
@@ -1300,9 +1444,19 @@ const server = http.createServer(async (req, res) => {
       const data = fs.readFileSync(file);
       return res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', ...SECURITY }) && res.end(data);
     }
-    // Ochrona CSRF: zmiany tylko JSON (przeglądarka nie wysyła go cross-site bez CORS)
-    if (req.method !== 'GET' && !String(req.headers['content-type'] || '').includes('application/json') && req.headers['content-length'] !== '0') {
-      return fail(res, 415, 'Wymagany JSON.');
+    // Ochrona CSRF dla zmian (wszystko poza GET):
+    // 1) dokładnie application/json – przeglądarka nie wyśle go z innej strony bez preflight CORS (którego nie zezwalamy);
+    //    dotyczy także pustych żądań (UI zawsze wysyła {}), więc nie ma obejścia przez content-length: 0;
+    // 2) Origin i Sec-Fetch-Site, gdy przeglądarka je podaje, muszą wskazywać tę samą stronę.
+    if (req.method !== 'GET') {
+      const ctype = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (ctype !== 'application/json') return fail(res, 415, 'Wymagany JSON.');
+      const origin = req.headers.origin, site = req.headers['sec-fetch-site'];
+      if ((origin && origin !== appOrigin(req)) || (site && !['same-origin', 'none'].includes(site))) {
+        // Do logu serwera, nie do dziennika (anonimowe żądania nie mogą zapełniać dziennika tylko do dopisywania)
+        console.warn(`CSRF zablokowane: ${req.method} ${url.pathname} origin=${JSON.stringify(String(origin || '').slice(0, 100))} site=${JSON.stringify(String(site || '').slice(0, 30))}`);
+        return fail(res, 403, 'Żądanie z innej strony zostało zablokowane.');
+      }
     }
     const route_ = routes.find(r => {
       if (r.method !== req.method) return false;
@@ -1315,11 +1469,13 @@ const server = http.createServer(async (req, res) => {
     const pa = route_.pattern.split('/'), ua = url.pathname.split('/');
     const params = {};
     pa.forEach((seg, i) => { if (seg.startsWith(':')) params[seg.slice(1)] = Number(ua[i]); });
-    const publicPaths = ['/api/login', '/api/logout', '/api/model', '/api/demo'];
+    const publicPaths = ['/api/login', '/api/logout', '/api/model', '/api/demo', '/api/activate'];
     let u = null;
     if (!publicPaths.includes(url.pathname)) {
       u = sessionUser(req);
       if (!u) return fail(res, 401, 'Zaloguj się.');
+      // Hasło nadane przez kogoś innego: do czasu zmiany dostępne są tylko dane konta i zmiana hasła
+      if (u.must_change && !['/api/me', '/api/password'].includes(url.pathname)) return fail(res, 403, 'Zmień hasło, aby kontynuować.', { code: 'password_change_required' });
     }
     await route_.handler(req, res, u, params);
   } catch (e) {

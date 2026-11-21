@@ -21,6 +21,8 @@ Plan wynika z [raportu z audytu](raport-audytu.md) z 2026-11-21. Jest ułożony 
 
 ## P0 – przed danymi realnymi (ok. 3–4 dni pracy)
 
+**Stan (2026-11-21): P0.1–P0.7 wdrożone**, z testami w `test/security-p0.test.mjs` i opisem w README („Etap P0 planu zabezpieczeń”). P0.8 (DPIA, IOD) to zadanie organizacyjne i zostaje do zrobienia. Ograniczenie P0.1: link aktywacyjny trafia do skrzynki nadawczej `data/outbox/` (symulacja e-maila), a nie do prawdziwej poczty – wysyłkę SMTP albo SSO dodaje P1.1.
+
 | # | Zadanie | Ustalenie | Kryterium odbioru (test) |
 |---|---|---|---|
 | P0.1 | Konta pracowników bez hasła od przełożonego: jednorazowy link aktywacyjny (24 h, w bazie tylko hash tokenu) i wymuszona zmiana hasła; `/acknowledge` i `/objection` dopiero po aktywacji | S-01 | Przełożony nie może zalogować się na konto pracownika; test w `security.test.mjs` |
