@@ -28,12 +28,13 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Dowody", "book", "Obserwacje zapisane przez przełożonego przy wskaźnikach"],
+      ["evidence", "Dowody i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
       ["evals", "Oceny", "clip", "Przygotuj ocenę krok po kroku"],
+      ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i dowody z miesiąca – bez punktacji"],
       ["evidence", "Dowody", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
@@ -45,7 +46,8 @@
   };
 
   const S = { user: null, ai: { ok: false }, dash: null, evals: [], goals: [], view: "home", cur: null, readEval: null, mandB: [], mandC: [], maxExtra: 3,
-    evFilter: { employeeId: "", competency: "", indicator: "", from: "", to: "" }, evidence: [] };
+    evFilter: { employeeId: "", competency: "", indicator: "", from: "", to: "" }, evidence: [],
+    month: { employeeId: "", month: new Date().toISOString().slice(0, 7) }, monthData: null };
 
   // ---------- API ----------
   async function api(method, url, body) {
@@ -228,7 +230,8 @@
     bindShell();
     animateIn(root);
     if (S.view === "log") loadLog();
-    if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); }
+    if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
+    if (S.view === "month") { bindMonthPage(); loadMonth(); }
     if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -356,6 +359,7 @@
           <li>Decyzje dotyczące pojedynczej osoby podejmuje przełożony, w rozmowie z tą osobą.</li></ul></div></div>`;
     }
     if (v === "evidence") return evidencePage(true);
+    if (v === "month") return monthPage();
     return evalsList(true);
   }
 
@@ -389,7 +393,143 @@
           ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj dowód</button>` : ""}</div>
       </form></div>
       <div class="card"><h2>Dowody</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
-        <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>`;
+        <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>
+      ${isMgr ? "" : `<div class="card"><h2>Feedback o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
+        <div class="card"><h2>Rozmowy miesięczne</h2><div id="ciMine"><p class="muted">Ładowanie…</p></div></div>
+        <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem dowodów.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
+  }
+  const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
+  function feedbackList(list, editable) {
+    if (!list.length) return `<p class="muted">Brak feedbacku.</p>`;
+    return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(f.date)} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
+      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj feedback z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
+  }
+  const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
+  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(dowody: ${p.evidenceIds.length})</span>`;
+  async function loadEmployeeExtras() {
+    const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
+    try {
+      const [fb, ci, pq] = await Promise.all([api("GET", "/api/feedback"), api("GET", "/api/checkins"), api("GET", "/api/partials")]);
+      put("fbMine", feedbackList(fb.feedback, false));
+      put("ciMine", ci.checkins.length ? `<ul class="c">${ci.checkins.map(c => `<li>${checkinText(c)}</li>`).join("")}</ul>` : `<p class="muted">Brak rozmów.</p>`);
+      put("pqMine", pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych.</p>`);
+    } catch (e) { put("fbMine", `<p class="muted">${esc(e.message)}</p>`); }
+  }
+
+  // ---------- Przegląd miesiąca (przełożony): check-in, dowody według wskaźników, feedback ----------
+  const quarterOf = m => `${m.slice(0, 4)}-Q${Math.floor((+m.slice(5, 7) - 1) / 3) + 1}`;
+  function monthPage() {
+    const m = S.month;
+    if (!m.employeeId && S.dash.team.length) m.employeeId = String(S.dash.team[0].id);
+    return `<div class="card"><form id="monthForm" class="grid two" aria-label="Wybór pracownika i miesiąca" novalidate>
+        <div><label class="f" for="mEmp">Pracownik</label><select id="mEmp" name="employeeId">${empOptions(m.employeeId)}</select></div>
+        <div><label class="f" for="mMonth">Miesiąc</label><input id="mMonth" name="month" type="month" value="${esc(m.month)}" max="${new Date().toISOString().slice(0, 7)}"></div>
+        <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">Pokaż</button></div>
+      </form></div>
+      <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+  }
+  async function loadMonth() {
+    const box = $("#monthBody"); if (!box) return;
+    const m = S.month;
+    try {
+      const [d, pq] = await Promise.all([
+        api("GET", `/api/month?employeeId=${encodeURIComponent(m.employeeId)}&month=${encodeURIComponent(m.month)}`),
+        api("GET", `/api/partials?employeeId=${encodeURIComponent(m.employeeId)}&quarter=${quarterOf(m.month)}`)]);
+      S.monthData = d; S.evidence = d.groups.flatMap(g => g.evidence); S.monthFeedback = d.feedback; S.monthPartials = pq.partials;
+      const c = d.checkin || { done: "", attention: "", goal: "", date: "", status: "planowany" };
+      const ro = "";
+      box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna (check-in)</h2>
+          <p class="muted">Do 20 minut. Trzy pola i dowody z miesiąca. Bez punktacji i bez oceny osoby.</p>
+          <form id="ciForm" aria-labelledby="ciH" novalidate>
+            <label class="f" for="ciDone">Co zrobiono</label><textarea id="ciDone" maxlength="600" ${ro}>${esc(c.done)}</textarea>
+            <label class="f" for="ciAtt">Co wymaga uwagi</label><textarea id="ciAtt" maxlength="600" ${ro}>${esc(c.attention)}</textarea>
+            <label class="f" for="ciGoal">Jeden cel na kolejny miesiąc</label><input id="ciGoal" maxlength="600" value="${esc(c.goal)}" ${ro}>
+            <div class="grid two"><div><label class="f" for="ciDate">Data rozmowy</label><input id="ciDate" type="date" value="${esc(c.date || "")}" max="${new Date().toISOString().slice(0, 10)}"></div>
+              <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
+            <div id="ciErr" role="alert" class="err"></div>
+            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button></div>
+          </form></div>
+        <div class="card"><div class="row"><h2>Dowody z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Dowód", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
+          <p class="muted">Pokazujemy tylko wskaźniki z nowymi dowodami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
+          ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
+            <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
+              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak dowodów w tym miesiącu.</p>`}</div>
+        <div class="card"><div class="row"><h2>Feedback z miesiąca</h2>${actBtn("plus", "Feedback", `data-act="addFeedback"`, "")}</div>
+          <p class="muted">Feedback dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
+        <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
+          <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem dowodów.</p>
+          ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
+      bindActs(box);
+      $("#ciForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const body = { done: $("#ciDone").value, attention: $("#ciAtt").value, goal: $("#ciGoal").value, date: $("#ciDate").value, status: $("#ciStatus").checked ? "odbyty" : "planowany" };
+        try {
+          if (d.checkin) await api("PUT", `/api/checkins/${d.checkin.id}`, body);
+          else await api("POST", "/api/checkins", { ...body, employeeId: +m.employeeId, month: m.month });
+          toast("Zapisano check-in."); loadMonth();
+        } catch (ex) { $("#ciErr").textContent = fieldErrors(ex); }
+      });
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+  }
+  function bindMonthPage() {
+    const fm = $("#monthForm"); if (!fm) return;
+    fm.addEventListener("submit", e => { e.preventDefault(); S.month.employeeId = $("#mEmp").value; S.month.month = $("#mMonth").value || S.month.month; loadMonth(); });
+  }
+  const RELATIONS = { przelozony: "przełożony bezpośredni", wspolpracownik: "współpracownik (przekazane przełożonemu)", odbiorca: "odbiorca rezultatu (przekazane przełożonemu)" };
+  function feedbackModal(fb) {
+    const v = fb || { indicator: "", source: "", level: null, justification: "", relation: "przelozony", date: new Date().toISOString().slice(0, 10) };
+    openModal(`<h2 id="fbTitle">${fb ? "Edytuj feedback" : "Nowy feedback"}</h2>
+      <p class="muted">Opisz rezultat konkretnego zadania. Nie oceniaj osoby. Nie zapisuj czasu pracy, obecności ani aktywności.</p>
+      <form id="fbForm" novalidate>
+        <label class="f" for="fbInd">Wskaźnik</label><select id="fbInd" required><option value="">Wybierz…</option>${indOptions(v.indicator)}</select>
+        <label class="f" for="fbSrc">Źródło zdarzenia (zadanie, sprawa, artefakt)</label><input id="fbSrc" required maxlength="300" value="${esc(v.source)}">
+        <label class="f" for="fbJust">Uzasadnienie (wymagane)</label><textarea id="fbJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
+        <label class="f" for="fbRel">Relacja autora do rezultatu</label><select id="fbRel">${Object.entries(RELATIONS).map(([k, l]) => `<option value="${k}" ${v.relation === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <label class="f" for="fbLvl">Poziom (opcjonalnie)</label><select id="fbLvl"><option value="">bez poziomu</option>${PTS5.map((p, i) => `<option value="${p}" ${v.level === p ? "selected" : ""}>${p} pkt – ${LEVELS5[i]}</option>`).join("")}</select>
+        <label class="f" for="fbDate">Data zdarzenia</label><input id="fbDate" type="date" required value="${esc(v.date)}">
+        <div id="fbErr" role="alert" class="err"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
+      </form>`, () => {
+      $("#fbForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const body = { indicator: $("#fbInd").value, source: $("#fbSrc").value, justification: $("#fbJust").value, relation: $("#fbRel").value, level: $("#fbLvl").value ? +$("#fbLvl").value : null, date: $("#fbDate").value };
+        try {
+          if (fb) await api("PUT", `/api/feedback/${fb.id}`, body); else await api("POST", "/api/feedback", { ...body, employeeId: +S.month.employeeId });
+          closeModal(); toast("Zapisano feedback."); loadMonth();
+        } catch (ex) { $("#fbErr").textContent = fieldErrors(ex); }
+      });
+    }, "fbTitle");
+  }
+  async function partialModal(pr) {
+    const q = pr ? pr.quarter : quarterOf(S.month.month), y = +q.slice(0, 4), n = +q.slice(6);
+    const from = `${y}-${String(n * 3 - 2).padStart(2, "0")}-01`, to = new Date(Date.UTC(y, n * 3, 0)).toISOString().slice(0, 10);
+    const emp = pr ? pr.employeeId : S.month.employeeId;
+    const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
+    const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
+    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak dowodów z tego kryterium w kwartale. Najpierw dodaj dowód.</p>`; };
+    openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
+      <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jeden dowód z kwartału.</p>
+      <form id="pqForm" novalidate>
+        <label class="f" for="pqComp">Kryterium</label><select id="pqComp" required ${pr ? "disabled" : ""}><option value="">Wybierz…</option>${compOptions(v.competency)}</select>
+        <fieldset class="plain"><legend class="f">Ocena cząstkowa</legend><div class="lv" role="radiogroup" aria-label="Ocena cząstkowa">
+          ${PTS5.map((p, i) => `<label><input type="radio" name="pqPts" value="${p}" ${v.pts === p ? "checked" : ""}><span><b>${p} pkt</b> ${LEVELS5[i]}</span></label>`).join("")}</div></fieldset>
+        <label class="f" for="pqJust">Uzasadnienie</label><textarea id="pqJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
+        <fieldset class="plain"><legend class="f">Dowody z kwartału</legend><div id="pqEvs">${v.competency ? evBoxes(v.competency) : `<p class="muted">Wybierz kryterium.</p>`}</div></fieldset>
+        <div id="pqErr" role="alert" class="err"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
+      </form>`, () => {
+      $("#pqComp").addEventListener("change", e => { $("#pqEvs").innerHTML = evBoxes(e.target.value); });
+      $("#pqForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const pts = +(document.querySelector('input[name="pqPts"]:checked')?.value || 0);
+        const body = { pts, justification: $("#pqJust").value, evidenceIds: [...document.querySelectorAll('input[name="pqEv"]:checked')].map(x => +x.value) };
+        try {
+          if (pr) await api("PUT", `/api/partials/${pr.id}`, body);
+          else await api("POST", "/api/partials", { ...body, employeeId: +emp, quarter: q, competency: $("#pqComp").value });
+          closeModal(); toast("Zapisano ocenę cząstkową."); loadMonth();
+        } catch (ex) { $("#pqErr").textContent = fieldErrors(ex); }
+      });
+    }, "pqTitle");
   }
   async function loadEvidence() {
     const box = $("#evList"); if (!box) return;
@@ -531,7 +671,12 @@
       <p class="muted">Ocenę cząstkową za kryterium przyznajesz Ty. Dla orientacji: poziomy wskaźników – ${esc(distText(sc.dist))}.</p>
       <div class="lv" role="radiogroup" aria-label="Ocena cząstkowa: ${esc(nameOf(comp.k))}">
       ${LEVELS5.map((lab, i) => `<label><input type="radio" name="partial-${esc(comp.k)}" value="${PTS5[i]}" data-partial="${esc(comp.k)}" ${cur === PTS5[i] ? "checked" : ""} ${ro}><span><b>${PTS5[i]} pkt</b> ${lab}</span></label>`).join("")}
-      </div></div>`;
+      </div>${quarterlyHistory(comp.k)}</div>`;
+  }
+  // Kwartalne oceny cząstkowe z okresu oceny: tylko lista (bez średniej i bez podpowiedzi wyniku)
+  function quarterlyHistory(k) {
+    const list = (S.cur.quarterly || []).filter(p => p.competency === k);
+    return list.length ? `<div class="ev-mini"><span class="muted">Oceny cząstkowe kwartalne w okresie oceny:</span><ul class="c">${list.map(p => `<li>${partialText(p)}</li>`).join("")}</ul></div>` : "";
   }
   function talkStep() {
     const c = S.cur;
@@ -634,6 +779,7 @@
       step: 0, missing: r.missing || [], aiText: "", aiSource: "" };
     S.maxExtra = 3;
     await refreshWizardEvidence();
+    try { S.cur.quarterly = (await api("GET", `/api/partials?employeeId=${e.employee_id}${e.period_from ? `&from=${e.period_from}` : ""}${e.period_to ? `&to=${e.period_to}` : ""}`)).partials; } catch (_) { S.cur.quarterly = []; }
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
   async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; }
@@ -745,6 +891,10 @@
         async () => { await refreshWizardEvidence(); await refreshMissing(); render(); });
       return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
     },
+    addFeedback: () => feedbackModal(null),
+    editFeedback: b => { const f = (S.monthFeedback || []).find(x => x.id === +b.dataset.id); if (f) feedbackModal(f); },
+    addPartial: () => partialModal(null),
+    editPartial: b => { const p = (S.monthPartials || []).find(x => x.id === +b.dataset.id); if (p) return partialModal(p); },
     editEvidence: b => { const ev = (S.evidence || []).find(x => x.id === +b.dataset.id); if (ev) evidenceModal(ev, {}, b.dataset.after === "month" ? () => loadMonth() : undefined); },
     signEval: async b => {
       try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano (symulacja)."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }

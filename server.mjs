@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS evidence(id INTEGER PRIMARY KEY, employee_id INTEGER 
   date TEXT NOT NULL, indicator TEXT NOT NULL, situation TEXT NOT NULL, action TEXT NOT NULL, result TEXT NOT NULL,
   link TEXT, task_ref TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS evidence_emp_date ON evidence(employee_id, date);
+-- Rytm miesięczny: krótka rozmowa (do 20 min), 3 pola, bez punktacji
+CREATE TABLE IF NOT EXISTS checkins(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL, month TEXT NOT NULL,
+  done_text TEXT NOT NULL DEFAULT '', attention_text TEXT NOT NULL DEFAULT '', goal_text TEXT NOT NULL DEFAULT '', date TEXT,
+  status TEXT NOT NULL DEFAULT 'planowany' CHECK(status IN ('planowany','odbyty')), created TEXT NOT NULL, updated TEXT NOT NULL,
+  UNIQUE(employee_id, month));
+-- Feedback o rezultacie zadania (nie o osobie); bez pól o czasie pracy, obecności i aktywności
+CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, author_id INTEGER NOT NULL, indicator TEXT NOT NULL,
+  source TEXT NOT NULL, level INTEGER CHECK(level IS NULL OR level IN (1,3,5,7,9)), justification TEXT NOT NULL, relation TEXT NOT NULL,
+  date TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL);
+-- Oceny cząstkowe kwartalne: przyznaje oceniający, z uzasadnieniem i wskazaniem dowodów z kwartału
+CREATE TABLE IF NOT EXISTS partial_ratings(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL, quarter TEXT NOT NULL,
+  competency TEXT NOT NULL, pts INTEGER NOT NULL CHECK(pts IN (1,3,5,7,9)), justification TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
+  created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(employee_id, quarter, competency));
 `);
 // Klucz do podpisów mockowych (lokalny, w data/ – nie trafia do repo)
 const KEY_FILE = path.join(DATA_DIR, 'sign.key');
@@ -149,6 +162,7 @@ function seed() {
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
   seedEvidence(mgr, emps, rnd);
+  seedRhythm(mgr, emps);
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,created) VALUES(?,?,?,?,?,?,?,?,?)');
   emps.forEach((eid, i) => insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', i % 3 === 0 ? 1 : 0, 20 + i * 12, now()));
 }
@@ -223,6 +237,9 @@ const str = (x, max = 500) => (typeof x === 'string' ? x.trim().slice(0, max) : 
 const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v);
 const isMonth = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
 const today = () => now().slice(0, 10);
+const isQuarter = v => typeof v === 'string' && /^\d{4}-Q[1-4]$/.test(v);
+const quarterRange = q => { const y = +q.slice(0, 4), n = +q.slice(6); const m1 = String(n * 3 - 2).padStart(2, '0'), m3 = `${y}-${String(n * 3).padStart(2, '0')}`; return [`${y}-${m1}-01`, monthEnd(m3)]; };
+const quarterOf = date => `${date.slice(0, 4)}-Q${Math.floor((+date.slice(5, 7) - 1) / 3) + 1}`;
 const monthEnd = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
 const qs = req => new URL(req.url, 'http://x').searchParams;
 // Pracownik z zespołu przełożonego (null, jeśli nie należy do zespołu)
@@ -349,6 +366,28 @@ function evalSummaryForAI(ev) {
   return lines.join('\n');
 }
 const RULES = `Zasady: nie wystawiasz ocen i nie podejmujesz decyzji – to należy do przełożonego. Nie oceniasz osoby, tylko zachowania. Odpowiadasz po polsku, zwięźle, w punktach. Nie podajesz imion ani danych osobowych.`;
+
+// Rytm miesięczny demo (fikcyjny): check-iny z poprzednich miesięcy, feedback, oceny cząstkowe za bieżący kwartał
+function seedRhythm(mgr, emps) {
+  const at = now(), cur = today().slice(0, 7);
+  const prevMonths = [-2, -1].map(d => { const t = new Date(); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() + d); return t.toISOString().slice(0, 7); });
+  const insC = db.prepare('INSERT INTO checkins(employee_id,evaluator_id,month,done_text,attention_text,goal_text,date,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  emps.slice(0, 4).forEach(eid => prevMonths.forEach(m => insC.run(eid, mgr, m, 'Zamknięto zaplanowane zadania miesiąca, w tym raport dla kierownictwa.',
+    'Dwa zadania zależne od innej komórki – uzgodnić terminy cząstkowe.', 'Przygotować listę kontrolną do raportu przed kolejnym terminem.', `${m}-20`, 'odbyty', at, at)));
+  insC.run(emps[0], mgr, cur, '', '', '', null, 'planowany', at, at);
+  const insF = db.prepare('INSERT INTO feedback(employee_id,author_id,indicator,source,level,justification,relation,date,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const fbDate = `${prevMonths[1]}-12`;
+  insF.run(emps[0], mgr, 'RZETELNOŚĆ|0', 'ZAD-214: zestawienie danych do sprawozdania', 7, 'Zestawienie przekazane z opisem metody i kontrolą sum; odbiorca nie zgłosił poprawek.', 'odbiorca', fbDate, at, at);
+  insF.run(emps[0], mgr, 'KOMUNIKACJA|0', 'Spotkanie z wykonawcą – protokół ustaleń', null, 'Protokół rozesłany tego samego dnia, ustalenia jednoznaczne, bez pytań zwrotnych.', 'przelozony', fbDate, at, at);
+  insF.run(emps[1], mgr, 'WSPÓŁPRACA|0', 'ZAD-331: wspólne opracowanie procedury', 5, 'Uwagi do procedury przekazane w terminie i uwzględnione w wersji końcowej.', 'wspolpracownik', fbDate, at, at);
+  // Ocena cząstkowa kwartalna: wskazuje dowody tej osoby z bieżącego kwartału
+  const q = quarterOf(today()), [qf, qt] = quarterRange(q);
+  const evs = db.prepare('SELECT id,indicator FROM evidence WHERE employee_id=? AND date>=? AND date<=?').all(emps[0], qf, qt);
+  const byComp = {};
+  for (const e of evs) (byComp[INDICATORS.get(e.indicator).k] ||= []).push(e.id);
+  const insP = db.prepare('INSERT INTO partial_ratings(employee_id,evaluator_id,quarter,competency,pts,justification,evidence_ids,created,updated) VALUES(?,?,?,?,?,?,?,?,?)');
+  Object.entries(byComp).slice(0, 2).forEach(([k, ids], i) => insP.run(emps[0], mgr, q, k, [5, 7][i], 'Rezultaty zadań w kwartale zgodne z wymaganiami; opis w dowodach.', JSON.stringify(ids.slice(0, 3)), at, at));
+}
 
 // Dane demo i migracje (po definicji funkcji pomocniczych)
 seed();
@@ -639,6 +678,242 @@ route('PUT', '/api/evidence/:id', async (req, res, u, p) => {
     .run(next.date, next.indicator, next.situation, next.action, next.result, next.link ?? null, next.task_ref ?? null, now(), cur.id);
   audit(u.id, 'update_evidence', `evidence:${cur.id}`, ch.prev, ch.next);
   send(res, 200, { evidence: evidenceRow(db.prepare('SELECT * FROM evidence WHERE id=?').get(cur.id)), changed: true });
+});
+
+// ---------- Rytm miesięczny: check-iny ----------
+const CHECKIN_FIELDS = ['employeeId', 'month', 'done', 'attention', 'goal', 'date', 'status'];
+const SCORE_KEYS = /^(level|lvl|pts|punkty|ocena|score|wynik|poziom)$/i;
+function sanitizeCheckin(b, partial = false) {
+  const errors = {}, v = {};
+  for (const k of Object.keys(b || {})) {
+    if (SCORE_KEYS.test(k)) errors[k] = 'Check-in nie zawiera punktacji – to rozmowa, nie ocena.';
+    else if (!CHECKIN_FIELDS.includes(k)) errors[k] = 'Nieznane pole.';
+  }
+  if (!(partial && b.month === undefined)) {
+    if (!isMonth(b.month) || b.month > today().slice(0, 7)) errors.month = 'Podaj miesiąc (RRRR-MM), nie późniejszy niż bieżący.'; else v.month = b.month;
+  }
+  for (const [k, col] of [['done', 'done_text'], ['attention', 'attention_text'], ['goal', 'goal_text']]) if (b[k] !== undefined) v[col] = str(b[k], 600);
+  if (b.date !== undefined) { if (b.date === '' || b.date === null) v.date = null; else if (!isDate(b.date) || b.date > today()) errors.date = 'Data rozmowy: RRRR-MM-DD, nie w przyszłości.'; else v.date = b.date; }
+  if (b.status !== undefined) { if (!['planowany', 'odbyty'].includes(b.status)) errors.status = 'Status: planowany albo odbyty.'; else v.status = b.status; }
+  return { value: v, errors };
+}
+const checkinRow = r => r && ({ id: r.id, employeeId: r.employee_id, evaluatorId: r.evaluator_id, month: r.month, done: r.done_text, attention: r.attention_text,
+  goal: r.goal_text, date: r.date, status: r.status, created: r.created, updated: r.updated });
+const checkinAuditView = r => ({ month: r.month, done: r.done_text, attention: r.attention_text, goal: r.goal_text, date: r.date ?? null, status: r.status });
+// Odbyty check-in musi mieć datę i wszystkie trzy pola (krótko – formularz na ok. 20 minut rozmowy)
+const checkinComplete = r => (r.status !== 'odbyty' ? null
+  : !r.date ? { date: 'Podaj datę odbytej rozmowy.' }
+  : ['done_text', 'attention_text', 'goal_text'].some(k => !(r[k] || '').trim()) ? { done: 'Uzupełnij trzy pola: co zrobiono, co wymaga uwagi, jeden cel.' } : null);
+function scopedWhere(u, q, alias = '') {
+  const where = [], args = [], a = alias ? alias + '.' : '';
+  if (u.role === 'pracownik') { where.push(`${a}employee_id=?`); args.push(u.id); }
+  else {
+    where.push(`${a}employee_id IN (SELECT id FROM users WHERE manager_id=?)`); args.push(u.id);
+    if (q.get('employeeId')) { where.push(`${a}employee_id=?`); args.push(Number(q.get('employeeId'))); }
+  }
+  return { where, args };
+}
+route('GET', '/api/checkins', async (req, res, u) => {
+  const q = qs(req);
+  if (q.get('month') && !isMonth(q.get('month'))) return invalid(res, { month: 'Nieprawidłowy miesiąc.' });
+  const { where, args } = scopedWhere(u, q);
+  if (q.get('month')) { where.push('month=?'); args.push(q.get('month')); }
+  send(res, 200, { checkins: db.prepare(`SELECT * FROM checkins WHERE ${where.join(' AND ')} ORDER BY month DESC`).all(...args).map(checkinRow) });
+});
+route('POST', '/api/checkins', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Check-in zapisuje przełożony.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { value: v, errors } = sanitizeCheckin(b);
+  const row = { done_text: '', attention_text: '', goal_text: '', date: null, status: 'planowany', ...v };
+  Object.assign(errors, Object.keys(errors).length ? {} : checkinComplete(row) || {});
+  if (Object.keys(errors).length) return invalid(res, errors);
+  if (db.prepare('SELECT id FROM checkins WHERE employee_id=? AND month=?').get(emp.id, row.month)) return fail(res, 409, 'Check-in za ten miesiąc już istnieje – edytuj go.');
+  const at = now();
+  const id = db.prepare('INSERT INTO checkins(employee_id,evaluator_id,month,done_text,attention_text,goal_text,date,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, row.month, row.done_text, row.attention_text, row.goal_text, row.date, row.status, at, at).lastInsertRowid;
+  const saved = db.prepare('SELECT * FROM checkins WHERE id=?').get(id);
+  audit(u.id, 'create_checkin', `checkin:${id}`, null, { employeeId: emp.id, ...checkinAuditView(saved) });
+  send(res, 201, { checkin: checkinRow(saved) });
+});
+route('PUT', '/api/checkins/:id', async (req, res, u, p) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Check-in edytuje przełożony.');
+  const cur = db.prepare('SELECT * FROM checkins WHERE id=?').get(p.id);
+  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono check-inu.');
+  const b = await readJson(req);
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść check-inu na inną osobę.' });
+  if (b.month !== undefined && b.month !== cur.month) return invalid(res, { month: 'Miesiąca check-inu nie zmienia się – utwórz nowy.' });
+  const { value: v, errors } = sanitizeCheckin(b, true);
+  const next = { ...cur, ...v };
+  Object.assign(errors, Object.keys(errors).length ? {} : checkinComplete(next) || {});
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const ch = diffObj(checkinAuditView(cur), checkinAuditView(next));
+  if (!ch) return send(res, 200, { checkin: checkinRow(cur), changed: false });
+  db.prepare('UPDATE checkins SET done_text=?,attention_text=?,goal_text=?,date=?,status=?,updated=? WHERE id=?')
+    .run(next.done_text, next.attention_text, next.goal_text, next.date, next.status, now(), cur.id);
+  audit(u.id, 'update_checkin', `checkin:${cur.id}`, ch.prev, ch.next);
+  send(res, 200, { checkin: checkinRow(db.prepare('SELECT * FROM checkins WHERE id=?').get(cur.id)), changed: true });
+});
+
+// ---------- Feedback o rezultacie zadania ----------
+const FEEDBACK_FIELDS = ['employeeId', 'indicator', 'source', 'level', 'justification', 'relation', 'date'];
+// Zakaz pól o czasie pracy, obecności i aktywności (monitoring) – feedback dotyczy rezultatu zadania, nie osoby
+const FEEDBACK_FORBIDDEN = /(czas|godzin|obecn|nieobecn|aktywn|hours?|time|attendance|presence|activity|online|login|klik|click|keystroke|screen)/i;
+const RELATIONS = { przelozony: 'przełożony bezpośredni', wspolpracownik: 'współpracownik (przekazane przełożonemu)', odbiorca: 'odbiorca rezultatu (przekazane przełożonemu)' };
+function sanitizeFeedback(b, partial = false) {
+  const errors = {}, v = {};
+  for (const k of Object.keys(b || {})) {
+    if (FEEDBACK_FORBIDDEN.test(k)) errors[k] = 'Feedback dotyczy rezultatu zadania. Nie zapisujemy czasu pracy, obecności ani aktywności.';
+    else if (!FEEDBACK_FIELDS.includes(k)) errors[k] = 'Nieznane pole.';
+  }
+  const need = (k, ok, msg) => { if (b[k] === undefined && partial) return false; if (!ok) errors[k] = msg; return ok; };
+  if (need('indicator', INDICATORS.has(b.indicator), 'Wybierz wskaźnik z modelu kompetencji.')) v.indicator = b.indicator;
+  const src = str(b.source, 300);
+  if (need('source', src.length >= 3, 'Podaj źródło: zadanie, sprawę lub artefakt, którego dotyczy feedback.')) v.source = src;
+  const just = str(b.justification, 2000);
+  if (need('justification', just.length >= 10, 'Uzasadnienie jest wymagane (min. 10 znaków): opisz rezultat zadania.')) v.justification = just;
+  if (need('relation', Object.hasOwn(RELATIONS, b.relation), 'Wybierz relację autora do rezultatu.')) v.relation = b.relation;
+  if (need('date', isDate(b.date) && b.date <= today(), 'Podaj datę zdarzenia (RRRR-MM-DD), nie późniejszą niż dziś.')) v.date = b.date;
+  if (b.level !== undefined) {
+    if (b.level === null || b.level === '') v.level = null;
+    else if (!PTS5.includes(Number(b.level))) errors.level = 'Poziom (opcjonalny): 1, 3, 5, 7 lub 9.';
+    else v.level = Number(b.level);
+  }
+  return { value: v, errors };
+}
+const feedbackRow = r => r && ({ id: r.id, employeeId: r.employee_id, authorId: r.author_id, indicator: r.indicator, competency: INDICATORS.get(r.indicator)?.k || null,
+  indicatorText: INDICATORS.get(r.indicator)?.text || '', source: r.source, level: r.level, justification: r.justification, relation: r.relation,
+  relationLabel: RELATIONS[r.relation] || r.relation, date: r.date, created: r.created, updated: r.updated });
+const feedbackAuditView = r => ({ indicator: r.indicator, source: r.source, level: r.level ?? null, justification: r.justification, relation: r.relation, date: r.date });
+route('GET', '/api/feedback', async (req, res, u) => {
+  const q = qs(req);
+  const { where, args } = scopedWhere(u, q);
+  if (q.get('indicator')) { if (!INDICATORS.has(q.get('indicator'))) return invalid(res, { indicator: 'Nieznany wskaźnik.' }); where.push('indicator=?'); args.push(q.get('indicator')); }
+  const month = q.get('month');
+  if (month && !isMonth(month)) return invalid(res, { month: 'Nieprawidłowy miesiąc.' });
+  const from = month ? `${month}-01` : q.get('from'), to = month ? monthEnd(month) : q.get('to');
+  if (isDate(from)) { where.push('date>=?'); args.push(from); }
+  if (isDate(to)) { where.push('date<=?'); args.push(to); }
+  send(res, 200, { feedback: db.prepare(`SELECT * FROM feedback WHERE ${where.join(' AND ')} ORDER BY date DESC, id DESC LIMIT 1000`).all(...args).map(feedbackRow), relations: RELATIONS });
+});
+route('POST', '/api/feedback', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Feedback zapisuje przełożony.');
+  const b = await readJson(req);
+  const { value: v, errors } = sanitizeFeedback(b);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const at = now();
+  const id = db.prepare('INSERT INTO feedback(employee_id,author_id,indicator,source,level,justification,relation,date,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, v.indicator, v.source, v.level ?? null, v.justification, v.relation, v.date, at, at).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM feedback WHERE id=?').get(id);
+  audit(u.id, 'create_feedback', `feedback:${id}`, null, { employeeId: emp.id, ...feedbackAuditView(row) });
+  send(res, 201, { feedback: feedbackRow(row) });
+});
+route('PUT', '/api/feedback/:id', async (req, res, u, p) => {
+  const cur = db.prepare('SELECT * FROM feedback WHERE id=?').get(p.id);
+  if (!cur || cur.author_id !== u.id) return fail(res, cur ? 403 : 404, cur ? 'Feedback edytuje jego autor.' : 'Nie znaleziono feedbacku.');
+  const b = await readJson(req);
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść feedbacku na inną osobę.' });
+  const { value: v, errors } = sanitizeFeedback(b, true);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const next = { ...cur, ...v };
+  const ch = diffObj(feedbackAuditView(cur), feedbackAuditView(next));
+  if (!ch) return send(res, 200, { feedback: feedbackRow(cur), changed: false });
+  db.prepare('UPDATE feedback SET indicator=?,source=?,level=?,justification=?,relation=?,date=?,updated=? WHERE id=?')
+    .run(next.indicator, next.source, next.level ?? null, next.justification, next.relation, next.date, now(), cur.id);
+  audit(u.id, 'update_feedback', `feedback:${cur.id}`, ch.prev, ch.next);
+  send(res, 200, { feedback: feedbackRow(db.prepare('SELECT * FROM feedback WHERE id=?').get(cur.id)), changed: true });
+});
+
+// ---------- Oceny cząstkowe kwartalne (przyznaje oceniający, z uzasadnieniem i dowodami) ----------
+const PARTIAL_FIELDS = ['employeeId', 'quarter', 'competency', 'pts', 'justification', 'evidenceIds'];
+function sanitizePartial(b, empId, partial = false, cur = null) {
+  const errors = {}, v = {};
+  for (const k of Object.keys(b || {})) {
+    if (/^(month|miesiac)$/i.test(k)) errors[k] = 'Ocena cząstkowa jest przypisana do kwartału, nie do miesiąca.';
+    else if (!PARTIAL_FIELDS.includes(k)) errors[k] = 'Nieznane pole.';
+  }
+  const need = (k, ok, msg) => { if (b[k] === undefined && partial) return false; if (!ok) errors[k] = msg; return ok; };
+  if (need('quarter', isQuarter(b.quarter) && quarterRange(b.quarter)[0] <= today(), 'Podaj kwartał (RRRR-Qn), który już się rozpoczął.')) v.quarter = b.quarter;
+  if (need('competency', MODEL_KEYS.has(b.competency), 'Wybierz kryterium (kompetencję) z modelu.')) v.competency = b.competency;
+  if (need('pts', PTS5.includes(Number(b.pts)), 'Ocena cząstkowa: 1, 3, 5, 7 lub 9 pkt.')) v.pts = Number(b.pts);
+  const just = str(b.justification, 2000);
+  if (need('justification', just.length >= 10, 'Uzasadnienie jest wymagane (min. 10 znaków).')) v.justification = just;
+  if (need('evidenceIds', Array.isArray(b.evidenceIds) && b.evidenceIds.length > 0 && b.evidenceIds.length <= 50, 'Wskaż co najmniej jeden dowód.')) v.evidenceIds = [...new Set(b.evidenceIds.map(Number))];
+  // Dowody: tej samej osoby, z tego kryterium i z tego kwartału
+  const quarter = v.quarter || cur?.quarter, comp = v.competency || cur?.competency;
+  const ids = v.evidenceIds || (cur ? JSON.parse(cur.evidence_ids) : null);
+  if (ids && quarter && comp && !errors.evidenceIds) {
+    const [from, to] = quarterRange(quarter);
+    const bad = ids.filter(id => { const e = db.prepare('SELECT employee_id,indicator,date FROM evidence WHERE id=?').get(id); return !e || e.employee_id !== empId || INDICATORS.get(e.indicator)?.k !== comp || e.date < from || e.date > to; });
+    if (bad.length) errors.evidenceIds = `Dowody spoza tej osoby, kryterium lub kwartału: ${bad.join(', ')}.`;
+  }
+  return { value: v, errors };
+}
+const partialRow = r => r && ({ id: r.id, employeeId: r.employee_id, evaluatorId: r.evaluator_id, quarter: r.quarter, competency: r.competency, pts: r.pts,
+  justification: r.justification, evidenceIds: JSON.parse(r.evidence_ids || '[]'), created: r.created, updated: r.updated });
+const partialAuditView = r => ({ quarter: r.quarter, competency: r.competency, pts: r.pts, justification: r.justification, evidenceIds: typeof r.evidence_ids === 'string' ? JSON.parse(r.evidence_ids) : r.evidence_ids });
+route('GET', '/api/partials', async (req, res, u) => {
+  const q = qs(req);
+  const { where, args } = scopedWhere(u, q);
+  if (q.get('quarter')) { if (!isQuarter(q.get('quarter'))) return invalid(res, { quarter: 'Kwartał: RRRR-Qn.' }); where.push('quarter=?'); args.push(q.get('quarter')); }
+  if (q.get('competency')) { where.push('competency=?'); args.push(q.get('competency')); }
+  if (isDate(q.get('from'))) { where.push('quarter>=?'); args.push(quarterOf(q.get('from'))); }
+  if (isDate(q.get('to'))) { where.push('quarter<=?'); args.push(quarterOf(q.get('to'))); }
+  send(res, 200, { partials: db.prepare(`SELECT * FROM partial_ratings WHERE ${where.join(' AND ')} ORDER BY quarter DESC, competency`).all(...args).map(partialRow) });
+});
+route('POST', '/api/partials', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Ocenę cząstkową przyznaje oceniający.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { value: v, errors } = sanitizePartial(b, emp.id);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  if (db.prepare('SELECT id FROM partial_ratings WHERE employee_id=? AND quarter=? AND competency=?').get(emp.id, v.quarter, v.competency)) return fail(res, 409, 'Ocena cząstkowa za ten kwartał i kryterium już istnieje – edytuj ją.');
+  const at = now();
+  const id = db.prepare('INSERT INTO partial_ratings(employee_id,evaluator_id,quarter,competency,pts,justification,evidence_ids,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, v.quarter, v.competency, v.pts, v.justification, JSON.stringify(v.evidenceIds), at, at).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM partial_ratings WHERE id=?').get(id);
+  audit(u.id, 'create_partial', `partial:${id}`, null, { employeeId: emp.id, ...partialAuditView(row) });
+  send(res, 201, { partial: partialRow(row) });
+});
+route('PUT', '/api/partials/:id', async (req, res, u, p) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Ocenę cząstkową zmienia oceniający.');
+  const cur = db.prepare('SELECT * FROM partial_ratings WHERE id=?').get(p.id);
+  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono oceny cząstkowej.');
+  const b = await readJson(req);
+  for (const k of ['employeeId', 'quarter', 'competency']) if (b[k] !== undefined && String(b[k]) !== String({ employeeId: cur.employee_id, quarter: cur.quarter, competency: cur.competency }[k])) return invalid(res, { [k]: 'Tego pola nie zmienia się – utwórz nową ocenę cząstkową.' });
+  const { value: v, errors } = sanitizePartial(b, cur.employee_id, true, cur);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const next = { ...cur, ...v, evidence_ids: v.evidenceIds ? JSON.stringify(v.evidenceIds) : cur.evidence_ids };
+  const ch = diffObj(partialAuditView(cur), partialAuditView(next));
+  if (!ch) return send(res, 200, { partial: partialRow(cur), changed: false });
+  db.prepare('UPDATE partial_ratings SET pts=?,justification=?,evidence_ids=?,updated=? WHERE id=?').run(next.pts, next.justification, next.evidence_ids, now(), cur.id);
+  audit(u.id, 'update_partial', `partial:${cur.id}`, ch.prev, ch.next);
+  send(res, 200, { partial: partialRow(db.prepare('SELECT * FROM partial_ratings WHERE id=?').get(cur.id)), changed: true });
+});
+
+// ---------- Przegląd miesiąca (przełożony): dowody według wskaźników, bez punktacji ----------
+// Wskaźniki bez nowych dowodów w miesiącu są pomijane, żeby nie generować pustych ocen.
+route('GET', '/api/month', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Przegląd miesiąca jest dla przełożonego.');
+  const q = qs(req);
+  const month = q.get('month') || today().slice(0, 7);
+  if (!isMonth(month)) return invalid(res, { month: 'Nieprawidłowy miesiąc.' });
+  const emp = teamMember(u, q.get('employeeId'));
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const ev = db.prepare('SELECT * FROM evidence WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(emp.id, `${month}-01`, monthEnd(month)).map(evidenceRow);
+  const groups = [];
+  for (const [key, ind] of INDICATORS) {
+    const items = ev.filter(e => e.indicator === key);
+    if (items.length) groups.push({ indicator: key, competency: ind.k, text: ind.text, evidence: items });
+  }
+  const checkin = db.prepare('SELECT * FROM checkins WHERE employee_id=? AND month=?').get(emp.id, month);
+  const fb = db.prepare('SELECT * FROM feedback WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(emp.id, `${month}-01`, monthEnd(month)).map(feedbackRow);
+  audit(u.id, 'view_month', `${emp.id}:${month}`);
+  send(res, 200, { month, employeeId: emp.id, groups, evidenceCount: ev.length, checkin: checkinRow(checkin) || null, feedback: fb });
 });
 
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)

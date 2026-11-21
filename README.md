@@ -52,6 +52,7 @@ Lokalnie masz model `orcarouter/Qwen3.8-27B-Uncensored:iq2_m`. Nie jest on domy�
 - **AI Act (UE 2024/1689):** wspieranie ocen pracowników w zatrudnieniu może zakwalifikować system jako wysokiego ryzyka (załącznik III). Dlatego AI tylko proponuje (pytania, przeformułowania, działania rozwojowe). Nie wystawia ocen, a decyzję zawsze podejmuje człowiek. Przed wdrożeniem wymagana jest analiza prawna.
 - **Agregaty zespołu:** wyniki zbiorcze pokazywane dopiero od 5 złożonych ocen.
 - **Dziennik zmian:** każda zmiana oceny, dowodu i feedbacku zapisuje autora, czas oraz poprzednią i nową wartość (`audit.prev_value`, `audit.new_value`, w łańcuchu skrótów SHA-256).
+- **Brak profilowania i monitoringu:** system nie wnioskuje o osobowości, stanie psychicznym ani motywacji, nie przewiduje ścieżki rozwoju i nie zbiera danych o czasie pracy, obecności ani aktywności. Feedback dotyczy rezultatu zadania.
 - **Ocena oparta na dowodach:** oceniany wskaźnik bez dowodu z okresu oceny wymaga jawnej adnotacji „brak podstaw do oceny”.
 - **Dostępność:** cel WCAG 2.1 AA (dyrektywa (UE) 2019/882, ustawa o dostępności cyfrowej).
 - **Przed wdrożeniem:** DPIA, umowa powierzenia (art. 28 RODO), polityka prywatności, uwierzytelnianie zgodne z wymogami resortu (np. profil zaufany / mObywatel jako IdP), audyt bezpieczeństwa.
@@ -91,6 +92,26 @@ Dowód to jedna obserwacja przy jednym wskaźniku z `app/kompetencje.js` (klucz 
 Kody błędów: `400` nieprawidłowe dane (`fields`: pole → komunikat, także nieznane pola), `403` brak uprawnień, `404` brak zasobu lub osoba spoza zespołu, `409` konflikt stanu, `422` ocena niekompletna. Dodanie i edycja dowodu trafiają do dziennika z poprzednią i nową wartością.
 
 **Walidacja przed złożeniem oceny okresowej:** każdy oceniany wskaźnik potrzebuje co najmniej jednego dowodu z okresu oceny albo jawnej adnotacji „brak podstaw do oceny”. W kreatorze przy każdym wskaźniku widać dowody z okresu i przycisk „+ Dowód”.
+
+## Rytm miesięczny, feedback i oceny cząstkowe kwartalne
+
+**Ekran „Miesiąc” (przełożony):** wybierasz pracownika i miesiąc. Widzisz:
+
+- **Check-in** (tabela `checkins`, jeden na osobę i miesiąc): trzy pola (co zrobiono, co wymaga uwagi, jeden cel), data i status (`planowany` / `odbyty`). Rozmowa ma trwać do 20 minut. Formularz nie ma punktacji, a pola typu `level`/`ocena` serwer odrzuca. Odbyty check-in wymaga daty i trzech pól.
+- **Dowody z miesiąca według wskaźników.** Wskaźniki bez nowych dowodów w miesiącu są ukryte, żeby nie generować pustych ocen.
+- **Feedback** (tabela `feedback`): wskaźnik, źródło zdarzenia (zadanie, sprawa, artefakt), opcjonalny poziom 1/3/5/7/9, wymagane uzasadnienie, autor i relacja autora do rezultatu. Feedback dotyczy rezultatu zadania, a nie osoby. Serwer odrzuca pola o czasie pracy, obecności i aktywności (np. `czasPracy`, `obecnosc`, `aktywnosc`, `hours`, `attendance`).
+- **Oceny cząstkowe kwartalne** (tabela `partial_ratings`): przypisane do kwartału (`RRRR-Qn`), a nie do miesiąca. Przyznaje je oceniający w skali 1/3/5/7/9, z uzasadnieniem i co najmniej jednym dowodem tej osoby z danego kryterium i kwartału. W kreatorze oceny okresowej widać je jako listę przy ocenie cząstkowej kryterium, bez średniej.
+
+**Widok pracownika „Dowody i feedback”:** pracownik widzi swoje dowody, feedback, check-iny i kwartalne oceny cząstkowe (tylko do odczytu).
+
+| Metoda | Ścieżka | Opis |
+|---|---|---|
+| GET/POST | `/api/checkins`, PUT `/api/checkins/:id` | Check-iny (`employeeId`, `month`) |
+| GET | `/api/month?employeeId=&month=` | Przegląd miesiąca: check-in, dowody według wskaźników, feedback |
+| GET/POST | `/api/feedback`, PUT `/api/feedback/:id` | Feedback (edytuje autor) |
+| GET/POST | `/api/partials`, PUT `/api/partials/:id` | Oceny cząstkowe kwartalne |
+
+Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową wartością.
 
 ## Ograniczenia prototypu
 
