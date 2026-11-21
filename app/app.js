@@ -165,7 +165,7 @@
     return `
       <div class="app">
         <aside class="side" aria-label="Menu główne">
-          <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><b>Kompas Kompetencji</b><br><small>${SUB[u.role]}</small></div></div>
+          <div class="brand"><img class="side-logo" src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></div>
           <nav class="side-nav">${navBtns}</nav>
           <div class="foot">
             <div class="who-row">${avatar(u.avatar, u.name)}<div class="who"><b>${first(u.name)}</b><br><small class="muted">${esc(u.position || "")}</small></div></div>

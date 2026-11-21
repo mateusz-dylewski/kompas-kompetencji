@@ -162,14 +162,17 @@ ul.c li{margin:4px 0}
 /* ---------- Desktop: pasek boczny ---------- */
 @media(min-width:960px){
   .app{grid-template-columns:260px 1fr}
-  .side{display:flex;flex-direction:column;gap:6px;background:#fff;color:var(--tx);border-right:1px solid var(--ln);padding:24px 16px;position:sticky;top:0;height:100vh}
-  .side .brand{display:flex;gap:12px;align-items:center;padding:4px 8px 20px}
+  .side{display:flex;flex-direction:column;gap:6px;background:#fff;color:var(--tx);border-right:1px solid var(--ln);padding:0;position:sticky;top:0;height:100vh;gap:0}
+  .side .brand{display:flex;align-items:center;padding:16px 16px 18px;border-bottom:1px solid var(--ln)}
+.side-logo{display:block;width:200px;height:auto;max-width:100%}
+.side .side-nav{gap:0;padding-top:8px}
+.side .side-nav button{width:100%;padding:14px 20px;margin:0}
   .side .brand b{font-size:17px;line-height:1.2}
   .side .brand small{opacity:.8;font-size:12px}
   .side button{flex-direction:row;color:var(--navy);opacity:.9;text-align:left;padding:12px 14px;border-radius:0;font-size:15px;font-weight:600;gap:12px;justify-content:flex-start}
   .side button:hover{background:var(--sky);opacity:1}
   .side button[aria-current="page"]{background:var(--navy);color:#fff;opacity:1}
-  .side .foot{margin-top:auto;font-size:12px;opacity:.8;padding:8px;line-height:1.4}
+  .side .foot{margin-top:auto;font-size:12px;opacity:.8;padding:16px 20px;line-height:1.4;border-top:1px solid var(--ln)}
   .top,.bottom{display:none}
   main{padding:32px 36px 40px}
 }
