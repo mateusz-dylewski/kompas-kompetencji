@@ -1,6 +1,7 @@
 // Kompas Kompetencji – serwer prototypu (Node.js >= 22.5, zero zależności)
 // Uruchomienie: node server.mjs   → http://localhost:8080
-// AI: lokalny Ollama z modelem Qwen (domyślnie http://127.0.0.1:11434). Zmienne: KK_AI_URL, KK_AI_MODEL.
+// AI: lokalny Ollama z modelem Qwen (domyślnie http://127.0.0.1:11434). Zmienne: KK_AI_URL, KK_AI_MODEL;
+// z KK_AI_KEY – serwer zgodny z OpenAI (klucz tylko ze środowiska, np. node --env-file=.env server.mjs).
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -432,7 +433,29 @@ function missingForSubmit(ev) {
 
 // ---------- AI (lokalny Qwen przez Ollama) ----------
 const AI_RULE_NOTE = 'Wygenerowano regułowo (lokalny model AI niedostępny).';
+let aiStatusCache = { at: 0, v: null };
 async function ollamaStatus() {
+  // Tryb zgodny z OpenAI (KK_AI_KEY): dostępność sprawdzamy listą modeli serwera (wynik pamiętany 60 s)
+  if (AI_KEY) {
+    if (aiStatusCache.v && Date.now() - aiStatusCache.at < 60000) return aiStatusCache.v;
+    const v = await remoteStatus();
+    aiStatusCache = { at: Date.now(), v };
+    return v;
+  }
+  return localStatus();
+}
+async function remoteStatus() {
+  {
+    try {
+      const r = await fetch(`${AI_URL}/models`, { headers: { authorization: `Bearer ${AI_KEY}` }, signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return { ok: false, model: AI_MODEL, remote: true };
+      const j = await r.json();
+      const has = (j.data || []).some(m => m.id === AI_MODEL);
+      return { ok: has, model: AI_MODEL, modelInstalled: has, remote: true, url: 'serwer zewnętrzny' };
+    } catch { return { ok: false, model: AI_MODEL, remote: true }; }
+  }
+}
+async function localStatus() {
   try {
     const r = await fetch(`${AI_URL}/api/tags`, { signal: AbortSignal.timeout(2500) });
     if (!r.ok) return { ok: false, model: AI_MODEL };

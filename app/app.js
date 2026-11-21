@@ -243,6 +243,8 @@
         : `<ul class="ev-list">${mine.map(x => `<li><span class="muted">${esc(isoToPl(x.date))} · ${esc(x.indicatorText)}</span><br><b>Sytuacja:</b> ${esc(x.situation)} · <b>Działanie:</b> ${esc(x.action)} · <b>Rezultat:</b> ${esc(x.result)} ${safeLink(x.link)}</li>`).join("")}</ul>`;
     });
   }
+  // Gdzie działa model AI: lokalnie (Ollama) albo na serwerze zewnętrznym (tryb zgodny z OpenAI, KK_AI_KEY)
+  const aiWhere = () => (S.ai && S.ai.remote ? "zewnętrzny" : "lokalnie");
   const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
 
   // ---------- Elementy wspólne ----------
@@ -424,7 +426,7 @@
   // ---------- Powłoka: sticky menu boczne (desktop) + dolna nawigacja (mobile) ----------
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
-    const aiPill = S.ai.ok ? `<span class="pill on" title="Model lokalny: ${esc(S.ai.model)}">AI lokalnie</span>` : `<span class="pill off" title="Lokalny model AI jest wyłączony">AI wyłączone</span>`;
+    const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">AI ${aiWhere()}</span>` : `<span class="pill off" title="Model AI jest niedostępny">AI wyłączone</span>`;
     const navBtns = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false).map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
     return `
       <div class="app">
@@ -1107,7 +1109,7 @@
       <p class="muted">Rozmowa jest ważniejsza niż ocena. Zacznij od tego, co się udało, potem omów obszary do rozwoju.</p>
       <div class="grid two"><div class="note"><b>Zacznij od</b><br>${esc(top)}</div><div class="note warn"><b>Omów</b><br>${esc(low)}</div></div>
       <div class="btns" style="justify-content:flex-start;margin-top:14px">
-        ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiTalk">Pytania do rozmowy (AI lokalnie)</button>
+        ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiTalk">Pytania do rozmowy (AI ${aiWhere()})</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
       <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
@@ -1254,7 +1256,7 @@
   }
   async function runAi(kind) {
     const out = $("#aiOut");
-    const stop = out ? (out.innerHTML = thinkingHtml("Model AI lokalnie przygotowuje podpowiedzi…"), startThinking(out)) : () => {};
+    const stop = out ? (out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} przygotowuje podpowiedzi…`), startThinking(out)) : () => {};
     try {
       const r = await api("POST", kind === "talk" ? "/api/ai/talk" : "/api/ai/formal", { evalId: S.cur.id });
       stop(); S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
@@ -1292,13 +1294,13 @@
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
         + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
-        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? "AI lokalnie" : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
   function chatBubble(m) {
     const who = m.role === "user" ? "Ty" : "Asystent";
-    const src = m.role === "assistant" ? `<div class="chat-src">${m.source === "ai" ? "model AI lokalnie" : "odpowiedź regułowa"}</div>` : "";
+    const src = m.role === "assistant" ? `<div class="chat-src">${m.source === "ai" ? `model AI ${aiWhere()}` : "odpowiedź regułowa"}</div>` : "";
     return `<div class="chat-row ${m.role}"><div class="chat-bub"><span class="chat-who">${who}</span>${esc(m.text)}${src}</div></div>`;
   }
   // Przewijanie czatu na dół; przy oczekiwaniu uruchamia licznik sekund
@@ -1370,8 +1372,8 @@
     aiFormal: () => runAi("formal"),
     aiDev: async () => {
       const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
-      const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml("Model AI lokalnie układa działania rozwojowe…"); const stop = startThinking(outEl);
-      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"}</p>`; }
+      const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa działania rozwojowe…`); const stop = startThinking(outEl);
+      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
       catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
@@ -1468,8 +1470,8 @@
       await api("POST", `/api/evals/${S.cur.id}/early-exception`, { reason }); await refreshMissing(); toast("Zapisano wyjątek."); render();
     },
     aiCheckin: async b => {
-      const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml("Model AI lokalnie układa pytania do rozmowy…"); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"} · propozycja do przemyślenia</p>`; }
+      const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
       catch (e) { stop(); out.innerHTML = ""; toast(e.message); }
       b.disabled = false;
     },

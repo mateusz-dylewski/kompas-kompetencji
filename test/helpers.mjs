@@ -19,7 +19,7 @@ export async function startServer(env = {}, opts = {}) {
     cwd: ROOT,
     // AI kierujemy na zamknięty port: testy idą ścieżką reguł, bez czekania na model
     // Tryb lokalny z domyślnym hasłem demo, niezależnie od zmiennych w powłoce
-    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', KK_MODE: 'local', KK_DEMO_PASSWORD: '', KK_SEED_DEMO: '',
+    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', KK_AI_KEY: '', KK_AI_MODEL: '', KK_MODE: 'local', KK_DEMO_PASSWORD: '', KK_SEED_DEMO: '',
       KK_PUBLIC_ORIGIN: '', KK_TRUSTED_PROXY: '', KK_SIGN_KEY: '', KK_AUDIT_KEY: '', KK_AUDIT_MIGRATE: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
