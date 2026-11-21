@@ -387,15 +387,16 @@ function redactNames(text) {
   }
   return out;
 }
-async function llm(system, user) {
+async function llm(system, user, history = []) {
   user = redactNames(user);
+  const hist = history.map(m => ({ role: m.role, content: redactNames(m.content) }));
   // Tryb zgodny z OpenAI (np. zewnętrzny endpoint testowy): tylko gdy ustawiono KK_AI_KEY w środowisku.
   // Klucz nigdy nie jest zapisany w kodzie ani w repozytorium.
   if (AI_KEY) {
     const r = await fetch(`${AI_URL}/chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${AI_KEY}` },
       body: JSON.stringify({ model: AI_MODEL, temperature: 0.3, max_tokens: 700,
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+        messages: [{ role: 'system', content: system }, ...hist, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(120000),
     });
     if (!r.ok) throw new Error('llm_' + r.status);
@@ -405,7 +406,7 @@ async function llm(system, user) {
   const r = await fetch(`${AI_URL}/api/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: AI_MODEL, stream: false, think: false, options: { temperature: 0.3, num_predict: 700 },
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      messages: [{ role: 'system', content: system }, ...hist, { role: 'user', content: user }] }),
     signal: AbortSignal.timeout(120000),
   });
   if (!r.ok) throw new Error('llm_' + r.status);
@@ -1184,6 +1185,77 @@ route('POST', '/api/ai/development', async (req, res, u) => {
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
+  }
+});
+
+// Asystent ogólny (czat): tylko system Kompas Kompetencji i procedury oceniania. Brak limitu zapytań.
+// Odpowiada wyłącznie na podstawie FAKTS (zweryfikowane zasady z aplikacji), bez danych ocen i osób.
+const CHAT_FACTS = `FAKTY O SYSTEMIE (jedyne źródło odpowiedzi):
+- System ma moduły: Start, Oceny (kreator oceny krok po kroku), Miesiąc (rozmowa miesięczna bez punktacji), Dowody (obserwacje przy wskaźnikach), Zestawienie, Wyniki zespołu, Dziennik (kto i kiedy działał), Ustawienia modułów. Nie ma sekcji „zadania”.
+- Role: przełożony (ocenia, widzi zespół) i pracownik (widzi swój profil, cele, dowody i swoje oceny po ich złożeniu).
+- Rodzaje ocen: pierwsza ocena (arkusz pierwszej oceny) oraz okresowa ocena kierownicza (Arkusz B) lub pozostałych (Arkusz C).
+- Kompetencje: 14 kompetencji, każda ma wskaźniki. Kryteria obowiązkowe są zawsze zaznaczone: dla B: zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja; dla C: wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja. Pozostałe kryteria wybiera się dodatkowo, do 3.
+- Punktacja wskaźnika: 1, 3, 5, 7 lub 9 punktów (B i C); przy pierwszej ocenie 3, 5 lub 7. Poziom ogólny z kryteriów: znacznie poniżej, poniżej, na poziomie, powyżej, znacznie powyżej oczekiwań.
+- Cykl okresowej oceny: 24 miesiące od ostatniej oceny okresowej. System pilnuje minimalnego odstępu 6 miesięcy; wyjątek wymaga uzasadnienia i wpisu do dziennika.
+- Zapoznanie: pracownik potwierdza zapoznanie z oceną. Od zapoznania ma 7 dni na złożenie sprzeciwu.
+- Sprzeciw: przełożony rozpatruje go w ciągu 14 dni. Uwzględnienie oznacza, że ocena wraca do poprawy (zmiana albo ponowne sporządzenie) i zapisuje się wersję.
+- Podpisy: podpis oceniającego i zapoznanie są zapisane z sumą kontrolną (SHA-256) i podpisem HMAC; weryfikacja pokazuje, czy treść się nie zmieniła.
+- Dziennik zmian (audyt) jest łańcuchem skrótów; każdą wygenerowaną podpowiedź AI widać w dzienniku.
+- Asystent AI nie ma dostępu do ocen konkretnych osób i nie podejmuje decyzji.`;
+// Liczby z systemu dla czatu (tylko zagregowane, bez nazwisk i treści ocen).
+// Przełożony: zakres jego zespołu i ocen, które sam sporządza. Pracownik: tylko jego własne oceny.
+function chatData(u) {
+  if (u.role === 'pracownik') {
+    const evs = db.prepare("SELECT status, objection_at, objection_result FROM evals WHERE employee_id=?").all(u.id);
+    const draft = evs.filter(e => e.status === 'draft').length;
+    const discussed = evs.filter(e => e.status === 'discussed').length;
+    const pending = evs.filter(e => e.status === 'submitted').length;
+    return `DANE OSOBY (liczby): ocen w przygotowaniu: ${draft}; złożonych, czeka na zapoznanie lub omówienie: ${pending}; omówionych: ${discussed}.`;
+  }
+  const team = db.prepare("SELECT id FROM users WHERE manager_id=? AND role='pracownik'").all(u.id);
+  const ids = team.map(t => t.id);
+  const evs = ids.length ? db.prepare(`SELECT employee_id, status, objection_at, objection_result FROM evals WHERE evaluator_id=? AND employee_id IN (${ids.map(() => '?').join(',')})`).all(u.id, ...ids) : [];
+  const withEval = new Set(evs.map(e => e.employee_id));
+  const noEval = ids.filter(id => !withEval.has(id)).length;
+  const draft = evs.filter(e => e.status === 'draft').length;
+  const submitted = evs.filter(e => e.status === 'submitted').length;
+  const discussed = evs.filter(e => e.status === 'discussed').length;
+  const objections = evs.filter(e => e.objection_at && !e.objection_result).length;
+  return `DANE PRZEŁOŻONEGO (liczby): pracowników w zespole: ${ids.length}; bez żadnej oceny: ${noEval}; oceny do przygotowania (szkic): ${draft}; złożone, do omówienia: ${submitted}; omówione: ${discussed}; sprzeciwy do rozpatrzenia: ${objections}.`;
+}
+const CHAT_SYSTEM = `Jesteś asystentem systemu Kompas Kompetencji w służbie cywilnej. Pomagasz wyłącznie w: obsłudze tego systemu, pojęciach z oceny, terminach i procedurach oceniania oraz zasadach służby cywilnej.
+ZASADY ODPOWIEDZI:
+1. Odpowiadaj WYŁĄCZNIE na podstawie poniższych FAKTÓW. Nie wymyślaj modułów, sekcji, zadań, danych ani liczb.
+2. Jeśli odpowiedzi nie ma w faktach, napisz: „Tego nie znajduję w systemie. Zapytaj dział kadr.”
+3. Jeśli pytanie nie dotyczy systemu ani procedur oceniania, napisz tylko: „Mogę pomóc w sprawach systemu Kompas Kompetencji i procedur oceny.”
+4. Nie oceniasz osób, nie pytasz o dane osobowe, nie podajesz wyniku ani poziomu dla konkretnej osoby.
+5. Odpowiadaj po polsku, krótko (do 5 zdań), zwykłym tekstem bez nagłówków.
+${CHAT_FACTS}`;
+const CHAT_FALLBACK = [
+  [/sprzeciw|odwo/i, 'Sprzeciw: pracownik ma 7 dni od zapoznania z oceną. Przełożony rozpatruje go w ciągu 14 dni. Uwzględnienie oznacza, że ocena wraca do poprawy.'],
+  [/cykl|termin|kiedy.*ocen|24/i, 'Okresowa ocena jest co 24 miesiące od ostatniej oceny okresowej. Najkrótszy odstęp to 6 miesięcy.'],
+  [/poziom|punkt|skal|wskaźnik/i, 'Wskaźniki są punktowane 1, 3, 5, 7 lub 9 (przy pierwszej ocenie 3, 5 lub 7). Poziom ogólny wynika z średniej kryteriów.'],
+  [/obowiązk|obowiazk|kryteri/i, 'Kryteria obowiązkowe są zawsze zaznaczone. Dla kierowniczych (B): zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja. Dla pozostałych (C): wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja.'],
+  [/podpis|zapozn/i, 'Podpis oceniającego i zapoznanie pracownika są zapisane z sumą kontrolną. Weryfikacja pokazuje, czy treść oceny się nie zmieniła.'],
+];
+route('POST', '/api/ai/chat', async (req, res, u) => {
+  const b = await readJson(req);
+  const q = String(b.message || '').trim().slice(0, 1000);
+  if (q.length < 2) return fail(res, 400, 'Wpisz pytanie.');
+  // Historia: tylko ostatnie 6 wiadomości, tylko role user/assistant, przycięte
+  const history = (Array.isArray(b.history) ? b.history : []).slice(-6)
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
+  const data = chatData(u);
+  try {
+    const text = await llm(`${CHAT_SYSTEM}\n${data}\nNa pytania o liczby odpowiadaj WYŁĄCZNIE z tych DANYCH (podaj liczbę i krótko, co ona znaczy). Nie podawaj nazwisk.`, q, history);
+    aiLog(null, u.id, 'chat', q, { text, source: 'ai' });
+    send(res, 200, { text, source: 'ai', model: AI_MODEL });
+  } catch {
+    const hit = /ile|liczb|ocen.*(zrobi|do|przygot)|sprzeciw.*(ile|ma)/i.test(q) ? [null, data + ' Szczegóły w module Oceny.'] : CHAT_FALLBACK.find(([re]) => re.test(q));
+    const text = (hit ? hit[1] : 'Asystent AI jest teraz niedostępny. Pytaj o sprzeciw, cykl oceny, wskaźniki, kryteria obowiązkowe lub podpisy.') + '\n\n' + AI_RULE_NOTE;
+    aiLog(null, u.id, 'chat', q, { text, source: 'rules' });
+    send(res, 200, { text, source: 'rules' });
   }
 });
 

@@ -30,6 +30,7 @@
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
       ["evidence", "Dowody i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
+      ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
@@ -39,11 +40,12 @@
       ["summary", "Zestawienie", "scale", "Liczby dowodów, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
+      ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
       ["settings", "Ustawienia", "spark", "Moduły spoza rozporządzenia – włącz lub wyłącz"],
     ],
   };
   // Strony, które znikają z menu po wyłączeniu modułu (moduły spoza rozporządzenia)
-  const MODULE_OF = { evidence: "mod_evidence", summary: "mod_evidence", month: "mod_checkins" };
+  const MODULE_OF = { evidence: "mod_evidence", summary: "mod_evidence", month: "mod_checkins", ai: "mod_ai" };
   const SUB = {
     pracownik: "Pracownik",
     przelozony: "Przełożony",
@@ -173,7 +175,7 @@
   function footer(extra = "") {
     return `<footer class="foot-gov ${extra}"><div class="logos">
       <img src="app/assets/logo-mc.png" alt="Ministerstwo Cyfryzacji">
-      <img src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027"></div>
+      <span class="kk-brand"><img class="kk-mark" src="app/assets/icon-kk.png" alt="" width="44" height="44"><img src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></span></div>
       <small>Kompas Kompetencji 2027</small></footer>`;
   }
 
@@ -201,7 +203,7 @@
       <div class="app">
         <a class="skip" href="#view">Przejdź do treści</a>
         <aside class="side" aria-label="Menu główne">
-          <div class="brand"><img class="side-logo" src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></div>
+          <div class="brand"><span class="kk-brand"><img class="kk-mark" src="app/assets/icon-kk.png" alt="" width="44" height="44"><img class="side-logo" src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></span></div>
           <nav class="side-nav">${navBtns}</nav>
           <div class="foot">
             <div class="who-row">${avatar(u.avatar, u.name)}<div class="who"><b>${first(u.name)}</b><br><small class="muted">${esc(u.position || "")}</small></div></div>
@@ -237,7 +239,7 @@
     else {
       const p = PAGES[u.role].find(x => x[0] === S.view) || PAGES[u.role][0];
       navView = p[0]; title = p[1]; sub = p[3];
-      html = u.role === "pracownik" ? empPage(S.view) : mgrPage(S.view);
+      html = S.view === "ai" ? aiPage() : u.role === "pracownik" ? empPage(S.view) : mgrPage(S.view);
     }
     // Fokus: przy zmianie strony/kroku przenosimy go na treść (czytnik ogłasza nowy widok);
     // przy odświeżeniu tej samej strony (np. wybór poziomu) wracamy do tego samego pola
@@ -912,6 +914,7 @@
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
   async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; S.cur.timing = r.timing || null; }
+  document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target?.id === "aiQ") { e.preventDefault(); document.querySelector('[data-act="aiChat"]')?.click(); } });
   // Widoczny stan „model myśli”: animowane kropki i licznik sekund (aria-live dla czytników ekranu)
   function thinkingHtml(what) {
     return `<div class="ai-think" role="status" aria-live="polite"><span class="ai-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(what)} <b class="ai-sec">0 s</b></span></div>`;
@@ -968,6 +971,31 @@
         + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? "AI lokalnie" : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
   }
+  // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
+  function chatBubble(m) {
+    const who = m.role === "user" ? "Ty" : "Asystent";
+    const src = m.role === "assistant" ? `<div class="chat-src">${m.source === "ai" ? "model AI lokalnie" : "odpowiedź regułowa"}</div>` : "";
+    return `<div class="chat-row ${m.role}"><div class="chat-bub"><span class="chat-who">${who}</span>${esc(m.text)}${src}</div></div>`;
+  }
+  // Przewijanie czatu na dół; przy oczekiwaniu uruchamia licznik sekund
+  function scrollChat(thinking) {
+    const log = $("#aiChatOut"); if (!log) return;
+    log.scrollTop = log.scrollHeight;
+    if (thinking) { const el = log.querySelector(".ai-think"); if (el) startThinking(el); }
+  }
+  function aiPage() {
+    const msgs = (S.aiChat || []).map(chatBubble).join("") + (S.aiPending ? `<div class="chat-row assistant"><div class="chat-bub chat-typing">${thinkingHtml("Asystent układa odpowiedź…")}</div></div>` : "");
+    const empty = `<div class="chat-hello">Cześć! Pytaj o obsługę systemu, terminy, sprzeciw, wskaźniki i kryteria obowiązkowe. Nie oceniam osób i nie podejmuję decyzji.</div>`;
+    return `<section class="chat" aria-labelledby="aiH">
+      <h2 id="aiH" class="sr">Asystent AI</h2>
+      <div class="chat-log" id="aiChatOut" role="log" aria-live="polite" aria-label="Rozmowa z asystentem">${msgs || empty}</div>
+      <form class="chat-bar" id="aiForm" onsubmit="return false">
+        <label class="sr" for="aiQ">Napisz wiadomość</label>
+        <input id="aiQ" type="text" maxlength="1000" autocomplete="off" placeholder="Napisz pytanie…">
+        <button class="btn" type="button" data-act="aiChat">Wyślij</button>
+        <button class="btn g" type="button" data-act="aiClear">Nowa rozmowa</button>
+      </form></section>`;
+  }
   const actions = {
     logout: async () => { await api("POST", "/api/logout").catch(() => {}); S.user = null; S.view = "home"; renderLogin(); },
     newEval: async (b) => {
@@ -999,6 +1027,19 @@
       try { await api("POST", `/api/evals/${S.cur.id}/discuss`, { dev }); S.cur.status = "discussed"; S.cur.data.dev = dev; toast("Oznaczono jako omówioną."); render(); }
       catch (e) { toast(e.message); }
     },
+    aiChat: async b => {
+      const inp = $("#aiQ"); const q = (inp?.value || "").trim();
+      if (q.length < 2) return toast("Napisz pytanie.");
+      const history = (S.aiChat || []).slice(-6).map(m => ({ role: m.role, content: m.text }));
+      S.aiChat = [...(S.aiChat || []), { role: "user", text: q }];
+      S.aiPending = true; render(); $("#aiQ")?.focus(); scrollChat(true);
+      try {
+        const r = await api("POST", "/api/ai/chat", { message: q, history });
+        S.aiChat = [...S.aiChat, { role: "assistant", text: r.text, source: r.source }];
+      } catch (e) { S.aiChat = [...S.aiChat, { role: "assistant", text: "Nie udało się uzyskać odpowiedzi. " + e.message, source: "rules" }]; }
+      S.aiPending = false; render(); $("#aiQ")?.focus(); scrollChat();
+    },
+    aiClear: () => { S.aiChat = []; render(); $("#aiQ")?.focus(); },
     aiTalk: () => runAi("talk"),
     aiFormal: () => runAi("formal"),
     aiDev: async () => {
