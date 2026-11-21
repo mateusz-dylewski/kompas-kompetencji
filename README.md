@@ -36,7 +36,7 @@ Hasło kont demo pochodzi z konfiguracji seedu (`lib/seed-config.mjs`):
 
 - `KK_DEMO_PASSWORD`: własne hasło demo (min. 10 znaków). Ekran logowania nie podpowiada go wtedy.
 - Bez tej zmiennej działa publiczna wartość domyślna z tabeli powyżej, **tylko w trybie lokalnym**.
-- `KK_MODE=production`: bez domyślnego hasła i bez kont demo. Seed jest możliwy tylko z `KK_SEED_DEMO=1` i `KK_DEMO_PASSWORD`. Cookie dostaje flagę `Secure`, a odpowiedzi nagłówek HSTS.
+- `KK_MODE=production`: bez domyślnego hasła i bez kont demo. Seed jest możliwy tylko z `KK_SEED_DEMO=1` i `KK_DEMO_PASSWORD`. Cookie dostaje flagę `Secure`, a odpowiedzi nagłówek HSTS. Tryb produkcyjny wymaga też zmiennych z sekcji „Bezpieczeństwo” (`KK_PUBLIC_ORIGIN`, `KK_SIGN_KEY`, `KK_AUDIT_KEY`); bez nich serwer nie wystartuje.
 - `KK_SEED_DEMO=0`: nie twórz kont demo także lokalnie.
 
 Hasła demo są tylko do testów lokalnych. Nie używaj ich nigdzie poza tym prototypem.
@@ -136,11 +136,11 @@ Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową w
 
 ## Ograniczenia prototypu
 
-- Brak HTTPS; sesje i licznik nieudanych logowań są w pamięci serwera (reset po restarcie).
-- Limit logowania: 5 nieudanych prób w 10 minut na adres IP i na e-mail (`429` z `Retry-After`). Adres IP pochodzi z gniazda, bez obsługi nagłówków proxy. Test automatyczny obejmuje blokadę po IP (wszystkie żądania testowe idą z 127.0.0.1).
+- Serwer nie obsługuje HTTPS sam; w produkcji stoi za reverse proxy z TLS. Sesje i licznik nieudanych logowań są w pamięci serwera (reset po restarcie).
+- Link aktywacyjny trafia do skrzynki nadawczej `data/outbox/aktywacje.jsonl` (symulacja e-maila). Wysyłkę SMTP albo logowanie SSO urzędu trzeba dodać przed wdrożeniem (plan P1.1).
 - Dowody, check-iny, feedback i oceny cząstkowe kwartalne zapisuje w MVP tylko przełożony. Nie ma usuwania wpisów, tylko edycja.
 - Redakcja nazwisk przed wysłaniem do AI działa na rdzeniu słowa i może nadmiarowo zastąpić zwykłe słowo o tym samym rdzeniu.
-- Brak rejestracji kont przez system zewnętrzny; konta zakłada przełożony.
+- Brak rejestracji kont przez system zewnętrzny; konto zakłada przełożony, a hasło ustala pracownik linkiem aktywacyjnym.
 - Limit kryteriów dodatkowych (3) do potwierdzenia z rozporządzeniem.
 - Mapowanie poziomów pierwszej oceny (3/5/7 pkt) na opisy modelu wymaga weryfikacji z Arkuszem A. Skala 3/5/7 jest oznaczona w kodzie jako „do weryfikacji z przepisami z 2015 r.”.
 
@@ -166,9 +166,31 @@ Ograniczenia: arkusz pierwszej oceny nie zawiera jeszcze daty nawiązania stosun
 ## Bezpieczeństwo (stan prototypu)
 
 - Cookie sesji `kk_sid`: `HttpOnly; SameSite=Strict; Path=/` (w produkcji także `Secure`). Po zalogowaniu poprzednia sesja z tej przeglądarki jest unieważniana (rotacja) i serwer wydaje nowy identyfikator.
-- Limit prób logowania (patrz „Ograniczenia”). Blokady trafiają do dziennika (`login_blocked`).
+- Limit prób logowania (okno 10 minut), który nie pozwala zablokować cudzego konta ani całego biura: para adres IP + konto po 5 nieudanych próbach, sam adres IP po 50, a jedno konto atakowane z wielu adresów dostaje rosnące odstępy między próbami (1, 2, 4… s, maks. 60 s). Odpowiedź `429` z `Retry-After`. Blokady trafiają do dziennika (`login_blocked`); login nieistniejącego konta zapisujemy jako `[nieznany login]`.
+- Czas odpowiedzi logowania nie zdradza, czy konto istnieje (scrypt liczony zawsze, także na fałszywym hashu).
 - Nagłówki na stronach i w API: CSP (`script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`. HSTS tylko w trybie produkcyjnym.
-- Ochrona CSRF jak dotąd: zmiany wyłącznie przez JSON plus `SameSite=Strict`.
+- Ochrona CSRF: każda zmiana (metoda inna niż GET) musi mieć typ dokładnie `application/json`, także pusta (UI wysyła `{}`). Przeglądarka nie wyśle takiego żądania z innej strony bez preflight CORS, a serwer go nie zezwala. Jeśli przeglądarka poda `Origin` lub `Sec-Fetch-Site`, muszą wskazywać tę samą stronę (`KK_PUBLIC_ORIGIN` w produkcji), inaczej `403`. Do tego `SameSite=Strict`.
+
+### Etap P0 planu zabezpieczeń
+
+Audyt i plan: `docs/bezpieczenstwo/` (prompt audytu, raport, plan). Wdrożony etap P0:
+
+- **Konta pracowników (P0.1).** Przełożony zakłada konto bez hasła (`POST /api/employees` z polem `password` zwraca `400`). Pracownik dostaje jednorazowy link aktywacyjny `…/#aktywacja=<token>` ważny 24 h; w bazie jest tylko SHA-256 tokenu. Lokalnie link widać też w odpowiedzi API (demo), w produkcji trafia wyłącznie do skrzynki nadawczej. Nowy link: `POST /api/employees/:id/activation` (unieważnia poprzedni). Aktywacja: `POST /api/activate` `{token, password}`. Zmiana hasła: `POST /api/password` `{current, next}` (pozostałe sesje są wylogowywane). Hasło: min. 12 znaków, bez nazwy konta i popularnych haseł.
+- **Konto z hasłem nadanym przez inną osobę** ma `mustChange` (pole w `GET /api/me` i odpowiedzi logowania). Do zmiany hasła działa tylko `GET /api/me` i `POST /api/password`, reszta zwraca `403` z `code: "password_change_required"`, więc nie da się też zarejestrować zapoznania z oceną ani sprzeciwu.
+- **Zaufane proxy (P0.3).** `KK_TRUSTED_PROXY=10.0.0.5,10.0.0.6`: tylko od tych adresów serwer czyta `X-Forwarded-For` (pierwszy od prawej adres spoza listy). Bez zmiennej nagłówek jest ignorowany.
+- **Pliki danych (P0.5).** Katalog danych `0700`, pliki `0600` (`umask 077`; istniejące pliki są poprawiane przy starcie).
+- **Tryb produkcyjny (P0.6).** Wymaga `KK_PUBLIC_ORIGIN=https://…` (adres strony, sprawdzany jako `Origin`), `KK_SIGN_KEY` i `KK_AUDIT_KEY` (min. 32 znaki, różne, z menedżera sekretów – nie z katalogu danych). Cookie sesji ma wtedy nazwę `__Host-kk_sid` i flagę `Secure`. Lokalnie klucze bez zmiennych leżą w `data/sign.key` i `data/audit.key`.
+- **Dziennik zdarzeń (P0.7).** Każdy wpis ma pieczęć HMAC-SHA256 (klucz `KK_AUDIT_KEY`) obejmującą numer, treść, wartości i skróty łańcucha. Bez klucza nie da się po zmianie wpisu przeliczyć pieczęci. Triggery w bazie blokują `UPDATE` i `DELETE` na tabeli `audit`. `GET /api/audit` sprawdza łańcuch, pieczęcie i ciągłość numeracji (`chainOk`, `brokenAt`).
+
+### Migracja do P0
+
+Automatyczna przy starcie, dane zostają:
+- kolumny `users.must_change`, `audit.mac` i tabela `activation`;
+- konta założone wcześniej przez przełożonego (wpis `create_employee` w dzienniku) dostają `must_change=1` i przy logowaniu muszą zmienić hasło;
+- wpisy dziennika sprzed migracji są jednorazowo pieczętowane HMAC. Lokalnie dzieje się to samo, w produkcji tylko z `KK_AUDIT_MIGRATE=1` przy pierwszym starcie (bez tej zmiennej wpisy bez pieczęci są zgłaszane jako naruszenie). Po migracji usuń zmienną;
+- przy przejściu z trybu lokalnego na produkcyjny ustaw `KK_SIGN_KEY` na zawartość `data/sign.key`, a `KK_AUDIT_KEY` na zawartość `data/audit.key` (inaczej dotychczasowe podpisy mock i pieczęcie nie przejdą weryfikacji), po czym usuń te pliki z katalogu danych.
+
+Zmiana kontraktu API (potrzebna ze względów bezpieczeństwa): `POST /api/employees` nie przyjmuje już hasła i zwraca `{ id, activation: { expires, delivered, link? } }`; żądania zmieniające dane bez `content-type: application/json` (także puste) dostają `415`.
 
 ## Dostępność nowych ekranów – jak sprawdzić
 

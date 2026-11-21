@@ -1,7 +1,7 @@
 // Faza 6: konfiguracja haseł demo, limit prób logowania, rotacja sesji, cookie i nagłówki bezpieczeństwa
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, DEMO_PASS } from './helpers.mjs';
+import { startServer, DEMO_PASS, PROD_ENV } from './helpers.mjs';
 import { demoConfig } from '../lib/seed-config.mjs';
 
 describe('konfiguracja seedu', () => {
@@ -27,14 +27,14 @@ describe('konfiguracja seedu', () => {
     } finally { await srv.stop(); }
   });
   test('tryb produkcyjny: brak kont demo, /api/demo wyłączone, HSTS i Secure', async () => {
-    const srv = await startServer({ KK_MODE: 'production' });
+    const srv = await startServer(PROD_ENV);
     try {
       const c = srv.client();
       assert.equal((await c.get('/api/demo')).body.enabled, false);
       const r = await c.post('/api/login', { email: 'przelozony@demo.kk', password: DEMO_PASS });
       assert.equal(r.status, 401);
       assert.match(r.headers.get('strict-transport-security') || '', /max-age/);
-      assert.match((await c.post('/api/logout')).headers.get('set-cookie'), /Secure/);
+      assert.match((await c.post('/api/logout')).headers.get('set-cookie'), /^__Host-kk_sid=;.*Secure/);
     } finally { await srv.stop(); }
   });
 });
@@ -64,7 +64,7 @@ describe('sesje i nagłówki', () => {
 });
 
 describe('limit prób logowania', () => {
-  test('5 nieudanych prób w 10 min → 429 z Retry-After (także dla poprawnego hasła)', async () => {
+  test('5 nieudanych prób z jednego adresu dla konta → 429 z Retry-After (także dla poprawnego hasła)', async () => {
     const srv = await startServer();
     try {
       const c = srv.client();
@@ -72,8 +72,8 @@ describe('limit prób logowania', () => {
       const blocked = await c.post('/api/login', { email: 'pracownik2@demo.kk', password: DEMO_PASS });
       assert.equal(blocked.status, 429);
       assert.ok(Number(blocked.headers.get('retry-after')) > 0);
-      // Ten sam adres IP: blokada obejmuje też inne konta
-      assert.equal((await c.post('/api/login', { email: 'przelozony@demo.kk', password: DEMO_PASS })).status, 429);
+      // Blokada dotyczy pary adres + konto: inne konto z tego samego adresu loguje się normalnie (P0.3)
+      assert.equal((await c.post('/api/login', { email: 'przelozony@demo.kk', password: DEMO_PASS })).status, 200);
     } finally { await srv.stop(); }
   });
 });

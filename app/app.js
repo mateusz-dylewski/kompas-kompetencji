@@ -64,7 +64,8 @@
     try { r = await fetch(url, opt); }
     catch (_) { const e = new Error("Brak połączenia z serwerem. Uruchom w terminalu: node server.mjs i otwórz http://localhost:8080"); e.status = 0; throw e; }
     let j = {}; try { j = await r.json(); } catch (_) {}
-    if (r.status === 401 && url !== "/api/login") { S.user = null; renderLogin(); throw new Error("Sesja wygasła. Zaloguj się ponownie."); }
+    if (r.status === 401 && url !== "/api/login" && url !== "/api/password") { S.user = null; renderLogin(); throw new Error("Sesja wygasła. Zaloguj się ponownie."); }
+    if (r.status === 403 && j.code === "password_change_required") { renderPasswordChange(); throw new Error(j.error); }
     if (!r.ok) { const e = new Error(j.error || "Wystąpił błąd."); e.data = j; e.status = r.status; throw e; }
     return j;
   }
@@ -73,6 +74,13 @@
     const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 2800);
   };
+  // Link aktywacyjny: lokalnie pokazujemy go przełożonemu (demo); w produkcji trafia tylko na e-mail pracownika
+  const activationInfo = a => openModal(`
+      <h2>Link aktywacyjny</h2>
+      ${a.link ? `<p>Wersja lokalna (demo): przekaż pracownikowi ten link. W wersji produkcyjnej trafia wyłącznie na jego e-mail.</p>
+        <label class="f" for="actLink">Link (ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC)</label><input id="actLink" readonly value="${esc(a.link)}">`
+        : `<p>Link wysłano na adres e-mail pracownika. Jest ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC.</p>`}
+      <div class="btns"><button type="button" class="btn" data-act="closeModal">Zamknij</button></div>`, () => { const i = $("#actLink"); if (i) i.select(); });
   const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
 
   // ---------- Elementy wspólne ----------
@@ -168,8 +176,66 @@
       e.preventDefault();
       try {
         const j = await api("POST", "/api/login", { email: $("#lEmail").value, password: $("#lPass").value });
-        S.user = j.user; S.view = "home"; await load(); render();
+        S.user = j.user; S.view = "home";
+        if (j.user.mustChange) return renderPasswordChange();
+        await load(); render();
       } catch (ex) { const em = $("#lEmail").value; renderLogin(ex.message); $("#lEmail").value = em; $("#lPass").focus(); }
+    });
+  }
+
+  // ---------- Aktywacja konta i zmiana hasła ----------
+  // Karta jak przy logowaniu; formularz z dwoma polami nowego hasła (min. 12 znaków, sprawdza też serwer)
+  const PASS_HINT = "Co najmniej 12 znaków, bez nazwy konta i popularnych haseł.";
+  const authCard = (title, sub, body) => `
+      <div class="login"><div class="login-main"><div class="login-card">
+        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>${esc(title)}</h1><div class="muted">${esc(sub)}</div></div></div>
+        ${body}
+      </div></div>${footer("foot-login")}</div>`;
+  const newPassFields = `
+          <label class="f" for="pNew">Nowe hasło</label>
+          <input id="pNew" type="password" autocomplete="new-password" minlength="12" maxlength="200" required aria-describedby="pHint">
+          <small id="pHint" class="muted">${PASS_HINT}</small>
+          <label class="f" for="pNew2">Powtórz nowe hasło</label>
+          <input id="pNew2" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>`;
+  const passErr = () => ($("#pNew").value.length < 12 ? "Hasło musi mieć co najmniej 12 znaków." : $("#pNew").value !== $("#pNew2").value ? "Hasła nie są takie same." : "");
+  const showErr = msg => { $("#pErr").textContent = msg; if (msg) $("#pNew").focus(); };
+  function renderActivation(token) {
+    $("#root").innerHTML = authCard("Aktywacja konta", "Ustal hasło do Kompasu Kompetencji", `
+        <form id="actForm" novalidate>${newPassFields}
+          <button class="btn w" style="margin-top:16px" type="submit">Aktywuj konto</button>
+          <div class="err" id="pErr" role="alert"></div>
+        </form>
+        <p class="note">Hasło znasz tylko Ty – przełożony go nie widzi. Link działa jednorazowo przez 24 godziny.</p>`);
+    $("#pNew").focus();
+    $("#actForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const bad = passErr(); if (bad) return showErr(bad);
+      try {
+        const r = await api("POST", "/api/activate", { token, password: $("#pNew").value });
+        history.replaceState(null, "", location.pathname);
+        renderLogin(); $("#lEmail").value = r.email; $("#lPass").focus(); toast("Konto aktywne. Zaloguj się nowym hasłem.");
+      } catch (ex) { showErr(ex.message); }
+    });
+  }
+  function renderPasswordChange() {
+    $("#root").innerHTML = authCard("Zmień hasło", "Hasło nadała inna osoba – ustal własne, aby kontynuować", `
+        <form id="pwForm" novalidate>
+          <label class="f" for="pCur">Obecne hasło</label>
+          <input id="pCur" type="password" autocomplete="current-password" required>${newPassFields}
+          <button class="btn w" style="margin-top:16px" type="submit">Zmień hasło</button>
+          <div class="err" id="pErr" role="alert"></div>
+        </form>
+        <p class="note">Po zmianie hasła pozostałe sesje na tym koncie zostaną wylogowane.</p>
+        <button class="btn g w" type="button" id="pwLogout">Wyloguj</button>`);
+    $("#pCur").focus();
+    $("#pwLogout").addEventListener("click", async () => { await api("POST", "/api/logout").catch(() => {}); S.user = null; renderLogin(); });
+    $("#pwForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const bad = passErr(); if (bad) return showErr(bad);
+      try {
+        await api("POST", "/api/password", { current: $("#pCur").value, next: $("#pNew").value });
+        toast("Hasło zmienione."); S.view = "home"; await load(); render();
+      } catch (ex) { showErr(ex.message); }
     });
   }
   function footer(extra = "") {
@@ -357,7 +423,7 @@
       const toDiscuss = d.team.filter(t => t.status === "submitted");
       const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
       const rows = d.team.map(t => `
-        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div></div></div></td>
+        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}</div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
@@ -965,7 +1031,7 @@
     const b = $("#logBody"); if (!b) return;
     try {
       const r = await api("GET", "/api/audit");
-      b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
+      b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
         + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
         + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? "AI lokalnie" : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
@@ -1068,20 +1134,25 @@
       });
     }),
     addEmp: () => openModal(`
-      <h2>Nowy pracownik</h2><p class="muted">Konto zakłada przełożony. Hasło przekaż bezpiecznym kanałem.</p>
+      <h2>Nowy pracownik</h2><p class="muted">Hasło ustala pracownik – dostanie link aktywacyjny ważny 24 godziny.</p>
       <form id="empForm" novalidate>
         <label class="f" for="eName">Imię i nazwisko</label><input id="eName" required maxlength="120">
         <label class="f" for="eMail">E-mail służbowy</label><input id="eMail" type="email" required maxlength="200">
         <label class="f" for="ePos">Stanowisko</label><input id="ePos" maxlength="120">
-        <label class="f" for="ePass">Hasło początkowe (min. 10 znaków)</label><input id="ePass" type="password" minlength="10" required autocomplete="new-password">
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Dodaj</button></div>
       </form>`, () => {
       $("#empForm").addEventListener("submit", async e => {
         e.preventDefault();
-        try { await api("POST", "/api/employees", { name: $("#eName").value, email: $("#eMail").value, position: $("#ePos").value, password: $("#ePass").value }); closeModal(); toast("Dodano pracownika."); await refreshData(); render(); }
-        catch (ex) { toast(ex.message); }
+        try {
+          const r = await api("POST", "/api/employees", { name: $("#eName").value, email: $("#eMail").value, position: $("#ePos").value });
+          closeModal(); await refreshData(); render(); activationInfo(r.activation);
+        } catch (ex) { toast(ex.message); }
       });
     }),
+    resendActivation: async b => {
+      try { const r = await api("POST", `/api/employees/${b.dataset.emp}/activation`); activationInfo(r.activation); }
+      catch (ex) { toast(ex.message); }
+    },
     closeModal: () => closeModal(),
     addEvidence: b => {
       if (S.view === "wizard" && S.cur) return evidenceModal(null, { employeeId: S.cur.employeeId, indicator: b.dataset.ind || "", date: S.cur.periodTo && S.cur.periodTo < new Date().toISOString().slice(0, 10) ? S.cur.periodTo : undefined },
@@ -1222,9 +1293,12 @@
 
   // ---------- Start ----------
   (async () => {
+    const act = /^#aktywacja=([a-f0-9]{64})$/.exec(location.hash);
+    if (act) return renderActivation(act[1]);
     try {
       const me = await api("GET", "/api/me");
       S.user = me.user; S.ai = me.ai;
+      if (me.user.mustChange) return renderPasswordChange();
       await load(); render();
     } catch (e) { renderLogin(e.status === 0 ? e.message : ""); }
   })();

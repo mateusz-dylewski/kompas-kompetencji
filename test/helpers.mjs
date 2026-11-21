@@ -9,13 +9,18 @@ import { LOCAL_DEMO_PASSWORD } from '../lib/seed-config.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEMO_PASS = LOCAL_DEMO_PASSWORD; // lokalna wartość domyślna z konfiguracji seedu (tylko tryb lokalny)
 
-export async function startServer(env = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kk-test-'));
+// Zmienne trybu produkcyjnego dla testów (klucze i adres fikcyjne)
+export const PROD_ENV = { KK_MODE: 'production', KK_PUBLIC_ORIGIN: 'https://kompas.test', KK_SIGN_KEY: 's'.repeat(40), KK_AUDIT_KEY: 'a'.repeat(40) };
+
+// opts.dir – istniejący katalog danych (np. drugi start na tej samej bazie), opts.keep – nie usuwaj katalogu po zatrzymaniu
+export async function startServer(env = {}, opts = {}) {
+  const dir = opts.dir || fs.mkdtempSync(path.join(os.tmpdir(), 'kk-test-'));
   const child = spawn(process.execPath, ['--no-warnings', 'server.mjs'], {
     cwd: ROOT,
     // AI kierujemy na zamknięty port: testy idą ścieżką reguł, bez czekania na model
     // Tryb lokalny z domyślnym hasłem demo, niezależnie od zmiennych w powłoce
-    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', KK_MODE: 'local', KK_DEMO_PASSWORD: '', KK_SEED_DEMO: '', ...env },
+    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', KK_MODE: 'local', KK_DEMO_PASSWORD: '', KK_SEED_DEMO: '',
+      KK_PUBLIC_ORIGIN: '', KK_TRUSTED_PROXY: '', KK_SIGN_KEY: '', KK_AUDIT_KEY: '', KK_AUDIT_MIGRATE: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -25,7 +30,7 @@ export async function startServer(env = {}) {
     child.stderr.on('data', d => { log += d; });
     child.on('exit', c => { clearTimeout(t); bad(new Error(`Serwer zakończył się (${c}):\n${log}`)); });
   });
-  const stop = () => new Promise(ok => { child.once('exit', () => { fs.rmSync(dir, { recursive: true, force: true }); ok(); }); child.kill(); });
+  const stop = () => new Promise(ok => { child.once('exit', () => { if (!opts.keep) fs.rmSync(dir, { recursive: true, force: true }); ok(); }); child.kill(); });
   return { base, dir, stop, log: () => log, client: () => new Client(base) };
 }
 
@@ -37,7 +42,8 @@ export class Client {
     if (body !== undefined) { opt.headers['content-type'] = 'application/json'; opt.body = JSON.stringify(body); }
     const r = await fetch(this.base + url, opt);
     const sc = r.headers.get('set-cookie');
-    if (sc) { const m = /kk_sid=([^;]*)/.exec(sc); this.cookie = m && m[1] ? `kk_sid=${m[1]}` : ''; }
+    // Cookie sesji: kk_sid (lokalnie) albo __Host-kk_sid (produkcja)
+    if (sc) { const m = /((?:__Host-)?kk_sid)=([^;]*)/.exec(sc); this.cookie = m && m[2] ? `${m[1]}=${m[2]}` : ''; }
     const text = await r.text();
     let json = null; try { json = JSON.parse(text); } catch { /* nie JSON */ }
     return { status: r.status, body: json, text, headers: r.headers };
