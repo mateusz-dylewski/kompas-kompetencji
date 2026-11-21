@@ -33,6 +33,23 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, user_id INTEGER, action
 `);
 
 try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT'); } catch (_) { /* kolumna już istnieje */ }
+for (const sql of [
+  'ALTER TABLE evals ADD COLUMN ack_at TEXT',
+  'ALTER TABLE evals ADD COLUMN objection_at TEXT',
+  'ALTER TABLE evals ADD COLUMN objection_text TEXT',
+  'ALTER TABLE audit ADD COLUMN prev_hash TEXT',
+  'ALTER TABLE audit ADD COLUMN hash TEXT',
+]) { try { db.exec(sql); } catch (_) { /* już istnieje */ } }
+db.exec(`
+CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, signer_id INTEGER NOT NULL,
+  role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
+CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
+  model TEXT, input_sha256 TEXT, output_text TEXT, source TEXT, at TEXT NOT NULL);
+`);
+// Klucz do podpisów mockowych (lokalny, w data/ – nie trafia do repo)
+const KEY_FILE = path.join(ROOT, 'data', 'sign.key');
+if (!fs.existsSync(KEY_FILE)) fs.writeFileSync(KEY_FILE, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+const SIGN_KEY = fs.readFileSync(KEY_FILE, 'utf8').trim();
 
 // Model kompetencji (ten sam plik co w przeglądarce)
 const MODEL = JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'kompetencje.js'), 'utf8')
@@ -55,8 +72,21 @@ const checkPass = (pw, stored) => {
   const b = Buffer.from(hash);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
-const audit = (uid, action, target = '') =>
-  db.prepare('INSERT INTO audit(user_id,action,target,at) VALUES(?,?,?,?)').run(uid, action, String(target), now());
+// Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje)
+const auditHash = (prev, uid, action, target, at) => crypto.createHash('sha256').update([prev || '', uid ?? '', action, target, at].join('|')).digest('hex');
+const audit = (uid, action, target = '') => {
+  const at = now();
+  const prev = db.prepare('SELECT hash FROM audit ORDER BY id DESC LIMIT 1').get()?.hash || '';
+  const hash = auditHash(prev, uid, action, String(target), at);
+  db.prepare('INSERT INTO audit(user_id,action,target,at,prev_hash,hash) VALUES(?,?,?,?,?,?)').run(uid, action, String(target), at, prev, hash);
+};
+const docHash = ev => {
+  const data = typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data || {});
+  return crypto.createHash('sha256').update(`${ev.id}|${ev.typ}|${ev.period_from}|${ev.period_to}|${data}`).digest('hex');
+};
+const sigValue = (hash, signerId, role, at) => crypto.createHmac('sha256', SIGN_KEY).update(`${hash}|${signerId}|${role}|${at}`).digest('hex');
+const aiLog = (evalId, uid, action, input, out) => db.prepare('INSERT INTO ai_log(eval_id,user_id,action,model,input_sha256,output_text,source,at) VALUES(?,?,?,?,?,?,?,?)')
+  .run(evalId ?? null, uid, action, AI_MODEL, crypto.createHash('sha256').update(String(input)).digest('hex'), String(out.text || ''), out.source || '', now());
 
 // Dane demonstracyjne (tylko gdy baza jest pusta)
 function seed() {
@@ -272,7 +302,13 @@ route('GET', '/api/dashboard', async (req, res, u) => {
       competencies: Object.entries(sums).map(([k, v]) => ({ k, avg: +(v.s / v.n).toFixed(2) })).sort((a, b) => a.avg - b.avg) };
   }
   const goalsOpen = db.prepare(`SELECT COUNT(*) n FROM goals WHERE done=0 AND user_id IN (${team.map(() => '?').join(',') || 'NULL'})`).get(...team.map(t => t.id)).n;
-  send(res, 200, { role: u.role, team: teamRows, counts, evals: evals.map(e => ({ id: e.id, employeeId: e.employee_id, typ: e.typ, status: e.status, updated: e.updated })), aggregate: agg, goalsOpen });
+  const alerts = [];
+  for (const e of evals) {
+    const emp = team.find(t => t.id === e.employee_id);
+    if (e.objection_at) alerts.push({ kind: 'objection', evalId: e.id, name: emp?.name || '', text: 'Złożono sprzeciw – rozpatrz go' });
+    else if (e.status === 'submitted' && !e.ack_at && Date.now() - Date.parse(e.updated) > 7 * 86400000) alerts.push({ kind: 'noack', evalId: e.id, name: emp?.name || '', text: 'Ocena złożona ponad 7 dni temu, brak zapoznania' });
+  }
+  send(res, 200, { role: u.role, alerts, team: teamRows, counts, evals: evals.map(e => ({ id: e.id, employeeId: e.employee_id, typ: e.typ, status: e.status, updated: e.updated })), aggregate: agg, goalsOpen });
 });
 
 route('POST', '/api/employees', async (req, res, u) => {
@@ -326,6 +362,9 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
     unit: mgr.unit || process.env.KK_UNIT || 'Nazwa urzędu (uzupełnij)',
     statusLabel: { draft: 'szkic', submitted: 'złożona', discussed: 'omówiona' }[ev.status] };
   ctx.res = computeResults(ctx.ev, model);
+  ctx.signatures = db.prepare('SELECT s.role,s.signed_at,s.doc_sha256,s.sig_value,s.signer_id,u.name FROM signatures s JOIN users u ON u.id=s.signer_id WHERE s.eval_id=? ORDER BY s.id').all(ev.id)
+    .map(r => ({ ...r, valid: r.sig_value === sigValue(r.doc_sha256, r.signer_id, r.role, r.signed_at) }));
+  ctx.ack = { ackAt: ev.ack_at, objectionAt: ev.objection_at, objectionText: ev.objection_text, deadline: ev.ack_at ? new Date(Date.parse(ev.ack_at) + 7 * 86400000).toISOString().slice(0, 10) : null };
   const base = `arkusz-${kind}-${ev.id}`;
   audit(u.id, 'download_doc', `${ev.id}:${format}`);
   if (format === 'xml') {
@@ -410,9 +449,10 @@ route('POST', '/api/ai/talk', async (req, res, u) => {
   try {
     const text = await llm(`Jesteś asystentem przełożonego w służbie cywilnej przygotowującego rozmowę oceniającą. ${RULES} Przygotuj: 1) 2 mocne strony z przykładami, 2) 2 obszary do rozwoju, 3) 3 pytania otwarte do rozmowy.`,
       `Wyniki oceny (kompetencja / wskaźnik: poziom):\n${evalSummaryForAI(ev)}`);
-    audit(u.id, 'ai_talk', ev.id);
+    audit(u.id, 'ai_talk', ev.id); aiLog(ev.id, u.id, 'talk', evalSummaryForAI(ev), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
+    aiLog(ev.id, u.id, 'talk', evalSummaryForAI(ev), { text: fallback, source: 'rules' });
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
   }
 });
@@ -425,7 +465,7 @@ route('POST', '/api/ai/formal', async (req, res, u) => {
   try {
     const text = await llm(`Jesteś asystentem formalnym oceny okresowej w służbie cywilnej. ${RULES} Sprawdź uzasadnienia i wskaż zdania oceniające osobę (np. „jest leniwy”) zamiast zachowania; zaproponuj przeformułowanie w języku obserwowalnych zachowań. Nie zmieniaj poziomów ocen.`,
       `Braki formalne: ${miss.join('; ') || 'brak'}\nUzasadnienia:\n${evalSummaryForAI(ev)}`);
-    audit(u.id, 'ai_formal', ev.id);
+    audit(u.id, 'ai_formal', ev.id); aiLog(ev.id, u.id, 'formal', evalSummaryForAI(ev), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
@@ -442,7 +482,7 @@ route('POST', '/api/ai/development', async (req, res, u) => {
   try {
     const text = await llm(`Jesteś doradcą rozwoju zawodowego pracownika służby cywilnej. ${RULES} Zaproponuj 2–3 działania rozwojowe w formie SMART. Nie oceniaj osoby.`,
       `Obszary do rozwoju: ${weak.join(', ') || 'brak'}\nCele: ${goals.map(g => `${g.s} (postęp ${g.progress}%)`).join('; ') || 'brak'}`);
-    audit(u.id, 'ai_development');
+    audit(u.id, 'ai_development'); aiLog(null, u.id, 'development', weak.join(','), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
@@ -452,7 +492,63 @@ route('POST', '/api/ai/development', async (req, res, u) => {
 // Dziennik zdarzeń – przegląd dla przełożonego (zgodność z RODO / audyt)
 route('GET', '/api/audit', async (req, res, u) => {
   const rows = db.prepare('SELECT action,target,at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 100').all(u.id);
-  send(res, 200, { audit: rows });
+  // Weryfikacja łańcucha: każdy wpis musi pasować do skrótu poprzedniego
+  const all = db.prepare('SELECT id,user_id,action,target,at,prev_hash,hash FROM audit ORDER BY id').all();
+  let prev = '', broken = null;
+  for (const r of all) {
+    if (r.hash && (r.prev_hash !== prev || auditHash(prev, r.user_id, r.action, r.target, r.at) !== r.hash)) { broken = r.id; break; }
+    if (r.hash) prev = r.hash;
+  }
+  const aiRows = db.prepare('SELECT eval_id,action,model,source,at,substr(output_text,1,400) AS output FROM ai_log WHERE user_id=? ORDER BY id DESC LIMIT 50').all(u.id);
+  send(res, 200, { audit: rows, chainOk: broken === null, brokenAt: broken, ai: aiRows });
+});
+
+// ---------- Podpis mockowy, zapoznanie i sprzeciw (art. 83 ustawy o służbie cywilnej) ----------
+const SIG_NOTE = 'Podpis symulowany (mock) – do zastąpienia podpisem kwalifikowanym / zaufanym';
+route('POST', '/api/evals/:id/sign', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  if (ev.status === 'draft') return fail(res, 409, 'Najpierw złóż ocenę.');
+  const hash = docHash(ev), at = now();
+  db.prepare('INSERT INTO signatures(eval_id,signer_id,role,signed_at,doc_sha256,sig_value,note) VALUES(?,?,?,?,?,?,?)')
+    .run(ev.id, u.id, 'przelozony', at, hash, sigValue(hash, u.id, 'przelozony', at), SIG_NOTE);
+  audit(u.id, 'sign_eval', ev.id);
+  send(res, 201, { ok: true, signedAt: at, hash });
+});
+route('POST', '/api/evals/:id/acknowledge', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.employee_id !== u.id || u.role !== 'pracownik') return fail(res, 403, 'Brak dostępu.');
+  if (ev.status === 'draft') return fail(res, 409, 'Ocena nie jest jeszcze złożona.');
+  if (ev.ack_at) return fail(res, 409, 'Zapoznanie już zarejestrowano.');
+  const hash = docHash(ev), at = now();
+  db.prepare('UPDATE evals SET ack_at=? WHERE id=?').run(at, ev.id);
+  db.prepare('INSERT INTO signatures(eval_id,signer_id,role,signed_at,doc_sha256,sig_value,note) VALUES(?,?,?,?,?,?,?)')
+    .run(ev.id, u.id, 'pracownik', at, hash, sigValue(hash, u.id, 'pracownik', at), SIG_NOTE);
+  audit(u.id, 'acknowledge_eval', ev.id);
+  send(res, 201, { ok: true, ackAt: at, objectionDeadline: new Date(Date.parse(at) + 7 * 86400000).toISOString() });
+});
+route('POST', '/api/evals/:id/objection', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.employee_id !== u.id || u.role !== 'pracownik') return fail(res, 403, 'Brak dostępu.');
+  if (!ev.ack_at) return fail(res, 409, 'Sprzeciw przysługuje po zapoznaniu się z oceną.');
+  if (ev.objection_at) return fail(res, 409, 'Sprzeciw już złożono.');
+  const deadline = Date.parse(ev.ack_at) + 7 * 86400000;
+  if (Date.now() > deadline) return fail(res, 409, 'Termin 7 dni na sprzeciw minął.');
+  const b = await readJson(req);
+  const text = str(b.text, 3000);
+  if (text.length < 10) return fail(res, 400, 'Opisz powód sprzeciwu (min. 10 znaków).');
+  db.prepare('UPDATE evals SET objection_at=?, objection_text=?, updated=? WHERE id=?').run(now(), text, now(), ev.id);
+  audit(u.id, 'objection_eval', ev.id);
+  send(res, 201, { ok: true });
+});
+route('GET', '/api/evals/:id/signatures', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  const can = ev && ((u.role === 'przelozony' && ev.evaluator_id === u.id) || (u.role === 'pracownik' && ev.employee_id === u.id && ev.status !== 'draft'));
+  if (!can) return fail(res, 403, 'Brak dostępu.');
+  const rows = db.prepare('SELECT s.id,s.signer_id,s.role,s.signed_at,s.doc_sha256,s.sig_value,u.name FROM signatures s JOIN users u ON u.id=s.signer_id WHERE s.eval_id=? ORDER BY s.id').all(ev.id);
+  const current = docHash(ev);
+  const signed = rows.map(r => ({ ...r, valid: r.sig_value === sigValue(r.doc_sha256, r.signer_id, r.role, r.signed_at), unchanged: r.doc_sha256 === current }));
+  send(res, 200, { signatures: signed.map(({ sig_value, signer_id, ...x }) => x), ackAt: ev.ack_at, objectionAt: ev.objection_at, objectionDeadline: ev.ack_at ? new Date(Date.parse(ev.ack_at) + 7 * 86400000).toISOString() : null });
 });
 
 // ---------- Serwer ----------

@@ -164,6 +164,7 @@
     const navBtns = pages.map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
     return `
       <div class="app">
+        <a class="skip" href="#view">Przejdź do treści</a>
         <aside class="side" aria-label="Menu główne">
           <div class="brand"><img class="side-logo" src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></div>
           <nav class="side-nav">${navBtns}</nav>
@@ -206,6 +207,8 @@
     bindShell();
     animateIn(root);
     if (S.view === "log") loadLog();
+    if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
+    if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
   }
   function go(view) {
@@ -285,7 +288,7 @@
         <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
         <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}"`)}</td></tr>`;
     }).join("");
-    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th>Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   // ---------- Przełożony ----------
@@ -307,6 +310,7 @@
         <section class="next card anim"><div class="next-ic" aria-hidden="true">${KK_ICON("arrow")}</div>
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
           <button class="btn" data-nav="evals">Przejdź do ocen</button></section>
+        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} <button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button></li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
           <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
@@ -314,7 +318,7 @@
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
         </div>
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th>Pracownik</th><th>Ocena</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th>Ocena</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
     if (v === "results") {
       const agg = d.aggregate;
@@ -346,7 +350,7 @@
     const head = `<div class="card wiz-head">
       <div class="row"><div class="who-row">${avatar(c.empAvatar, c.empName, "av av-lg")}<div><h2>${esc(TYP[c.typ])}</h2><div class="muted">${first(c.empName)} · ${esc(c.periodFrom || "")} – ${esc(c.periodTo || "")}</div></div></div>
         <div class="row">${pill(c.status)}<span class="saved" id="saved"></span></div></div>
-      <div class="wiz-progress"><div class="progress"><i style="width:${pct}%"></i></div><small>Krok ${idx + 1} z ${steps.length} · ${esc(st.label)}</small></div></div>`;
+      <div class="wiz-progress"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Postęp kreatora oceny"><i style="width:${pct}%"></i></div><small>Krok ${idx + 1} z ${steps.length} · ${esc(st.label)}</small></div></div>`;
     let body;
     if (st.id === "crit") body = critStep();
     else if (st.id === "talk") body = talkStep();
@@ -359,7 +363,7 @@
       <button class="btn g" data-wiz="${idx === 0 ? "close" : "prev"}">${KK_ICON("back")}<span>${prevLabel}</span></button>
       <span class="muted wiz-count">${idx + 1} / ${steps.length}</span>
       ${last ? "" : `<button class="btn" data-wiz="next" ${canNext ? "" : "disabled"}><span>Dalej</span>${KK_ICON("arrow")}</button>`}</nav>`;
-    return { html: head + body + nav, title: "Ocena", sub: st.id === "crit" ? "Wybierz, co będziemy oceniać" : st.id === "sum" ? "Sprawdź i złóż ocenę" : st.id === "talk" ? "Przygotuj rozmowę" : "Opisz zachowania, nie osobę", opts: { hidePageHead: true } };
+    return { html: `<h1 class="sr">Kreator oceny</h1>` + head + body + nav, title: "Ocena", sub: st.id === "crit" ? "Wybierz, co będziemy oceniać" : st.id === "sum" ? "Sprawdź i złóż ocenę" : st.id === "talk" ? "Przygotuj rozmowę" : "Opisz zachowania, nie osobę", opts: { hidePageHead: true } };
   }
   function bindWizard() {
     document.querySelectorAll("[data-wiz]").forEach(b => b.addEventListener("click", () => {
@@ -452,6 +456,7 @@
     ${c.status === "submitted" ? `<div class="card"><h2>Po rozmowie</h2><p class="muted">Zapisz wnioski rozwojowe i oznacz ocenę jako omówioną.</p>
       <label class="f" for="devN">Wnioski rozwojowe</label><textarea id="devN">${esc(c.data.dev || "")}</textarea>
       <button class="btn" style="margin-top:12px" data-act="discussEval">Oznacz jako omówioną</button></div>` : ""}
+    ${c.status !== "draft" ? `<div class="card" id="sigBox"><h2>Podpisy i zapoznanie</h2><p class="muted">Ładowanie…</p></div>` : ""}
     ${c.status === "discussed" ? `<div class="note">Ocena omówiona. Wnioski rozwojowe: ${esc(c.data.dev || "—")}</div>` : ""}`;
   }
   function docLinks(id) {
@@ -473,6 +478,7 @@
       <div class="grid two"><div>${radar(scores)}</div><div>${scoreBars(scores)}</div></div></div>
       ${items}
       ${e.data.dev ? `<div class="card"><h2>Wnioski rozwojowe</h2><p>${esc(e.data.dev)}</p></div>` : ""}
+      <div class="card" id="sigBox"><h2>Podpisy i zapoznanie</h2><p class="muted">Ładowanie…</p></div>
       <div class="card">${docLinks(e.id)}</div>
       <div class="btns"><button class="btn g" data-nav="evals">${KK_ICON("back")}<span>Wróć do listy</span></button></div>`;
   }
@@ -507,11 +513,36 @@
       S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
     } catch (e) { toast(e.message); }
   }
+  // Podpisy (mock) i zapoznanie z oceną – stan z serwera
+  async function loadSigs(id, status) {
+    const box = $("#sigBox"); if (!box) return;
+    try {
+      const r = await api("GET", `/api/evals/${id}/signatures`);
+      const rows = r.signatures.map(g => `<tr><td>${g.role === "przelozony" ? "Podpis oceniającego" : "Zapoznanie ocenianego"}</td><td>${esc(g.name)}</td><td>${esc(g.signed_at.slice(0, 16).replace("T", " "))}</td><td><span class="tag ${g.valid && g.unchanged ? "ok" : "bad"}">${g.valid ? (g.unchanged ? "weryfikacja OK" : "treść zmieniona") : "błąd podpisu"}</span></td></tr>`).join("");
+      const isMgr = S.user.role === "przelozony";
+      const hasMgrSig = r.signatures.some(g => g.role === "przelozony");
+      const ackDone = !!r.ackAt;
+      const deadlinePassed = r.objectionDeadline && Date.now() > Date.parse(r.objectionDeadline);
+      box.innerHTML = `<h2>Podpisy i zapoznanie</h2>
+        <p class="muted">Podpis symulowany (mock) do czasu integracji z podpisem kwalifikowanym lub zaufanym.</p>
+        ${rows ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Osoba</th><th scope="col">Czas</th><th scope="col">Weryfikacja</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">Brak podpisów.</p>`}
+        ${isMgr && status !== "draft" && !hasMgrSig ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="signEval" data-id="${id}">Podpisz ocenę (symulacja)</button></div>` : ""}
+        ${!isMgr ? `<p><b>Zapoznanie:</b> ${ackDone ? esc(r.ackAt.slice(0, 10)) : "jeszcze nie"}${r.objectionDeadline ? ` · <b>Termin na sprzeciw:</b> ${esc(r.objectionDeadline.slice(0, 10))}` : ""}${r.objectionAt ? ` · <b>Sprzeciw złożono:</b> ${esc(r.objectionAt.slice(0, 10))}` : ""}</p>
+          ${!ackDone ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="ackEval" data-id="${id}">Zapoznałem(-łam) się z oceną</button></div>` : ""}
+          ${ackDone && !r.objectionAt && !deadlinePassed ? `<div class="btns" style="justify-content:flex-start"><button class="btn g" data-act="objectionEval" data-id="${id}">Złóż sprzeciw</button></div>` : ""}
+          ${r.objectionAt ? `<p class="note warn">Sprzeciw został złożony. Przełożony rozpatrzy go zgodnie z procedurą.</p>` : ""}` : ""}`;
+      box.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => act(b.dataset.act, b, e)));
+      animateIn(box);
+    } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(e.message)}</p>`; }
+  }
   async function loadLog() {
     const b = $("#logBody"); if (!b) return;
     try {
       const r = await api("GET", "/api/audit");
-      b.innerHTML = r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Zdarzenie</th><th>Cel</th><th>Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`;
+      b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
+        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
+        + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? "AI lokalnie" : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
   }
   const actions = {
@@ -578,6 +609,28 @@
       });
     }),
     closeModal: () => closeModal(),
+    signEval: async b => {
+      try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano (symulacja)."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
+      catch (e) { toast(e.message); }
+    },
+    ackEval: async b => {
+      try { await api("POST", `/api/evals/${b.dataset.id}/acknowledge`); toast("Zapoznanie zarejestrowane."); loadSigs(+b.dataset.id, S.readEval?.status); }
+      catch (e) { toast(e.message); }
+    },
+    objectionEval: b => openModal(`
+      <h2>Sprzeciw wobec oceny</h2>
+      <p class="muted">Sprzeciw można złożyć w terminie 7 dni od zapoznania się z oceną (art. 83 ust. 1 ustawy o służbie cywilnej). Opisz powód.</p>
+      <form id="objForm" novalidate>
+        <label class="f" for="objText">Uzasadnienie sprzeciwu</label>
+        <textarea id="objText" required minlength="10" maxlength="3000"></textarea>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Złóż sprzeciw</button></div>
+      </form>`, () => {
+      $("#objForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        try { await api("POST", `/api/evals/${b.dataset.id}/objection`, { text: $("#objText").value }); closeModal(); toast("Sprzeciw złożony."); loadSigs(+b.dataset.id, S.readEval?.status); }
+        catch (ex) { toast(ex.message); }
+      });
+    }),
   };
   function act(name, el) {
     if (!actions[name]) return;
@@ -592,6 +645,7 @@
     m.querySelector("input")?.focus();
   }
   function closeModal() { document.getElementById("modal")?.remove(); }
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
   // Zdarzenia formularzy w kreatorze i celach
   document.addEventListener("change", async e => {

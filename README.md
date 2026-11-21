@@ -79,3 +79,11 @@ npm install
 Nazwa urzędu w nagłówku: ustaw zmienną `KK_UNIT`, np. `KK_UNIT="Ministerstwo Cyfryzacji" node server.mjs`. Bez niej dokument używa nazwy działu przełożonego.
 
 Ograniczenia: arkusz pierwszej oceny nie zawiera jeszcze daty nawiązania stosunku pracy ani rozmowy wstępnej. Ustalenia poziomów dla pierwszej oceny (3/5/7 pkt) wymagają weryfikacji z przepisami 2015.
+
+## Zgodność, dostępność, AI Act (stan prototypu)
+
+- Macierz wymagań: [docs/zgodnosc-regulacje.md](docs/zgodnosc-regulacje.md). Ocena ryzyka AI: [docs/ai-act-ocena-ryzyka.md](docs/ai-act-ocena-ryzyka.md). Szkic DPIA: [docs/dpia-szkic.md](docs/dpia-szkic.md). Deklaracja dostępności (szkic): [docs/deklaracja-dostepnosci.md](docs/deklaracja-dostepnosci.md).
+- **Podpis (mock):** przełożony podpisuje złożoną ocenę, pracownik rejestruje zapoznanie. Podpis to SHA-256 treści oceny i HMAC z kluczem w `data/sign.key` (nie w repo). Weryfikacja w API i w PDF/XML. Nie jest to podpis kwalifikowany.
+- **Sprzeciw:** pracownik może złożyć sprzeciw w 7 dni od zapoznania (art. 83 ust. 1). Po terminie serwer go odrzuca. Przełożony widzi alert.
+- **Dziennik:** każdy wpis ma skrót SHA-256 poprzedniego. Widok dziennika pokazuje, czy łańcuch jest zgodny.
+- **AI:** każda podpowiedź jest zapisana w tabeli `ai_log` (skrót wejścia, treść wyjścia, źródło). Podpowiedzi nie zmieniają ocen.
