@@ -51,6 +51,7 @@ export class Client {
   get(url) { return this.req('GET', url); }
   post(url, body = {}) { return this.req('POST', url, body); }
   put(url, body = {}) { return this.req('PUT', url, body); }
+  patch(url, body = {}) { return this.req('PATCH', url, body); }
   async login(email, password = DEMO_PASS) {
     const r = await this.post('/api/login', { email, password });
     if (r.status !== 200) throw new Error(`Logowanie ${email}: ${r.status} ${r.text}`);

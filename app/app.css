@@ -331,3 +331,51 @@ input[type="checkbox"]:disabled:checked::after{border-color:#fff}
 /* Ikony kompetencji na zaznaczonym (granatowym) kafelku są białe, a nie granatowe */
 .choice:has(input:checked) .comp-ic,.choice:has(input:checked) .ic-svg{color:#fff}
 .choice:has(input:disabled) .comp-ic{color:var(--navy)}
+
+/* ---------- Panel pracownika: poprawki (start, cele, szczegóły oceny) ---------- */
+/* Przyciski w formularzach i oknach: obok siebie, wyrównane do prawej, równa wysokość */
+.btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;align-items:center;margin-top:20px}
+.btns .btn{min-width:120px}
+.modal .btns{border-top:1px solid var(--ln);padding-top:16px}
+@media(max-width:480px){.btns .btn{flex:1}}
+/* Karta „co dalej”: bez osobnej ikony strzałki – strzałka jest w przycisku */
+.next{gap:12px 24px}
+.next .btn{flex:none}
+.btn-next svg{transition:transform .2s}
+.btn-next:hover svg{transform:translateX(3px)}
+/* Kafelki: równe kolumny niezależnie od liczby kafelków, równa wysokość */
+.kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+@media(min-width:900px){.kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}}
+.kpi{display:flex;flex-direction:column;justify-content:space-between;gap:8px;min-height:104px}
+.kpi b .tag{font-family:var(--font-body);font-size:15px;padding:6px 12px}
+/* Data w formacie DD.MM.RRRR */
+.date-in{font-variant-numeric:tabular-nums;letter-spacing:.04em;max-width:200px}
+.date-in[aria-invalid="true"]{border-color:var(--bad)}
+.field-err{color:var(--bad);font-size:13px;min-height:1.2em;margin-top:4px}
+/* Kroki celu: postęp wynika z wykonanych kroków */
+.steps{list-style:none;margin:10px 0 6px;padding:0}
+.steps li{display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-top:1px solid var(--ln)}
+.steps li:first-child{border-top:0}
+.steps input{width:18px;height:18px;margin-top:3px;accent-color:var(--navy);flex:none}
+.steps label{cursor:pointer}
+.steps .is-done label{color:var(--mu);text-decoration:line-through}
+.seg{display:flex;gap:4px;margin:8px 0 4px}
+.seg i{flex:1;height:8px;background:var(--ln)}
+.seg i.on{background:var(--navy)}
+.step-rows{display:grid;gap:8px}
+.step-row{display:flex;gap:8px}
+.step-row input{flex:1}
+.goal .row+.muted{margin-top:2px}
+/* Szczegóły kompetencji w ocenie */
+details.comp{border:1px solid var(--ln);background:var(--card);margin-bottom:12px}
+details.comp>summary{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none}
+details.comp>summary::-webkit-details-marker{display:none}
+details.comp>summary .h-comp{margin:0;flex:1}
+details.comp>summary .more{font-size:14px;color:var(--navy);font-weight:700;white-space:nowrap}
+details.comp>summary .more::after{content:" ▾"}
+details.comp[open]>summary .more::after{content:" ▴"}
+details.comp>.comp-body{padding:0 16px 16px;border-top:1px solid var(--ln)}
+.comp-body h4{margin:16px 0 6px;font-size:15px}
+.ev-list{list-style:none;padding:0;margin:0}
+.ev-list li{padding:8px 0;border-top:1px solid var(--ln);font-size:14px}
+.ev-list li:first-child{border-top:0}

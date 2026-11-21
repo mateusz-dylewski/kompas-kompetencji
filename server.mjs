@@ -120,6 +120,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS kickoffs(id INTEGER PRIMARY KEY, employee_id
 // Ankieta przygotowania do rozmowy (1–5): bez identyfikatora osoby i oceny – tylko do zbiorczych metryk (K_MIN przełożonych)
 db.exec(`CREATE TABLE IF NOT EXISTS prep_survey(id INTEGER PRIMARY KEY, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), month TEXT NOT NULL)`);
 try { db.exec('ALTER TABLE evals ADD COLUMN survey_done INTEGER NOT NULL DEFAULT 0'); } catch (_) { /* już istnieje */ }
+// Cele SMART: postęp z kroków (sprawdzalnych), a nie z suwaka – [{ t, done }]; progress = odsetek wykonanych kroków
+try { db.exec("ALTER TABLE goals ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* już istnieje */ }
 
 // Dziennik: pieczęć HMAC każdego wpisu (klucz spoza bazy) i blokada UPDATE/DELETE na poziomie bazy
 try { db.exec('ALTER TABLE audit ADD COLUMN mac TEXT'); } catch (_) { /* już istnieje */ }
@@ -251,8 +253,13 @@ function seed() {
   });
   seedEvidence(mgr, emps, rnd);
   seedRhythm(mgr, emps);
-  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,created) VALUES(?,?,?,?,?,?,?,?,?)');
-  emps.forEach((eid, i) => insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', i % 3 === 0 ? 1 : 0, 20 + i * 12, now()));
+  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
+  emps.forEach((eid, i) => {
+    const doneN = i % 3 === 0 ? STEPS.length : i % STEPS.length;
+    const steps = STEPS.map((t, si) => ({ t, done: si < doneN }));
+    insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), now());
+  });
 }
 // Dowody demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
@@ -742,7 +749,9 @@ route('GET', '/api/dashboard', async (req, res, u) => {
   if (u.role === 'pracownik') {
     const evals = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status!='draft' ORDER BY updated DESC").all(u.id).map(evalRow);
     const latest = evals[0] || null;
-    const goals = db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(u.id);
+    const goals = goalsOf(u.id);
+    // Plan rozwoju: wnioski z ostatniej oceny, w której przełożony je zapisał (zwykle po rozmowie oceniającej)
+    const devEval = evals.find(e => (e.data?.dev || '').trim());
     const manager = u.manager_id ? db.prepare('SELECT name FROM users WHERE id=?').get(u.manager_id) : null;
     // § 6 rozporządzenia: oceniany zna kryteria i termin sporządzenia oceny także przed jej złożeniem (bez poziomów)
     const upcoming = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status='draft' ORDER BY id").all(u.id).map(e => {
@@ -754,7 +763,9 @@ route('GET', '/api/dashboard', async (req, res, u) => {
       role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue, dueReason: tc.dueReason, kickoff: kickoffRow(latestKickoff(u.id)),
       evals: evals.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, updated: e.updated })),
       latestScores: latest ? scoreEval(latest) : null,
-      latestDev: latest?.data?.dev || '',
+      latestDev: devEval?.data?.dev || '',
+      latestDevEval: devEval ? { id: devEval.id, typ: devEval.typ, status: devEval.status, periodFrom: devEval.period_from, periodTo: devEval.period_to } : null,
+      latestEvalId: latest?.id ?? null,
       goals,
     });
   }
@@ -1014,22 +1025,54 @@ route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
 });
 
 // Cele SMART (pracownik)
-route('GET', '/api/goals', async (req, res, u) => send(res, 200, { goals: db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(u.id) }));
+// Cel SMART z krokami: każdy krok jest sprawdzalny (wykonany albo nie), postęp liczy się sam – nie trzeba go „dostrajać”.
+// Cel bez kroków (sprzed tej zmiany) ma tylko stan zrealizowany / w toku.
+const GOAL_STEPS_MAX = 8, GOAL_YEARS_MAX = 5;
+const goalRow = g => { const steps = JSON.parse(g.steps || '[]'); return { ...g, steps, done: !!g.done, stepsDone: steps.filter(x => x.done).length }; };
+const goalProgress = steps => (steps.length ? Math.round(steps.filter(x => x.done).length / steps.length * 100) : null);
+const goalsOf = uid => db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(uid).map(goalRow);
+const stepText = t => str(t, 150);
+route('GET', '/api/goals', async (req, res, u) => send(res, 200, { goals: goalsOf(u.id) }));
 route('POST', '/api/goals', async (req, res, u) => {
   const b = await readJson(req);
-  const g = ['s', 'm', 'a', 'r'].map(k => str(b[k], 200));
-  const t = str(b.t, 10);
-  if (g.some(x => !x) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) return fail(res, 400, 'Uzupełnij wszystkie pola SMART.');
-  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,created) VALUES(?,?,?,?,?,?,0,0,?)').run(u.id, ...g, t, now()).lastInsertRowid;
-  send(res, 201, { id });
+  const errors = {};
+  const g = {};
+  for (const [k, label] of [['s', 'Konkretnie'], ['m', 'Mierzalnie'], ['a', 'Osiągalnie'], ['r', 'Istotnie']]) { g[k] = str(b[k], 200); if (!g[k]) errors[k] = `Uzupełnij pole „${label}”.`; }
+  const t = typeof b.t === 'string' ? b.t : '';
+  const maxT = `${+today().slice(0, 4) + GOAL_YEARS_MAX}${today().slice(4)}`;
+  if (!isDate(t)) errors.t = 'Podaj prawdziwą datę (DD.MM.RRRR).';
+  else if (t < today()) errors.t = 'Termin nie może być w przeszłości.';
+  else if (t > maxT) errors.t = `Termin najpóźniej za ${GOAL_YEARS_MAX} lat.`;
+  const steps = Array.isArray(b.steps) ? b.steps.map(stepText).filter(Boolean) : [];
+  if (!steps.length) errors.steps = 'Dodaj co najmniej jeden krok – po nim widać postęp.';
+  else if (steps.length > GOAL_STEPS_MAX) errors.steps = `Najwyżej ${GOAL_STEPS_MAX} kroków.`;
+  if (Object.keys(errors).length) return invalid(res, errors, Object.values(errors)[0]);
+  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,0,0,?,?)')
+    .run(u.id, g.s, g.m, g.a, g.r, t, JSON.stringify(steps.map(x => ({ t: x, done: false }))), now()).lastInsertRowid;
+  send(res, 201, { id, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(id)) });
 });
+// { step: i, done } – oznacza krok; { addStep: "…" } – dopisuje krok; { done } – tylko dla celu bez kroków
 route('PATCH', '/api/goals/:id', async (req, res, u, p) => {
   const g = db.prepare('SELECT * FROM goals WHERE id=? AND user_id=?').get(p.id, u.id);
   if (!g) return fail(res, 404, 'Nie znaleziono celu.');
   const b = await readJson(req);
-  const progress = Math.min(100, Math.max(0, Number(b.progress ?? g.progress) | 0));
-  db.prepare('UPDATE goals SET done=?, progress=? WHERE id=?').run(b.done === undefined ? g.done : (b.done ? 1 : 0), progress, g.id);
-  send(res, 200, { ok: true });
+  const steps = JSON.parse(g.steps || '[]');
+  if (b.step !== undefined) {
+    const i = Number(b.step);
+    if (!Number.isInteger(i) || !steps[i]) return invalid(res, { step: 'Nie ma takiego kroku.' });
+    steps[i].done = !!b.done;
+  } else if (b.addStep !== undefined) {
+    const t = stepText(b.addStep);
+    if (!t) return invalid(res, { addStep: 'Opisz krok.' });
+    if (steps.length >= GOAL_STEPS_MAX) return invalid(res, { addStep: `Najwyżej ${GOAL_STEPS_MAX} kroków.` });
+    steps.push({ t, done: false });
+  } else if (b.done !== undefined) {
+    if (steps.length) return invalid(res, { done: 'Cel z krokami jest zrealizowany, gdy wszystkie kroki są wykonane.' });
+  } else return invalid(res, { step: 'Brak zmiany.' });
+  const progress = goalProgress(steps);
+  const done = steps.length ? progress === 100 : !!b.done;
+  db.prepare('UPDATE goals SET steps=?, done=?, progress=? WHERE id=?').run(JSON.stringify(steps), done ? 1 : 0, progress ?? (done ? 100 : 0), g.id);
+  send(res, 200, { ok: true, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(g.id)) });
 });
 
 // ---------- Dowody (wskaźniki z app/kompetencje.js) ----------
