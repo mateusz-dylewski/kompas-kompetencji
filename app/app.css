@@ -253,3 +253,12 @@ ul.c li{margin:4px 0}
 /* ---------- Dostępność ---------- */
 .skip{position:absolute;left:12px;top:-60px;background:var(--navy);color:#fff;padding:10px 14px;z-index:50;font-weight:700}
 .skip:focus{top:12px}
+
+/* Dowody, przegląd miesiąca, zestawienia */
+.modal .card{max-height:calc(100vh - 32px);overflow:auto}
+.ev-mini{margin-top:12px;padding-top:10px;border-top:1px dashed var(--ln)}
+.ev-mini ul{margin:6px 0 0}
+.err:empty{display:none}
+.dist{display:flex;gap:6px;flex-wrap:wrap}
+.dist span{border:1px solid var(--ln);padding:2px 8px;font-size:13px}
+fieldset.plain{border:0;padding:0;margin:12px 0 0}

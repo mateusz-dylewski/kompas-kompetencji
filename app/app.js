@@ -28,11 +28,13 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
+      ["evidence", "Dowody", "book", "Obserwacje zapisane przez przełożonego przy wskaźnikach"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
       ["evals", "Oceny", "clip", "Przygotuj ocenę krok po kroku"],
+      ["evidence", "Dowody", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
     ],
@@ -42,7 +44,8 @@
     przelozony: "Przełożony",
   };
 
-  const S = { user: null, ai: { ok: false }, dash: null, evals: [], goals: [], view: "home", cur: null, readEval: null, mandB: [], mandC: [], maxExtra: 3 };
+  const S = { user: null, ai: { ok: false }, dash: null, evals: [], goals: [], view: "home", cur: null, readEval: null, mandB: [], mandC: [], maxExtra: 3,
+    evFilter: { employeeId: "", competency: "", indicator: "", from: "", to: "" }, evidence: [] };
 
   // ---------- API ----------
   async function api(method, url, body) {
@@ -225,6 +228,7 @@
     bindShell();
     animateIn(root);
     if (S.view === "log") loadLog();
+    if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); }
     if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -294,6 +298,7 @@
         <button class="btn" data-act="addGoal">+ Nowy cel</button></div>
         <div class="card">${list}</div>`;
     }
+    if (v === "evidence") return evidencePage(false);
     // evals
     return evalsList(false);
   }
@@ -350,7 +355,95 @@
           <li>Zbiorcze wyniki służą do planowania szkoleń i mentoringu.</li>
           <li>Decyzje dotyczące pojedynczej osoby podejmuje przełożony, w rozmowie z tą osobą.</li></ul></div></div>`;
     }
+    if (v === "evidence") return evidencePage(true);
     return evalsList(true);
+  }
+
+  // ---------- Dowody: obserwacje przy wskaźnikach (sytuacja – działanie – rezultat) ----------
+  const IND = MODEL.flatMap(c => c.w.map((w, wi) => ({ key: c.k + "|" + wi, k: c.k, wi, text: w.w.replace(/\n/g, " ") })));
+  const indLabel = key => { const i = IND.find(x => x.key === key); return i ? `${nameOf(i.k)} – ${i.wi + 1}. ${i.text}` : key; };
+  const indOptions = (sel, onlyK) => MODEL.filter(c => !onlyK || c.k === onlyK).map(c => `<optgroup label="${esc(nameOf(c.k))}">${c.w.map((w, wi) => {
+    const key = c.k + "|" + wi; return `<option value="${esc(key)}" ${sel === key ? "selected" : ""}>${wi + 1}. ${esc(w.w.replace(/\n/g, " ").slice(0, 90))}</option>`; }).join("")}</optgroup>`).join("");
+  const compOptions = sel => MODEL.map(c => `<option value="${esc(c.k)}" ${sel === c.k ? "selected" : ""}>${esc(nameOf(c.k))}</option>`).join("");
+  const empOptions = sel => ((S.dash && S.dash.team) || []).map(t => `<option value="${t.id}" ${+sel === t.id ? "selected" : ""}>${first(t.name)}</option>`).join("");
+  const empName = id => first(((S.dash && S.dash.team) || []).find(t => t.id === +id)?.name || "");
+  const safeLink = u => (/^https?:\/\//i.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">link<span class="sr"> (otwiera się w nowej karcie)</span></a>` : "");
+  function evidenceTable(list, { editable, showEmp }) {
+    if (!list.length) return `<p class="muted">Brak dowodów dla wybranych filtrów.</p>`;
+    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Dowody (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
+      ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
+        <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
+        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
+      </tbody></table></div>`;
+  }
+  function evidencePage(isMgr) {
+    const f = S.evFilter;
+    return `<div class="card"><h2 id="evFiltH">Filtry</h2>
+      <form id="evFilter" class="grid two" aria-labelledby="evFiltH" novalidate>
+        ${isMgr ? `<div><label class="f" for="fEmp">Pracownik</label><select id="fEmp" name="employeeId"><option value="">Cały zespół</option>${empOptions(f.employeeId)}</select></div>` : ""}
+        <div><label class="f" for="fComp">Kompetencja</label><select id="fComp" name="competency"><option value="">Wszystkie</option>${compOptions(f.competency)}</select></div>
+        <div><label class="f" for="fInd">Wskaźnik</label><select id="fInd" name="indicator"><option value="">Wszystkie</option>${indOptions(f.indicator, f.competency)}</select></div>
+        <div><label class="f" for="fFrom">Od</label><input id="fFrom" name="from" type="date" value="${esc(f.from)}"></div>
+        <div><label class="f" for="fTo">Do</label><input id="fTo" name="to" type="date" value="${esc(f.to)}"></div>
+        <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button>
+          ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj dowód</button>` : ""}</div>
+      </form></div>
+      <div class="card"><h2>Dowody</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
+        <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>`;
+  }
+  async function loadEvidence() {
+    const box = $("#evList"); if (!box) return;
+    const q = new URLSearchParams(Object.entries(S.evFilter).filter(([, v]) => v)).toString();
+    try { S.evidence = (await api("GET", "/api/evidence" + (q ? "?" + q : ""))).evidence; box.innerHTML = evidenceTable(S.evidence, { editable: S.user.role === "przelozony", showEmp: S.user.role === "przelozony" }); bindActs(box); }
+    catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  }
+  function bindEvidencePage() {
+    const fm = $("#evFilter"); if (!fm) return;
+    fm.addEventListener("submit", e => { e.preventDefault(); const fd = new FormData(fm); Object.keys(S.evFilter).forEach(k => { S.evFilter[k] = fd.get(k) || ""; }); loadEvidence(); });
+    $("#fComp")?.addEventListener("change", e => { $("#fInd").innerHTML = `<option value="">Wszystkie</option>${indOptions("", e.target.value)}`; });
+  }
+  const fieldErrors = ex => (ex.data && ex.data.fields ? Object.values(ex.data.fields).join(" ") : ex.message);
+  // Formularz dowodu (dodanie / edycja). preset: { employeeId, indicator, date }, after: wywołanie po zapisie
+  function evidenceModal(ev, preset = {}, after) {
+    const v = ev || { employeeId: preset.employeeId || S.evFilter.employeeId || "", indicator: preset.indicator || "", date: preset.date || new Date().toISOString().slice(0, 10), situation: "", action: "", result: "", link: "", taskRef: "" };
+    const fixedEmp = !!ev || !!preset.employeeId;
+    openModal(`<h2 id="mTitle">${ev ? "Edytuj dowód" : "Nowy dowód"}</h2>
+      <p class="muted">Jedna obserwacja przy jednym wskaźniku: sytuacja, działanie, rezultat. Zmiana trafia do dziennika.</p>
+      <form id="evForm" novalidate>
+        ${fixedEmp ? `<p><b>Pracownik:</b> ${empName(v.employeeId) || esc(S.cur?.empName || "")}</p>` : `<label class="f" for="eEmp">Pracownik</label><select id="eEmp" required><option value="">Wybierz…</option>${empOptions(v.employeeId)}</select>`}
+        <label class="f" for="eDate">Data zdarzenia</label><input id="eDate" type="date" required value="${esc(v.date)}">
+        <label class="f" for="eInd">Wskaźnik</label><select id="eInd" required><option value="">Wybierz…</option>${indOptions(v.indicator)}</select>
+        <label class="f" for="eSit">Sytuacja</label><textarea id="eSit" required maxlength="1000">${esc(v.situation)}</textarea>
+        <label class="f" for="eAct">Działanie</label><textarea id="eAct" required maxlength="1000">${esc(v.action)}</textarea>
+        <label class="f" for="eRes">Rezultat</label><textarea id="eRes" required maxlength="1000">${esc(v.result)}</textarea>
+        <label class="f" for="eLink">Link do artefaktu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
+        <label class="f" for="eTask">ID zadania lub artefaktu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
+        <div id="evErr" role="alert" class="err"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
+      </form>`, () => {
+      $("#evForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const body = { date: $("#eDate").value, indicator: $("#eInd").value, situation: $("#eSit").value, action: $("#eAct").value, result: $("#eRes").value, link: $("#eLink").value.trim(), taskRef: $("#eTask").value };
+        try {
+          if (ev) await api("PUT", `/api/evidence/${ev.id}`, body);
+          else await api("POST", "/api/evidence", { ...body, employeeId: +(fixedEmp ? v.employeeId : $("#eEmp").value) });
+          closeModal(); toast(ev ? "Zapisano zmiany dowodu." : "Dodano dowód.");
+          if (after) await after(); else loadEvidence();
+        } catch (ex) { $("#evErr").textContent = fieldErrors(ex); }
+      });
+    }, "mTitle");
+  }
+  // Dowody przy wskaźniku w kreatorze oceny (okres oceny)
+  function evidenceMini(indKey) {
+    const c = S.cur, list = (c.evidence || []).filter(e => e.indicator === indKey);
+    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Dowód</button>` : "";
+    return `<div class="ev-mini"><div class="row"><span class="muted">Dowody z okresu oceny: <b>${list.length}</b></span>${add}</div>
+      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak dowodu. Przed złożeniem dodaj dowód albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
+  }
+  async function refreshWizardEvidence() {
+    const c = S.cur; if (!c) return;
+    const q = new URLSearchParams({ employeeId: c.employeeId, ...(c.periodFrom ? { from: c.periodFrom } : {}), ...(c.periodTo ? { to: c.periodTo } : {}) });
+    try { c.evidence = (await api("GET", "/api/evidence?" + q)).evidence; } catch (_) { c.evidence = []; }
   }
 
   // ---------- Kreator oceny: strony Dalej/Wstecz ----------
@@ -425,7 +518,8 @@
           <label><input type="radio" name="${esc(id)}" value="none" ${r.lvl === "none" ? "checked" : ""} data-rate="${esc(id)}"><span>Brak podstaw do oceny</span></label>
           </div>
           <label class="f" for="${exId}">Przykład z okresu</label>
-          <textarea id="${exId}" data-ex="${esc(id)}" placeholder="Sytuacja, działanie, rezultat">${esc(r.ex || "")}</textarea></div>`;
+          <textarea id="${exId}" data-ex="${esc(id)}" placeholder="Sytuacja, działanie, rezultat">${esc(r.ex || "")}</textarea>
+          ${evidenceMini(id)}</div>`;
       }).join("")}${isS2(c.typ, c.data) ? partialCard(comp) : ""}`;
   }
   // Ocena cząstkowa za kryterium – przyznaje oceniający (skala 1/3/5/7/9), system jej nie podpowiada
@@ -535,10 +629,11 @@
   async function openWizard(id) {
     const r = await api("GET", `/api/evals/${id}`);
     const e = r.eval;
-    S.cur = { id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to,
+    S.cur = { id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id, evidence: [],
       empName: r.employee?.name || "", empAvatar: r.employee?.avatar || null, data: e.data, criteria: e.data.criteria || [], ratings: e.data.ratings || {},
       step: 0, missing: r.missing || [], aiText: "", aiSource: "" };
     S.maxExtra = 3;
+    await refreshWizardEvidence();
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
   async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; }
@@ -645,6 +740,12 @@
       });
     }),
     closeModal: () => closeModal(),
+    addEvidence: b => {
+      if (S.view === "wizard" && S.cur) return evidenceModal(null, { employeeId: S.cur.employeeId, indicator: b.dataset.ind || "", date: S.cur.periodTo && S.cur.periodTo < new Date().toISOString().slice(0, 10) ? S.cur.periodTo : undefined },
+        async () => { await refreshWizardEvidence(); await refreshMissing(); render(); });
+      return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
+    },
+    editEvidence: b => { const ev = (S.evidence || []).find(x => x.id === +b.dataset.id); if (ev) evidenceModal(ev, {}, b.dataset.after === "month" ? () => loadMonth() : undefined); },
     signEval: async b => {
       try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano (symulacja)."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
       catch (e) { toast(e.message); }
@@ -672,15 +773,34 @@
     if (!actions[name]) return;
     Promise.resolve(actions[name](el)).catch(e => toast(e.message));
   }
-  function openModal(html, bind) {
+  const bindActs = root => root.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
+  let modalReturn = null;
+  function openModal(html, bind, labelledBy) {
+    const back = document.activeElement;
     closeModal();
+    modalReturn = back;
     const m = document.createElement("div"); m.className = "modal"; m.id = "modal"; m.setAttribute("role", "dialog"); m.setAttribute("aria-modal", "true");
     m.innerHTML = `<div class="card">${html}</div>`;
+    const h = labelledBy ? m.querySelector("#" + labelledBy) : m.querySelector("h2");
+    if (h) { h.id = h.id || "modalTitle"; m.setAttribute("aria-labelledby", h.id); }
     m.addEventListener("click", e => { if (e.target === m) closeModal(); });
-    document.body.appendChild(m); bind && bind();
-    m.querySelector("input")?.focus();
+    // Pułapka fokusu: Tab nie wychodzi poza okno dialogowe
+    m.addEventListener("keydown", e => {
+      if (e.key !== "Tab") return;
+      const f = [...m.querySelectorAll("button,input,select,textarea,a[href]")].filter(x => !x.disabled);
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    });
+    document.body.appendChild(m); bindActs(m); bind && bind();
+    m.querySelector("input,select,textarea")?.focus();
   }
-  function closeModal() { document.getElementById("modal")?.remove(); }
+  function closeModal() {
+    const m = document.getElementById("modal"); if (!m) return;
+    m.remove();
+    if (modalReturn && document.body.contains(modalReturn)) modalReturn.focus();
+    modalReturn = null;
+  }
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
   // Zdarzenia formularzy w kreatorze i celach

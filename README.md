@@ -51,6 +51,8 @@ Lokalnie masz model `orcarouter/Qwen3.8-27B-Uncensored:iq2_m`. Nie jest on domy�
 - **RODO:** minimalizacja danych. Prompt do modelu nie zawiera imion ani nazwisk, tylko kompetencje, poziomy i uzasadnienia. Dziennik zdarzeń pozwala sprawdzić dostęp i zmiany.
 - **AI Act (UE 2024/1689):** wspieranie ocen pracowników w zatrudnieniu może zakwalifikować system jako wysokiego ryzyka (załącznik III). Dlatego AI tylko proponuje (pytania, przeformułowania, działania rozwojowe). Nie wystawia ocen, a decyzję zawsze podejmuje człowiek. Przed wdrożeniem wymagana jest analiza prawna.
 - **Agregaty zespołu:** wyniki zbiorcze pokazywane dopiero od 5 złożonych ocen.
+- **Dziennik zmian:** każda zmiana oceny, dowodu i feedbacku zapisuje autora, czas oraz poprzednią i nową wartość (`audit.prev_value`, `audit.new_value`, w łańcuchu skrótów SHA-256).
+- **Ocena oparta na dowodach:** oceniany wskaźnik bez dowodu z okresu oceny wymaga jawnej adnotacji „brak podstaw do oceny”.
 - **Dostępność:** cel WCAG 2.1 AA (dyrektywa (UE) 2019/882, ustawa o dostępności cyfrowej).
 - **Przed wdrożeniem:** DPIA, umowa powierzenia (art. 28 RODO), polityka prywatności, uwierzytelnianie zgodne z wymogami resortu (np. profil zaufany / mObywatel jako IdP), audyt bezpieczeństwa.
 
@@ -75,6 +77,20 @@ Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostę
 ### Migracja danych: schemat oceny 2
 
 Przy starcie serwer przenosi **szkice** ocen B/C bez pola `schema` do `schema: 2`: dodaje puste `partials` i usuwa ręcznie wpisany `wynik`. Oceniający musi wtedy przyznać oceny cząstkowe. Każdy taki szkic dostaje wpis `migrate_eval_schema2` w dzienniku. **Ocen złożonych nie zmieniamy**, bo ich treść jest podpisana skrótem. Ich oceny cząstkowe pozostają średnimi wskaźników, a wynik to ten wpisany przez oceniającego (`wynikSource: reczny_sprzed_migracji`).
+
+## Dowody (ekran „Dowody”)
+
+Dowód to jedna obserwacja przy jednym wskaźniku z `app/kompetencje.js` (klucz `KOMPETENCJA|nr`, ten sam co w ocenie). Składa się z daty, opisu sytuacji, działania i rezultatu, opcjonalnego linku do artefaktu (http/https) i ID zadania. Na tym etapie (MVP) dowody dodaje i edytuje przełożony. Pracownik widzi swoje dowody tylko do odczytu.
+
+| Metoda | Ścieżka | Opis |
+|---|---|---|
+| GET | `/api/evidence?employeeId=&indicator=&competency=&from=&to=&month=` | Lista z filtrami. Przełożony widzi swój zespół, pracownik tylko siebie. |
+| POST | `/api/evidence` | Dodanie dowodu (tylko przełożony, tylko dla swojego zespołu) |
+| PUT | `/api/evidence/:id` | Edycja dowodu (tylko pola przesłane w żądaniu) |
+
+Kody błędów: `400` nieprawidłowe dane (`fields`: pole → komunikat, także nieznane pola), `403` brak uprawnień, `404` brak zasobu lub osoba spoza zespołu, `409` konflikt stanu, `422` ocena niekompletna. Dodanie i edycja dowodu trafiają do dziennika z poprzednią i nową wartością.
+
+**Walidacja przed złożeniem oceny okresowej:** każdy oceniany wskaźnik potrzebuje co najmniej jednego dowodu z okresu oceny albo jawnej adnotacji „brak podstaw do oceny”. W kreatorze przy każdym wskaźniku widać dowody z okresu i przycisk „+ Dowód”.
 
 ## Ograniczenia prototypu
 

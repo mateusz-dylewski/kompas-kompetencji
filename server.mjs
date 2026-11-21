@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NO
   role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
 CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
   model TEXT, input_sha256 TEXT, output_text TEXT, source TEXT, at TEXT NOT NULL);
+-- Dowody: obserwacja zachowania przy konkretnym wskaźniku (sytuacja – działanie – rezultat)
+CREATE TABLE IF NOT EXISTS evidence(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL,
+  date TEXT NOT NULL, indicator TEXT NOT NULL, situation TEXT NOT NULL, action TEXT NOT NULL, result TEXT NOT NULL,
+  link TEXT, task_ref TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS evidence_emp_date ON evidence(employee_id, date);
 `);
 // Klucz do podpisów mockowych (lokalny, w data/ – nie trafia do repo)
 const KEY_FILE = path.join(DATA_DIR, 'sign.key');
@@ -59,6 +64,8 @@ const SIGN_KEY = fs.readFileSync(KEY_FILE, 'utf8').trim();
 const MODEL = JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'kompetencje.js'), 'utf8')
   .replace(/^\s*window\.KK_MODEL\s*=\s*/, '').replace(/;\s*$/, ''));
 const MODEL_KEYS = new Set(MODEL.map(c => c.k));
+// Wskaźniki: klucz „KOMPETENCJA|nr” (ten sam co w data.ratings oceny)
+const INDICATORS = new Map(MODEL.flatMap(c => c.w.map((w, wi) => [`${c.k}|${wi}`, { k: c.k, wi, text: w.w }])));
 // Kryteria obowiązkowe wg rozporządzenia z 4.04.2016: Arkusz B (kierowanie) i Arkusz C (pozostałe stanowiska)
 const MAND_B = ['ZARZĄDZANIE LUDŹMI', 'PODEJMOWANIE DECYZJI', 'ORGANIZACJA PRACY', 'WSPÓŁPRACA', 'KOMUNIKACJA'];
 const MAND_C = ['WYKORZYSTYWANIE WIEDZY', 'RZETELNOŚĆ', 'ORGANIZACJA PRACY', 'WSPÓŁPRACA', 'KOMUNIKACJA'];
@@ -141,11 +148,37 @@ function seed() {
     }
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
+  seedEvidence(mgr, emps, rnd);
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,created) VALUES(?,?,?,?,?,?,?,?,?)');
   emps.forEach((eid, i) => insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', i % 3 === 0 ? 1 : 0, 20 + i * 12, now()));
 }
-seed();
-migrateEvalSchema();
+// Dowody demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
+function seedEvidence(mgr, emps, rnd) {
+  const SIT = ['Przygotowanie raportu kwartalnego dla kierownictwa', 'Odpowiedź na pismo innej komórki organizacyjnej', 'Wdrożenie nowej procedury obiegu dokumentów',
+    'Spotkanie projektowe z zespołem wykonawcy', 'Obsługa wniosku o udostępnienie informacji publicznej', 'Aktualizacja rejestru umów'];
+  const ACT = ['Sprawdzono wymagania i uzgodniono harmonogram z osobami zależnymi', 'Przygotowano wersję roboczą i zebrano uwagi przed terminem',
+    'Zgłoszono ryzyko opóźnienia z dwudniowym wyprzedzeniem i zaproponowano zmianę kolejności prac', 'Ustalenia podsumowano na piśmie i rozesłano uczestnikom'];
+  const RES = ['Dokument przekazany w terminie, bez poprawek merytorycznych', 'Termin dotrzymany, uwagi uwzględnione w jednej rundzie',
+    'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych'];
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+  const add = (eid, date, ind) => ins.run(eid, mgr, date, ind, pick(SIT), pick(ACT), pick(RES), null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+  // Szkic oceny (ostatni pracownik): dowody do prawie wszystkich wskaźników – dwa celowo bez dowodu (demo walidacji)
+  const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
+  if (draft) {
+    const inds = Object.keys(JSON.parse(draft.data).ratings || {});
+    inds.slice(0, -2).forEach((ind, i) => add(draft.employee_id, `2026-0${1 + (i % 6)}-${String(5 + (i % 20)).padStart(2, '0')}`, ind));
+  }
+  // Ostatnie miesiące: kilka dowodów na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
+  const pool = [...INDICATORS.keys()].filter(k => MAND_C.some(m => k.startsWith(m)));
+  const months = [-2, -1, 0].map(d => { const t = new Date(); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() + d); return t.toISOString().slice(0, 7); });
+  emps.slice(0, 4).forEach(eid => months.forEach(m => {
+    for (let i = 0; i < 3; i++) {
+      const day = Math.min(1 + Math.floor(rnd() * 27), m === today().slice(0, 7) ? Math.max(1, +today().slice(8, 10)) : 28);
+      add(eid, `${m}-${String(day).padStart(2, '0')}`, pick(pool));
+    }
+  }));
+}
 
 // Migracja kształtu danych oceny do wersji 2 (oceny cząstkowe B/C przyznaje oceniający, wynik wyliczany).
 // Szkice B/C bez pola schema dostają schema=2 i puste data.partials – oceniający musi przyznać oceny cząstkowe.
@@ -187,6 +220,15 @@ const readJson = req => new Promise((ok, bad) => {
   req.on('end', () => { try { ok(b ? JSON.parse(b) : {}); } catch { bad(new Error('bad_json')); } });
 });
 const str = (x, max = 500) => (typeof x === 'string' ? x.trim().slice(0, max) : '');
+const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v);
+const isMonth = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+const today = () => now().slice(0, 10);
+const monthEnd = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
+const qs = req => new URL(req.url, 'http://x').searchParams;
+// Pracownik z zespołu przełożonego (null, jeśli nie należy do zespołu)
+const teamMember = (u, empId) => (u.role === 'przelozony' ? db.prepare("SELECT id,name FROM users WHERE id=? AND manager_id=? AND role='pracownik'").get(Number(empId), u.id) || null : null);
+// Walidacja: zwraca { value, errors }; errors to mapa pole → komunikat (kod 400 „Nieprawidłowe dane.”)
+const invalid = (res, errors, msg = 'Nieprawidłowe dane.') => fail(res, 400, msg, { fields: errors });
 const publicUser = u => u && ({ id: u.id, email: u.email, name: u.name, role: u.role, position: u.position, unit: u.unit, avatar: u.avatar || null });
 
 const parseData = ev => (typeof ev.data === 'string' ? JSON.parse(ev.data || '{}') : (ev.data || {}));
@@ -232,6 +274,12 @@ function sanitizeData(input, typ) {
   }
   return out;
 }
+// Liczba dowodów per wskaźnik w okresie (puste daty = bez ograniczenia)
+function evidenceCounts(empId, from, to) {
+  const rows = db.prepare(`SELECT indicator, COUNT(*) n FROM evidence WHERE employee_id=? ${isDate(from) ? 'AND date>=?' : ''} ${isDate(to) ? 'AND date<=?' : ''} GROUP BY indicator`)
+    .all(empId, ...[from, to].filter(isDate));
+  return Object.fromEntries(rows.map(r => [r.indicator, r.n]));
+}
 // Walidacja do złożenia oceny
 function missingForSubmit(ev) {
   const data = parseData(ev);
@@ -244,6 +292,18 @@ function missingForSubmit(ev) {
       else if (r.lvl !== 'none' && !(r.ex || '').trim()) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez uzasadnienia`);
     });
     if (isSchema2(ev.typ, data) && !PTS5.includes(Number(data.partials?.[k]?.pts))) miss.push(`${comp.k}: brak oceny cząstkowej (1/3/5/7/9 pkt)`);
+  }
+  // Ocena okresowa: każdy oceniany wskaźnik ma co najmniej jeden dowód z okresu oceny
+  // albo jawną adnotację „brak podstaw do oceny” (lvl = 'none')
+  if (ev.typ !== 'pierwsza') {
+    const counts = evidenceCounts(ev.employee_id, ev.period_from, ev.period_to);
+    for (const k of data.criteria || []) {
+      const comp = MODEL.find(c => c.k === k);
+      comp.w.forEach((w, wi) => {
+        const r = data.ratings?.[`${k}|${wi}`];
+        if (r && r.lvl !== 'none' && !counts[`${k}|${wi}`]) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez dowodu z okresu oceny (dodaj dowód albo zaznacz „brak podstaw do oceny”)`);
+      });
+    }
   }
   if (ev.typ !== 'pierwsza') {
     const res = computeResults({ ...ev, data }, MODEL);
@@ -289,6 +349,10 @@ function evalSummaryForAI(ev) {
   return lines.join('\n');
 }
 const RULES = `Zasady: nie wystawiasz ocen i nie podejmujesz decyzji – to należy do przełożonego. Nie oceniasz osoby, tylko zachowania. Odpowiadasz po polsku, zwięźle, w punktach. Nie podajesz imion ani danych osobowych.`;
+
+// Dane demo i migracje (po definicji funkcji pomocniczych)
+seed();
+migrateEvalSchema();
 
 // ---------- Trasy API ----------
 const routes = [];
@@ -499,6 +563,82 @@ route('PATCH', '/api/goals/:id', async (req, res, u, p) => {
   const progress = Math.min(100, Math.max(0, Number(b.progress ?? g.progress) | 0));
   db.prepare('UPDATE goals SET done=?, progress=? WHERE id=?').run(b.done === undefined ? g.done : (b.done ? 1 : 0), progress, g.id);
   send(res, 200, { ok: true });
+});
+
+// ---------- Dowody (wskaźniki z app/kompetencje.js) ----------
+const EVIDENCE_FIELDS = ['employeeId', 'date', 'indicator', 'situation', 'action', 'result', 'link', 'taskRef'];
+function sanitizeEvidence(b, partial = false) {
+  const errors = {}, v = {};
+  const need = (k, ok, msg) => { if (b[k] === undefined && partial) return false; if (!ok) errors[k] = msg; return ok; };
+  for (const k of Object.keys(b || {})) if (!EVIDENCE_FIELDS.includes(k)) errors[k] = 'Nieznane pole.';
+  if (need('date', isDate(b.date) && b.date <= today(), 'Podaj datę zdarzenia (RRRR-MM-DD), nie późniejszą niż dziś.')) v.date = b.date;
+  if (need('indicator', INDICATORS.has(b.indicator), 'Wybierz wskaźnik z modelu kompetencji.')) v.indicator = b.indicator;
+  for (const [k, label] of [['situation', 'sytuację'], ['action', 'działanie'], ['result', 'rezultat']]) {
+    const t = str(b[k], 1000);
+    if (need(k, t.length >= 3, `Opisz ${label} (min. 3 znaki).`)) v[k] = t;
+  }
+  if (b.link !== undefined && b.link !== '' && b.link !== null) {
+    let ok = false; try { const url = new URL(String(b.link)); ok = ['http:', 'https:'].includes(url.protocol) && String(b.link).length <= 500; } catch { /* zły adres */ }
+    if (!ok) errors.link = 'Link musi być adresem http(s) (maks. 500 znaków).'; else v.link = String(b.link);
+  } else if (b.link !== undefined) v.link = null;
+  if (b.taskRef !== undefined) v.task_ref = str(b.taskRef, 100) || null;
+  return { value: v, errors };
+}
+const evidenceRow = r => r && ({ id: r.id, employeeId: r.employee_id, evaluatorId: r.evaluator_id, date: r.date, indicator: r.indicator,
+  competency: INDICATORS.get(r.indicator)?.k || null, indicatorText: INDICATORS.get(r.indicator)?.text || '', situation: r.situation, action: r.action,
+  result: r.result, link: r.link, taskRef: r.task_ref, created: r.created, updated: r.updated });
+const evidenceAuditView = r => ({ date: r.date, indicator: r.indicator, situation: r.situation, action: r.action, result: r.result, link: r.link ?? null, task_ref: r.task_ref ?? null });
+// Filtr: employeeId, indicator (KOMP|nr) lub competency (KOMP), from/to (RRRR-MM-DD) lub month (RRRR-MM)
+function evidenceQuery(u, q) {
+  const where = [], args = [];
+  if (u.role === 'pracownik') { where.push('employee_id=?'); args.push(u.id); }
+  else {
+    where.push('employee_id IN (SELECT id FROM users WHERE manager_id=?)'); args.push(u.id);
+    if (q.get('employeeId')) { where.push('employee_id=?'); args.push(Number(q.get('employeeId'))); }
+  }
+  if (q.get('indicator')) { where.push('indicator=?'); args.push(q.get('indicator')); }
+  if (q.get('competency')) { where.push("substr(indicator,1,length(?)+1)=?||'|'"); args.push(q.get('competency'), q.get('competency')); }
+  const month = q.get('month');
+  const from = isMonth(month) ? `${month}-01` : q.get('from'), to = isMonth(month) ? monthEnd(month) : q.get('to');
+  if (isDate(from)) { where.push('date>=?'); args.push(from); }
+  if (isDate(to)) { where.push('date<=?'); args.push(to); }
+  return db.prepare(`SELECT * FROM evidence WHERE ${where.join(' AND ')} ORDER BY date DESC, id DESC LIMIT 1000`).all(...args);
+}
+route('GET', '/api/evidence', async (req, res, u) => {
+  const q = qs(req);
+  for (const [k, ok] of [['from', isDate], ['to', isDate], ['month', isMonth]]) if (q.get(k) && !ok(q.get(k))) return invalid(res, { [k]: 'Nieprawidłowy format daty.' });
+  if (q.get('indicator') && !INDICATORS.has(q.get('indicator'))) return invalid(res, { indicator: 'Nieznany wskaźnik.' });
+  send(res, 200, { evidence: evidenceQuery(u, q).map(evidenceRow) });
+});
+route('POST', '/api/evidence', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody dodaje przełożony.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { value: v, errors } = sanitizeEvidence(b);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const at = now();
+  const id = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, v.date, v.indicator, v.situation, v.action, v.result, v.link ?? null, v.task_ref ?? null, at, at).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM evidence WHERE id=?').get(id);
+  audit(u.id, 'create_evidence', `evidence:${id}`, null, { employeeId: emp.id, ...evidenceAuditView(row) });
+  send(res, 201, { evidence: evidenceRow(row) });
+});
+route('PUT', '/api/evidence/:id', async (req, res, u, p) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody edytuje przełożony.');
+  const cur = db.prepare('SELECT * FROM evidence WHERE id=?').get(p.id);
+  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono dowodu.');
+  const b = await readJson(req);
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść dowodu na inną osobę.' });
+  const { value: v, errors } = sanitizeEvidence(b, true);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const next = { ...cur, ...v };
+  const ch = diffObj(evidenceAuditView(cur), evidenceAuditView(next));
+  if (!ch) return send(res, 200, { evidence: evidenceRow(cur), changed: false });
+  db.prepare('UPDATE evidence SET date=?,indicator=?,situation=?,action=?,result=?,link=?,task_ref=?,updated=? WHERE id=?')
+    .run(next.date, next.indicator, next.situation, next.action, next.result, next.link ?? null, next.task_ref ?? null, now(), cur.id);
+  audit(u.id, 'update_evidence', `evidence:${cur.id}`, ch.prev, ch.next);
+  send(res, 200, { evidence: evidenceRow(db.prepare('SELECT * FROM evidence WHERE id=?').get(cur.id)), changed: true });
 });
 
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)
