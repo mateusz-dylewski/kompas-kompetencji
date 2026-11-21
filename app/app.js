@@ -39,8 +39,11 @@
       ["summary", "Zestawienie", "scale", "Liczby dowodów, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
+      ["settings", "Ustawienia", "spark", "Moduły spoza rozporządzenia – włącz lub wyłącz"],
     ],
   };
+  // Strony, które znikają z menu po wyłączeniu modułu (moduły spoza rozporządzenia)
+  const MODULE_OF = { evidence: "mod_evidence", summary: "mod_evidence", month: "mod_checkins" };
   const SUB = {
     pracownik: "Pracownik",
     przelozony: "Przełożony",
@@ -183,6 +186,7 @@
   async function load() {
     const me = await api("GET", "/api/me");
     S.user = me.user; S.ai = me.ai;
+    const st = await api("GET", "/api/settings"); S.modules = Object.fromEntries(st.modules.map(x => [x.key, x.on])); S.moduleList = st.modules;
     const m = await fetch("/api/model").then(r => r.json()); S.mandB = m.mandB || []; S.mandC = m.mandC || []; S.maxExtra = m.maxExtra || 3;
     await refreshData();
   }
@@ -191,7 +195,7 @@
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
     const aiPill = S.ai.ok ? `<span class="pill on" title="Model lokalny: ${esc(S.ai.model)}">AI lokalnie</span>` : `<span class="pill off" title="Uruchom Ollama, aby włączyć AI">Tryb reguł</span>`;
-    const navBtns = pages.map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
+    const navBtns = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false).map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
     return `
       <div class="app">
         <a class="skip" href="#view">Przejdź do treści</a>
@@ -343,6 +347,7 @@
 
   // ---------- Przełożony ----------
   function mgrPage(v) {
+    if (v === "settings") return settingsPage();
     const d = S.dash, c = d.counts;
     if (v === "home") {
       const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
@@ -367,6 +372,8 @@
           <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone</span></div>
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
         </div>
+        ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy). Reguła 6 miesięcy wymaga potwierdzenia prawnego.</p>
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(x.lastEval) : "—"}</td><td>${x.due ? esc(x.due) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
@@ -652,6 +659,15 @@
     } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
   }
 
+  function settingsPage() {
+    const mods = S.moduleList || [];
+    return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
+      <p class="muted">Dowody, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Dowody są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
+      <form id="setForm">${mods.map(m => `<label class="choice"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span></label>`).join("")}
+      <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
+      <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B i C), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
+  }
+
   // ---------- Kreator oceny: strony Dalej/Wstecz ----------
   function wizSteps() {
     const c = S.cur;
@@ -706,7 +722,7 @@
       <div class="crit-grid">${MODEL.map(m => {
         const dis = !isFirst && isMand(m.k, S.cur && S.cur.typ);
         return `<label class="choice"><input type="checkbox" data-crit="${esc(m.k)}" ${c.criteria.includes(m.k) ? "checked" : ""} ${dis ? "disabled" : ""}>
-          <span class="crit-h">${compIc(m.k)}<span><b>${esc(nameOf(m.k))}</b>${!isFirst && isMand(m.k, S.cur && S.cur.typ) ? ' <span class="tag ok">obowiązkowe</span>' : ""}<br><span class="muted">${m.w.length} wskaźników</span></span></span></label>`;
+          <span class="crit-h">${compIc(m.k)}<span><b>${esc(nameOf(m.k))}</b>${!isFirst && isMand(m.k, S.cur && S.cur.typ) ? ' <span class="tag">obowiązkowe</span>' : ""}<br><span class="muted">${m.w.length} wskaźników</span></span></span></label>`;
       }).join("")}</div></div>`;
   }
   function rateOne(comp) {
@@ -745,6 +761,20 @@
     const list = (S.cur.quarterly || []).filter(p => p.competency === k);
     return list.length ? `<div class="ev-mini"><span class="muted">Oceny cząstkowe kwartalne w okresie oceny:</span><ul class="c">${list.map(p => `<li>${partialText(p)}</li>`).join("")}</ul></div>` : "";
   }
+  // Podpowiedzi do przemyślenia przed spotkaniem: reguły z ocen, bez decyzji i bez oceny osoby
+  function prepPanel(c) {
+    const sc = scoreLocal(c);
+    const ranked = Object.entries(sc).filter(([, v]) => v.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
+    if (!ranked.length) return `<p class="muted">Podpowiedzi pojawią się po ocenieniu wskaźników.</p>`;
+    const low = ranked.slice(0, 2), high = ranked.slice(-1);
+    const weakInd = k => (MODEL.find(m => m.k === k)?.w || []).map((w, wi) => ({ w: w.w, r: c.ratings[k + "|" + wi] })).filter(o => o.r && o.r.lvl !== "none" && o.r.lvl !== undefined && o.r.lvl <= 1);
+    return `<ul class="c">
+      ${low.map(([k, v]) => `<li><b>${esc(nameOf(k))}</b> (średnio ${fmt(v.avg)} pkt): zapytaj, co wpłynęło na ten wynik i jakich warunków brakowało.${weakInd(k).length ? ` Do omówienia: ${weakInd(k).slice(0, 2).map(o => `„${esc(o.w.slice(0, 60))}”`).join(", ")}.` : ""}</li>`).join("")}
+      ${high.map(([k]) => `<li><b>${esc(nameOf(k))}</b>: warto docenić konkretne działania i zapytać, jak je utrzymać.</li>`).join("")}
+      <li>Jeśli przy wskaźniku nie ma przykładu, zapytaj o sytuację z okresu zamiast zakładać brak działania.</li>
+    </ul>
+    <p class="note">To podpowiedzi do przemyślenia, nie ocena. Decyzję podejmujesz Ty, a rozmowa powinna opierać się na przykładach.</p>`;
+  }
   function talkStep() {
     const c = S.cur;
     const sc = scoreLocal(c);
@@ -755,8 +785,9 @@
       <p class="muted">Rozmowa jest ważniejsza niż ocena. Zacznij od tego, co się udało, potem omów obszary do rozwoju.</p>
       <div class="grid two"><div class="note"><b>Zacznij od</b><br>${esc(top)}</div><div class="note warn"><b>Omów</b><br>${esc(low)}</div></div>
       <div class="btns" style="justify-content:flex-start;margin-top:14px">
-        <button class="btn" data-act="aiTalk">Pytania do rozmowy (AI lokalnie)</button>
-        <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button></div>
+        ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiTalk">Pytania do rozmowy (AI lokalnie)</button>
+        <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
+      <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
       <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
       <p class="note">Model działa na Twoim komputerze, dane nie opuszczają urządzenia. To propozycja do przemyślenia. Ocenę wystawiasz Ty.</p></div>`;
   }
@@ -1011,6 +1042,11 @@
     addPartial: () => partialModal(null),
     editPartial: b => { const p = (S.monthPartials || []).find(x => x.id === +b.dataset.id); if (p) return partialModal(p); },
     editEvidence: b => { const ev = (S.evidence || []).find(x => x.id === +b.dataset.id); if (ev) evidenceModal(ev, {}, b.dataset.after === "month" ? () => loadMonth() : undefined); },
+    saveSettings: async () => {
+      const modules = Object.fromEntries([...document.querySelectorAll("[data-mod]")].map(cb => [cb.dataset.mod, cb.checked]));
+      try { await api("PUT", "/api/settings", { modules }); await load(); toast("Zapisano ustawienia."); render(); }
+      catch (e) { toast(e.message); }
+    },
     signEval: async b => {
       try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano (symulacja)."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
       catch (e) { toast(e.message); }

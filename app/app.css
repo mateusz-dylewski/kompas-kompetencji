@@ -263,3 +263,16 @@ ul.c li{margin:4px 0}
 .dist span{border:1px solid var(--ln);padding:2px 8px;font-size:13px}
 fieldset.plain{border:0;padding:0;margin:12px 0 0}
 .view:focus{outline:none}
+
+/* ---------- Pola wyboru: kwadratowe, zgodne z gov.pl (nie systemowe) ---------- */
+input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:22px;height:22px;min-width:22px;flex:none;margin:2px 0 0;padding:0;border:2px solid var(--navy);border-radius:0;background:#fff;display:inline-grid;place-content:center;cursor:pointer}
+input[type="checkbox"]:checked{background:var(--navy);border-color:var(--navy)}
+input[type="checkbox"]:checked::after{content:"";width:6px;height:11px;border:solid #fff;border-width:0 3px 3px 0;transform:rotate(45deg);margin-top:-2px}
+input[type="checkbox"]:disabled{border-color:#9aa3ad;background:#e4e7eb;cursor:not-allowed}
+input[type="checkbox"]:disabled:checked{background:#9aa3ad;border-color:#9aa3ad}
+input[type="checkbox"]:disabled:checked::after{border-color:#fff}
+/* Kryteria obowiązkowe: wyszarzone, nie do zmiany. Dodatkowe zaznaczone: niebieskie (jak aktywna pozycja menu). */
+.choice:has(input:disabled){background:#eef0f3;border-color:#c9ced6;color:var(--tx);cursor:not-allowed}
+.choice:has(input:disabled) .muted{color:var(--mu)}
+.choice:has(input:disabled) b{color:var(--tx)}
+.choice:has(input:disabled:checked){background:#e4e7eb;border-color:#9aa3ad}

@@ -8,12 +8,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
-import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS } from './lib/cycle.mjs';
+import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS, addMonths, lastPeriodic } from './lib/cycle.mjs';
 import { demoConfig, DEMO_MANAGER, DEMO_EMPLOYEE } from './lib/seed-config.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT) || 8080;
+const PORT = process.env.PORT !== undefined && process.env.PORT !== '' ? Number(process.env.PORT) : 8080; // PORT=0 → losowy port (testy)
 const AI_URL = process.env.KK_AI_URL || 'http://127.0.0.1:11434';
 const AI_MODEL = process.env.KK_AI_MODEL || 'qwen2.5:14b';
 const K_MIN = 5; // minimalna liczba osób do pokazania agregatów zespołu
@@ -52,6 +52,7 @@ for (const sql of [
   'ALTER TABLE evals ADD COLUMN early_exception TEXT',
 ]) { try { db.exec(sql); } catch (_) { /* już istnieje */ } }
 db.exec(`
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, signer_id INTEGER NOT NULL,
   role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
 CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
@@ -94,6 +95,18 @@ const MAX_EXTRA = 3;
 // PTS5 (1/3/5/7/9) i PTS3 (3/5/7 – pierwsza ocena, do weryfikacji z przepisami z 2015 r.) są w lib/documents.mjs
 
 const now = () => new Date().toISOString();
+// Moduły spoza rozporządzenia: można je wyłączyć. Ocena okresowa, zapoznanie i sprzeciw są zawsze włączone.
+const MODULES = {
+  mod_evidence: { label: 'Dowody przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
+  mod_checkins: { label: 'Rozmowy miesięczne (check-in) i przegląd miesiąca', prefixes: ['/api/checkins', '/api/month'], default: '1' },
+  mod_feedback: { label: 'Feedback między przełożonym a pracownikiem', prefixes: ['/api/feedback'], default: '1' },
+  mod_partials: { label: 'Oceny cząstkowe kwartalne', prefixes: ['/api/partials'], default: '1' },
+  mod_ai: { label: 'Asystent AI (podpowiedzi, nie decyzje)', prefixes: ['/api/ai/'], default: '1' },
+  mod_employee_evidence: { label: 'Pracownik widzi swoje dowody (opcjonalne)', prefixes: [], default: '1' },
+};
+const settingVal = key => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key); return r ? r.value : MODULES[key].default; };
+const modOn = key => settingVal(key) === '1';
+const modeOffFor = pathname => Object.entries(MODULES).find(([k, m]) => m.prefixes.some(pre => pathname.startsWith(pre)) && !modOn(k))?.[0] || null;
 const hashPass = (pw, salt = crypto.randomBytes(16).toString('hex')) =>
   `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`;
 const checkPass = (pw, stored) => {
@@ -466,6 +479,17 @@ route('GET', '/api/demo', async (req, res) => send(res, 200, DEMO.seed && !PROD
   ? { enabled: true, manager: DEMO_MANAGER, employee: DEMO_EMPLOYEE(1), password: DEMO.hintPassword }
   : { enabled: false }));
 route('GET', '/api/me', async (req, res, u) => send(res, 200, { user: publicUser(u), ai: await ollamaStatus() }));
+route('GET', '/api/settings', async (req, res) => send(res, 200, { modules: Object.entries(MODULES).map(([key, m]) => ({ key, label: m.label, on: modOn(key), regulation: false })), required: ['Ocena okresowa (Arkusz B/C)', 'Pierwsza ocena', 'Zapoznanie i sprzeciw (art. 83)', 'Dziennik zdarzeń'] }));
+route('PUT', '/api/settings', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Tylko przełożony zmienia ustawienia.');
+  const b = await readJson(req);
+  for (const [key, v] of Object.entries(b.modules || {})) {
+    if (!MODULES[key]) continue;
+    db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, v ? '1' : '0');
+    audit(u.id, 'setting', `${key}=${v ? 1 : 0}`);
+  }
+  send(res, 200, { ok: true });
+});
 route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN,
   cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS } }));
 // Terminy: ostatnia ocena okresowa pracownika, najwcześniejszy termin kolejnej (6 mies.) i termin cyklu (24 mies.)
@@ -528,7 +552,17 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     if (e.objection_at) alerts.push({ kind: 'objection', evalId: e.id, name: emp?.name || '', text: 'Złożono sprzeciw – rozpatrz go' });
     else if (e.status === 'submitted' && !e.ack_at && Date.now() - Date.parse(e.updated) > 7 * 86400000) alerts.push({ kind: 'noack', evalId: e.id, name: emp?.name || '', text: 'Ocena złożona ponad 7 dni temu, brak zapoznania' });
   }
-  send(res, 200, { role: u.role, alerts, team: teamRows, counts, evals: evals.map(e => ({ id: e.id, employeeId: e.employee_id, typ: e.typ, status: e.status, updated: e.updated })), aggregate: agg, goalsOpen });
+  const todayStr = now().slice(0, 10);
+  const deadlines = team.map(t => {
+    const mine = evals.filter(e => e.employee_id === t.id);
+    const last = lastPeriodic(mine);
+    const due = last ? addMonths(refDate(last), CYCLE_MONTHS) : null;
+    const days = due ? Math.round((Date.parse(due) - Date.parse(todayStr)) / 86400000) : null;
+    return { id: t.id, name: t.name, lastEval: last ? refDate(last) : null, due, days, text: due ? (days < 0 ? 'Termin minął' : `Ocena okresowa do ${due}`) : 'Brak poprzedniej oceny okresowej – sprawdź termin pierwszej oceny' };
+  }).sort((a, b) => (a.days ?? 1e9) - (b.days ?? 1e9));
+  const dueById = Object.fromEntries(deadlines.map(d => [d.id, d.due]));
+  teamRows.forEach(r => { r.nextDue = dueById[r.id] || null; });
+  send(res, 200, { role: u.role, alerts, deadlines, team: teamRows, counts, evals: evals.map(e => ({ id: e.id, employeeId: e.employee_id, typ: e.typ, status: e.status, updated: e.updated })), aggregate: agg, goalsOpen });
 });
 
 route('POST', '/api/employees', async (req, res, u) => {
@@ -767,6 +801,7 @@ route('GET', '/api/evidence', async (req, res, u) => {
   const q = qs(req);
   for (const [k, ok] of [['from', isDate], ['to', isDate], ['month', isMonth]]) if (q.get(k) && !ok(q.get(k))) return invalid(res, { [k]: 'Nieprawidłowy format daty.' });
   if (q.get('indicator') && !INDICATORS.has(q.get('indicator'))) return invalid(res, { indicator: 'Nieznany wskaźnik.' });
+  if (u.role === 'pracownik' && !modOn('mod_employee_evidence')) return send(res, 200, { evidence: [] });
   send(res, 200, { evidence: evidenceQuery(u, q).map(evidenceRow) });
 });
 route('POST', '/api/evidence', async (req, res, u) => {
@@ -1245,6 +1280,8 @@ const server = http.createServer(async (req, res) => {
       return pa.length === ua.length && pa.every((seg, i) => seg.startsWith(':') || seg === ua[i]);
     });
     if (!route_) return fail(res, 404, 'Nie ma takiej ścieżki.');
+    const offMod = modeOffFor(url.pathname);
+    if (offMod) return fail(res, 403, `Moduł wyłączony w ustawieniach: ${MODULES[offMod].label}.`);
     const pa = route_.pattern.split('/'), ua = url.pathname.split('/');
     const params = {};
     pa.forEach((seg, i) => { if (seg.startsWith(':')) params[seg.slice(1)] = Number(ua[i]); });
