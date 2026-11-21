@@ -141,6 +141,14 @@ ul.c li{margin:4px 0}
 .desc{font-size:12px;color:var(--mu);font-weight:400}
 .ai-out{white-space:pre-wrap;background:var(--bg);border-radius:0;padding:14px;margin-top:10px;font-size:14px;animation:rise .4s var(--ease) both}
 .saved{font-size:12px;color:var(--mu);transition:opacity .3s}
+.ai-think{display:flex;align-items:center;gap:12px;background:var(--bg);border-left:4px solid var(--navy);padding:14px;margin-top:10px;font-size:14px;color:var(--tx)}
+.ai-think b{color:var(--navy);font-variant-numeric:tabular-nums}
+.ai-dots{display:inline-flex;gap:6px}
+.ai-dots i{width:10px;height:10px;background:var(--navy);display:block;animation:kkdot 1.2s ease-in-out infinite}
+.ai-dots i:nth-child(2){animation-delay:.2s}
+.ai-dots i:nth-child(3){animation-delay:.4s}
+@keyframes kkdot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-6px)}}
+@media (prefers-reduced-motion: reduce){.ai-dots i{animation:none;opacity:1}}
 .modal{position:fixed;inset:0;background:rgba(10,20,40,.45);display:grid;place-items:center;padding:16px;z-index:20;animation:fade .2s both}
 .modal .card{width:min(520px,100%);margin:0;animation:rise .3s var(--ease) both}
 .radar{width:100%;max-width:300px;margin:0 auto;display:block}

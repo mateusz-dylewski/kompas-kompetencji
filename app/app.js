@@ -912,12 +912,26 @@
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
   async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; S.cur.timing = r.timing || null; }
+  // Widoczny stan „model myśli”: animowane kropki i licznik sekund (aria-live dla czytników ekranu)
+  function thinkingHtml(what) {
+    return `<div class="ai-think" role="status" aria-live="polite"><span class="ai-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(what)} <b class="ai-sec">0 s</b></span></div>`;
+  }
+  function startThinking(root) {
+    const t0 = Date.now();
+    const id = setInterval(() => {
+      const el = root?.querySelector(".ai-sec");
+      if (!el || !el.isConnected) return clearInterval(id);
+      el.textContent = Math.floor((Date.now() - t0) / 1000) + " s";
+    }, 500);
+    return () => clearInterval(id);
+  }
   async function runAi(kind) {
-    const out = $("#aiOut"); if (out) out.innerHTML = `<div class="ai-out">Model przygotowuje odpowiedź…</div>`;
+    const out = $("#aiOut");
+    const stop = out ? (out.innerHTML = thinkingHtml("Model AI lokalnie przygotowuje podpowiedzi…"), startThinking(out)) : () => {};
     try {
       const r = await api("POST", kind === "talk" ? "/api/ai/talk" : "/api/ai/formal", { evalId: S.cur.id });
-      S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
-    } catch (e) { toast(e.message); }
+      stop(); S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
+    } catch (e) { stop(); toast(e.message); }
   }
   // Podpisy i zapoznanie z oceną – stan z serwera
   async function loadSigs(id, status) {
@@ -988,9 +1002,10 @@
     aiTalk: () => runAi("talk"),
     aiFormal: () => runAi("formal"),
     aiDev: async () => {
-      const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Myślę…";
-      try { const r = await api("POST", "/api/ai/development", {}); $("#aiDevOut").innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"}</p>`; }
-      catch (e) { toast(e.message); }
+      const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
+      const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml("Model AI lokalnie układa działania rozwojowe…"); const stop = startThinking(outEl);
+      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"}</p>`; }
+      catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
     toggleGoal: async b => { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshData(); render(); },
@@ -1049,9 +1064,9 @@
       await api("POST", `/api/evals/${S.cur.id}/early-exception`, { reason }); await refreshMissing(); toast("Zapisano wyjątek."); render();
     },
     aiCheckin: async b => {
-      const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = `<div class="ai-out">Asystent przygotowuje pytania…</div>`;
-      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"} · propozycja do przemyślenia</p>`; }
-      catch (e) { out.innerHTML = ""; toast(e.message); }
+      const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml("Model AI lokalnie układa pytania do rozmowy…"); const stop = startThinking(out);
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (e) { stop(); out.innerHTML = ""; toast(e.message); }
       b.disabled = false;
     },
     editFeedback: b => { const f = (S.monthFeedback || []).find(x => x.id === +b.dataset.id); if (f) feedbackModal(f); },

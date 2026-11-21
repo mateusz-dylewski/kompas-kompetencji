@@ -31,6 +31,6 @@ test('pytania są otwarte i nie zawierają oceny osoby ani wyroku', () => {
 test('zasady asystenta są zapisane i zgodne z instrukcją', () => {
   assert.ok(bank.zasady.length >= 4);
   const doc = fs.readFileSync(path.join(ROOT, 'docs', 'asystent-instrukcja.md'), 'utf8');
-  assert.ok(doc.includes('Czego asystent nie robi'));
+  assert.ok(doc.includes('Czego nie robi'));
   assert.ok(doc.includes('baza-pytan.json'));
 });

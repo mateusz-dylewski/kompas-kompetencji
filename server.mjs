@@ -18,6 +18,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT !== undefined && process.env.PORT !== '' ? Number(process.env.PORT) : 8080; // PORT=0 → losowy port (testy)
 const AI_URL = process.env.KK_AI_URL || 'http://127.0.0.1:11434';
 const AI_MODEL = process.env.KK_AI_MODEL || 'qwen2.5:14b';
+const AI_KEY = process.env.KK_AI_KEY || '';
 const K_MIN = 5; // minimalna liczba osób do pokazania agregatów zespołu
 const SESSION_MS = 8 * 3600 * 1000;
 const DEMO = demoConfig(); // hasła demo z konfiguracji seedu (KK_DEMO_PASSWORD; domyślne tylko lokalnie)
@@ -388,6 +389,19 @@ function redactNames(text) {
 }
 async function llm(system, user) {
   user = redactNames(user);
+  // Tryb zgodny z OpenAI (np. zewnętrzny endpoint testowy): tylko gdy ustawiono KK_AI_KEY w środowisku.
+  // Klucz nigdy nie jest zapisany w kodzie ani w repozytorium.
+  if (AI_KEY) {
+    const r = await fetch(`${AI_URL}/chat/completions`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${AI_KEY}` },
+      body: JSON.stringify({ model: AI_MODEL, temperature: 0.3, max_tokens: 700,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!r.ok) throw new Error('llm_' + r.status);
+    const j = await r.json();
+    return (j.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
   const r = await fetch(`${AI_URL}/api/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: AI_MODEL, stream: false, think: false, options: { temperature: 0.3, num_predict: 700 },
