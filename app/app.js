@@ -295,6 +295,88 @@
   }
 
   let lastPageKey = "";
+  // ---------- Listy wyboru w stylu systemu (zamiast natywnej listy przeglądarki) ----------
+  // Natywny <select> zostaje w DOM (ukryty, czytany przez resztę kodu i wysyłany w formularzach);
+  // obok powstaje przycisk i lista zgodna z polami formularza. Klawiatura: strzałki, Home/End, Enter, Spacja, Esc.
+  let selSeq = 0, selObserving = false;
+  function selSync(sel) {
+    const w = sel.parentNode; const btn = w.querySelector(".kk-sel-btn"); const list = w.querySelector(".kk-sel-list");
+    const opt = sel.options[sel.selectedIndex];
+    btn.textContent = opt ? opt.textContent : "";
+    btn.disabled = sel.disabled;
+    [...list.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === sel.selectedIndex)));
+  }
+  function selClose(w, focusBtn) {
+    const btn = w.querySelector(".kk-sel-btn"), list = w.querySelector(".kk-sel-list");
+    list.hidden = true; btn.setAttribute("aria-expanded", "false");
+    if (focusBtn) btn.focus();
+  }
+  function selOpen(w, sel) {
+    document.querySelectorAll(".kk-sel").forEach(o => { if (o !== w) selClose(o, false); });
+    const btn = w.querySelector(".kk-sel-btn"), list = w.querySelector(".kk-sel-list");
+    selSync(sel); list.hidden = false; btn.setAttribute("aria-expanded", "true");
+    selActive(w, sel.selectedIndex < 0 ? 0 : sel.selectedIndex);
+    list.focus({ preventScroll: true });
+  }
+  function selActive(w, i) {
+    const list = w.querySelector(".kk-sel-list"); const items = [...list.children];
+    if (!items.length) return;
+    i = Math.max(0, Math.min(items.length - 1, i));
+    items.forEach((li, j) => li.classList.toggle("kk-on", j === i));
+    list.setAttribute("aria-activedescendant", items[i].id);
+    items[i].scrollIntoView({ block: "nearest" });
+    w.dataset.active = String(i);
+  }
+  function selPick(w, sel, i) {
+    if (sel.selectedIndex !== i) { sel.selectedIndex = i; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+    selSync(sel); selClose(w, true);
+  }
+  function enhanceSelects(root) {
+    root.querySelectorAll("select:not([data-kk])").forEach(sel => {
+      sel.dataset.kk = "1"; sel.classList.add("kk-native"); sel.tabIndex = -1; sel.setAttribute("aria-hidden", "true");
+      const w = document.createElement("div"); w.className = "kk-sel";
+      sel.parentNode.insertBefore(w, sel); w.appendChild(sel);
+      const id = "kks" + (++selSeq);
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "kk-sel-btn"; btn.id = id + "-btn";
+      btn.setAttribute("aria-haspopup", "listbox"); btn.setAttribute("aria-expanded", "false"); btn.setAttribute("aria-controls", id + "-list");
+      const list = document.createElement("ul"); list.className = "kk-sel-list"; list.id = id + "-list"; list.setAttribute("role", "listbox"); list.tabIndex = -1; list.hidden = true;
+      [...sel.options].forEach((o, i) => {
+        const li = document.createElement("li"); li.id = id + "-o" + i; li.setAttribute("role", "option"); li.textContent = o.textContent;
+        li.addEventListener("mousedown", e => e.preventDefault());
+        li.addEventListener("click", () => selPick(w, sel, i));
+        list.appendChild(li);
+      });
+      w.appendChild(btn); w.appendChild(list);
+      // etykieta wskazuje na przycisk (klik i czytnik ekranu trafiają w widoczny element)
+      if (sel.id) root.querySelectorAll(`label[for="${sel.id}"]`).forEach(l => l.htmlFor = btn.id);
+      btn.addEventListener("click", () => (list.hidden ? selOpen(w, sel) : selClose(w, true)));
+      btn.addEventListener("keydown", e => {
+        if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); selOpen(w, sel); }
+        else if (e.key.length === 1 && /\S/.test(e.key)) { // skok do opcji zaczynającej się na wpisaną literę
+          const k = [...sel.options].findIndex(o => o.textContent.toLowerCase().startsWith(e.key.toLowerCase()));
+          if (k >= 0) { sel.selectedIndex = k; selSync(sel); sel.dispatchEvent(new Event("change", { bubbles: true })); }
+        }
+      });
+      list.addEventListener("keydown", e => {
+        const i = Number(w.dataset.active || 0);
+        if (e.key === "ArrowDown") { e.preventDefault(); selActive(w, i + 1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); selActive(w, i - 1); }
+        else if (e.key === "Home") { e.preventDefault(); selActive(w, 0); }
+        else if (e.key === "End") { e.preventDefault(); selActive(w, list.children.length - 1); }
+        else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selPick(w, sel, i); }
+        else if (e.key === "Escape") { e.preventDefault(); selClose(w, true); }
+        else if (e.key === "Tab") { selClose(w, false); }
+      });
+      selSync(sel);
+    });
+  }
+  function initSelects(root) {
+    enhanceSelects(root);
+    if (selObserving) return;
+    selObserving = true;
+    new MutationObserver(() => enhanceSelects(root)).observe(root, { childList: true, subtree: true });
+    document.addEventListener("mousedown", e => { document.querySelectorAll(".kk-sel").forEach(w => { if (!w.contains(e.target)) selClose(w, false); }); });
+  }
   function render() {
     if (!S.user) return renderLogin();
     const root = $("#root");
@@ -320,6 +402,7 @@
     if (pageChanged && sel) $("#view")?.focus({ preventScroll: true });
     else if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
     bindShell();
+    initSelects(root);
     animateIn(root);
     if (S.view === "log") loadLog();
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }

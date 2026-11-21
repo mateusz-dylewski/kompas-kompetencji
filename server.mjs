@@ -1525,7 +1525,13 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     if (!url.pathname.startsWith('/api/')) {
       const isAsset = /^\/app\/assets\/(faces\/|fonts\/)?[a-z0-9-]+\.(svg|png|jpg|woff2)$/.test(url.pathname);
-      if (!STATIC.has(url.pathname) && !isAsset) return send(res, 404, { error: 'not_found' }, SECURITY);
+      if (!STATIC.has(url.pathname) && !isAsset) {
+        // Nieznany adres otwierany w przeglądarce: ładna strona 404 (HTML), dla reszty JSON
+        if (req.method === 'GET' && String(req.headers.accept || '').includes('text/html')) {
+          return res.writeHead(404, { 'content-type': 'text/html; charset=utf-8', ...SECURITY }) && res.end(fs.readFileSync(path.join(ROOT, 'app', '404.html')));
+        }
+        return send(res, 404, { error: 'not_found' }, SECURITY);
+      }
       const file = path.join(ROOT, url.pathname === '/' ? 'index.html' : url.pathname);
       const data = fs.readFileSync(file);
       return res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', ...SECURITY }) && res.end(data);

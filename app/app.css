@@ -45,6 +45,11 @@ button{cursor:pointer}
 label.f{display:block;font-weight:600;font-size:14px;margin:12px 0 6px}
 input,select,textarea{width:100%;padding:12px 14px;border:1.5px solid var(--ln);border-radius:0;background:var(--bg);transition:border-color .2s,box-shadow .2s}
 input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(44,111,209,.15);outline:none}
+/* Listy rozwijane: ten sam wygląd co pola tekstowe, własna strzałka (zamiast domyślnej systemowej) */
+select{-webkit-appearance:none;-moz-appearance:none;appearance:none;cursor:pointer;min-height:46px;padding-right:44px;background-color:#fff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1.5l6 6 6-6' fill='none' stroke='%23002d5a' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:14px 9px}
+select:disabled{cursor:not-allowed;opacity:.6;background-color:var(--bg)}
+select option{color:var(--tx);background:#fff}
+select:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
 textarea{min-height:76px;resize:vertical}
 .err{color:var(--bad);background:var(--bad-bg);border-radius:0;padding:10px 12px;margin-top:12px;font-size:14px;animation:shake .4s}
 
@@ -304,3 +309,22 @@ input[type="checkbox"]:disabled:checked::after{border-color:#fff}
 .chat-bar .btn{height:40px}
 .chat-typing{padding:6px 10px;min-width:220px}
 .chat-typing .ai-think{background:transparent;border-left:0;padding:4px 0;margin:0}
+/* Lista wyboru zgodna z polami formularza */
+.kk-sel{position:relative;width:100%}
+.kk-native{position:absolute!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;opacity:0!important;pointer-events:none}
+.kk-sel-btn{display:block;width:100%;min-height:46px;padding:12px 44px 12px 14px;text-align:left;border:1.5px solid var(--ln);border-radius:0;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1.5l6 6 6-6' fill='none' stroke='%23002d5a' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 16px center/14px 9px;font:inherit;font-size:15px;color:var(--tx);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kk-sel-btn:hover{border-color:var(--navy)}
+.kk-sel-btn[aria-expanded="true"]{border-color:var(--navy)}
+.kk-sel-btn:disabled{cursor:not-allowed;opacity:.6;background-color:var(--bg)}
+.kk-sel-btn:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.kk-sel-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;margin:0;padding:4px 0;list-style:none;background:#fff;border:1.5px solid var(--navy);box-shadow:0 8px 24px rgba(0,0,0,.14);max-height:300px;overflow-y:auto}
+.kk-sel-list:focus{outline:none}
+.kk-sel-list li{padding:11px 14px;font-size:15px;color:var(--tx);cursor:pointer}
+.kk-sel-list li.kk-on{background:#e8f1fb}
+.kk-sel-list li[aria-selected="true"]{background:var(--navy);color:#fff}
+.kk-sel-list li[aria-selected="true"].kk-on{background:var(--navy)}
+/* Otwarta lista nie może chować się pod kolejnymi kartami */
+.card:has(.kk-sel-btn[aria-expanded="true"]),.chat:has(.kk-sel-btn[aria-expanded="true"]){position:relative;z-index:80;overflow:visible}
+/* Podświetlenie pozycji pod kursorem */
+.kk-sel-list li:hover{background:#e8f1fb}
+.kk-sel-list li[aria-selected="true"]:hover{background:var(--navy);color:#fff}
