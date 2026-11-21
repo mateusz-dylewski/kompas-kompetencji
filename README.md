@@ -50,6 +50,23 @@ ollama pull qwen2.5:14b          # lub inny model instruct Qwen dopasowany do sp
 KK_AI_MODEL=qwen2.5:14b node server.mjs
 ```
 
+### Serwer AI zgodny z OpenAI (zewnętrzny)
+
+Zamiast Ollama można użyć serwera zgodnego z API OpenAI. Klucz podaje się **wyłącznie w zmiennych środowiska** – nigdy w repozytorium. Najprościej w pliku `.env` (jest w `.gitignore`):
+
+```bash
+# .env (uprawnienia 600, nie commitować)
+KK_AI_URL=https://adres-serwera/v1
+KK_AI_KEY=…klucz…
+KK_AI_MODEL=nazwa-modelu        # lista: GET $KK_AI_URL/models
+```
+
+```bash
+node --env-file=.env server.mjs
+```
+
+Wskaźnik w aplikacji pokazuje wtedy „AI zewnętrzny”. **Uwaga (RODO):** treść podpowiedzi opuszcza komputer. Przed wysłaniem usuwamy imiona, nazwiska i e-maile (`redactNames`), ale treści dowodów i uzasadnień trafiają na serwer zewnętrzny – używaj tego trybu tylko z danymi fikcyjnymi albo za zgodą IOD.
+
 Jeśli Ollama nie działa, aplikacja przełącza się na tryb reguł. Oznacza to, że asystent podpowiada na podstawie samej oceny, bez modelu, i zawsze pokazuje źródło odpowiedzi.
 
 Lokalnie masz model `orcarouter/Qwen3.8-27B-Uncensored:iq2_m`. Nie jest on domyślny: wersja „uncensored” z kwantyzacją iq2 nie nadaje się do narzędzia dla administracji publicznej. Do produkcji wybierz standardowy model instruct.
