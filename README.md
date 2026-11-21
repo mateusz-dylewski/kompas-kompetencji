@@ -139,6 +139,14 @@ Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową w
 - **Migracja:** automatyczna przy starcie – tabele `kickoffs` i `prep_survey`, kolumna `evals.survey_done`. Istniejące dane bez zmian.
 - **Jeszcze nieobsługiwane:** arkusz A (wyższe stanowiska), przekazanie oceny pośredniemu przełożonemu lub zastępcy, osobny dokument IPRZ.
 
+## Panel pracownika: cele z krokami, plan rozwoju, szczegóły oceny
+
+- **Cele SMART z krokami.** Postęp nie jest ustawiany suwakiem: cel ma 1–8 sprawdzalnych kroków (wykonany albo nie), a postęp to odsetek wykonanych kroków. Cel jest zrealizowany, gdy wszystkie kroki są wykonane. API: `POST /api/goals` wymaga `steps` (lista tekstów); `PATCH /api/goals/:id` przyjmuje `{ step, done }` albo `{ addStep }`; `{ done }` działa tylko dla celów bez kroków (sprzed zmiany). Ręczne `progress` nie jest już przyjmowane.
+- **Termin celu:** pole DD.MM.RRRR – wpisuje się same cyfry, kropki dodają się automatycznie, niemożliwe cyfry są odrzucane (dzień 01–31, miesiąc 01–12, rok 2xxx), a po wpisaniu całej daty sprawdzana jest liczba dni w miesiącu. Serwer przyjmuje tylko prawdziwą datę, nie z przeszłości i najwyżej 5 lat naprzód.
+- **Plan rozwoju** (Mój profil): wnioski z ostatniej oceny, w której przełożony je zapisał, z odnośnikiem do oceny, obszary z najniższą oceną i przycisk „Cel z tego obszaru”. Gdy wniosków nie ma, ekran mówi dlaczego (`latestDev`, `latestDevEval` w `GET /api/dashboard`).
+- **Szczegóły kryteriów w podglądzie oceny:** każda kompetencja rozwija się („Szczegóły”) i pokazuje wskaźniki z punktami i przykładami oraz dowody z okresu oceny przy tej kompetencji.
+- **Migracja:** kolumna `goals.steps` (domyślnie `[]`). Istniejące cele nie mają kroków – ekran proponuje ich dodanie.
+
 ## Ograniczenia prototypu
 
 - Serwer nie obsługuje HTTPS sam; w produkcji stoi za reverse proxy z TLS. Sesje i licznik nieudanych logowań są w pamięci serwera (reset po restarcie).

@@ -143,6 +143,106 @@
           <li>Przygotowanie do rozmowy (ankieta 1–5): ${m.prep.suppressed ? `za mało odpowiedzi (${m.prep.n})` : `mediana <b>${m.prep.median}</b> z ${m.prep.n} odpowiedzi`}</li></ul>
         <p class="muted">Mediany i odsetki z ${m.evals} ocen ${m.managers} przełożonych. Bez danych o osobach, czasie pracy i aktywności. Czas przygotowania „z aplikacją i bez” oraz dokumenty poza systemem wymagają badania pilotażowego.</p>`);
   }
+  // ---------- Data DD.MM.RRRR: same cyfry, kropki wstawiane automatycznie, niemożliwe cyfry odrzucane ----------
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const isoToPl = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || "") ? iso.split("-").reverse().join(".") : iso || "");
+  // Przyjmuje kolejne cyfry: dzień 01–31, miesiąc 01–12; „5” w dniu → „05.”, „2” w miesiącu → „02.”
+  function maskDigits(raw) {
+    let out = "";
+    for (const ch of raw.replace(/\D/g, "")) {
+      const n = out.length, d = +ch;
+      if (n === 0) out += d > 3 ? "0" + ch : ch;
+      else if (n === 1) { if ((out[0] === "3" && d > 1) || (out[0] === "0" && d === 0)) continue; out += ch; }
+      else if (n === 2) out += d > 1 ? "0" + ch : ch;
+      else if (n === 3) { if ((out[2] === "1" && d > 2) || (out[2] === "0" && d === 0)) continue; out += ch; }
+      else if (n === 4) { if (d !== 2) continue; out += ch; } // rok 2xxx
+      else if (n < 8) out += ch;
+    }
+    return out;
+  }
+  const fmtDigits = (dg, trailing) => {
+    let v = dg.slice(0, 2);
+    if (dg.length > 2 || (trailing && dg.length === 2)) v += ".";
+    v += dg.slice(2, 4);
+    if (dg.length > 4 || (trailing && dg.length === 4)) v += ".";
+    return v + dg.slice(4, 8);
+  };
+  function dateMask(input, errEl, opt = {}) {
+    const check = dg => {
+      if (dg.length < 8) return dg.length ? "Uzupełnij datę: DD.MM.RRRR." : "Podaj termin.";
+      const d = +dg.slice(0, 2), m = +dg.slice(2, 4), y = +dg.slice(4);
+      if (d > daysIn(y, m)) return `Ten miesiąc ma ${daysIn(y, m)} dni.`;
+      const iso = `${y}-${dg.slice(2, 4)}-${dg.slice(0, 2)}`;
+      if (opt.min && iso < opt.min) return "Termin nie może być w przeszłości.";
+      if (opt.maxYears && y > new Date().getUTCFullYear() + opt.maxYears) return `Termin najpóźniej za ${opt.maxYears} lat.`;
+      return "";
+    };
+    const show = (msg, force) => { const bad = !!msg && (force || input.value.replace(/\D/g, "").length >= 8); input.setAttribute("aria-invalid", bad ? "true" : "false"); errEl.textContent = bad ? msg : ""; };
+    input.addEventListener("input", e => {
+      let dg = maskDigits(input.value);
+      // Kasowanie kropki kasuje też cyfrę przed nią
+      if (e.inputType === "deleteContentBackward" && /[.]$/.test(fmtDigits(dg, true)) && input.value.length < fmtDigits(dg, true).length) dg = dg.slice(0, -1);
+      input.value = fmtDigits(dg, e.inputType !== "deleteContentBackward");
+      show(check(dg));
+    });
+    input.addEventListener("paste", e => {
+      const t = (e.clipboardData || window.clipboardData).getData("text").trim();
+      const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+      if (iso) { e.preventDefault(); input.value = fmtDigits(maskDigits(iso[3] + iso[2] + iso[1]), false); show(check(maskDigits(input.value))); }
+    });
+    input.addEventListener("blur", () => { const dg = maskDigits(input.value); if (dg.length) show(check(dg), true); });
+    return { iso: () => { const dg = maskDigits(input.value), msg = check(dg); show(msg, true); return msg ? "" : `${dg.slice(4)}-${dg.slice(2, 4)}-${dg.slice(0, 2)}`; } };
+  }
+  // ---------- Cele: karta z krokami (postęp = wykonane kroki / wszystkie) ----------
+  function goalCard(g) {
+    const n = g.steps.length, k = g.stepsDone;
+    const state = g.done ? '<span class="tag ok">zrealizowany</span>' : '<span class="tag info">w toku</span>';
+    const steps = n ? `
+          <div class="seg" role="img" aria-label="Wykonane kroki: ${k} z ${n}">${g.steps.map(x => `<i class="${x.done ? "on" : ""}"></i>`).join("")}</div>
+          <div class="muted">Wykonane kroki: <b>${k} z ${n}</b></div>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="${x.done ? "is-done" : ""}"><input type="checkbox" id="gs${g.id}_${i}" data-goal-step="${g.id}:${i}" ${x.done ? "checked" : ""}><label for="gs${g.id}_${i}">${esc(x.t)}</label></li>`).join("")}</ul>
+          ${n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}`
+      : `<p class="muted">Ten cel nie ma kroków. Dodaj kroki, żeby postęp liczył się sam.</p>
+          <div class="btns" style="justify-content:flex-start;margin-top:8px"><button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>
+          <button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button></div>`;
+    return `
+        <div class="goal ${g.done ? "is-done" : ""}">
+          <div class="row"><b>${esc(g.s)}</b>${state}</div>
+          <div class="muted">Miara: ${esc(g.m)} · Termin: ${esc(isoToPl(g.t))}</div>${steps}
+        </div>`;
+  }
+  // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
+  function devPlan(d, items) {
+    const weak = items.slice(0, 3).map(([k]) => k);
+    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))} <button class="btn sm g" data-act="goalFromArea" data-area="${esc(nameOf(k))}">${KK_ICON("plus")}<span>Cel z tego obszaru</span></button></li>`).join("")}</ul>` : "";
+    if (d.latestDev) {
+      const e = d.latestDevEval;
+      return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
+        <p>${esc(d.latestDev)}</p>${areas}
+        <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
+    }
+    const last = d.evals[0];
+    const why = !last ? "Nie masz jeszcze złożonej oceny." : last.status === "submitted" ? "Ocena jest złożona – wnioski przełożony zapisze po rozmowie oceniającej." : "Przełożony nie zapisał wniosków rozwojowych w ostatniej ocenie.";
+    return `<p class="muted">${why} Na razie możesz sam zaproponować cele – omówicie je na rozmowie.</p>${areas}
+      <div class="btns" style="justify-content:flex-start"><button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
+  }
+  // Dowody z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
+  async function loadEvalEvidence(e) {
+    const boxes = document.querySelectorAll("[data-comp-ev]"); if (!boxes.length) return;
+    const q = new URLSearchParams();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(e.period_from || "")) q.set("from", e.period_from);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(e.period_to || "")) q.set("to", e.period_to);
+    if (S.user.role === "przelozony") q.set("employeeId", e.employee_id);
+    let list = [];
+    try { list = (await api("GET", `/api/evidence?${q}`)).evidence; } catch (_) { list = null; }
+    boxes.forEach(box => {
+      const mine = (list || []).filter(x => x.competency === box.dataset.compEv);
+      box.innerHTML = list === null ? `<p class="muted">Dowody są niedostępne (moduł wyłączony w ustawieniach).</p>`
+        : !mine.length ? `<p class="muted">Brak zapisanych dowodów przy tej kompetencji w okresie oceny.</p>`
+        : `<ul class="ev-list">${mine.map(x => `<li><span class="muted">${esc(isoToPl(x.date))} · ${esc(x.indicatorText)}</span><br><b>Sytuacja:</b> ${esc(x.situation)} · <b>Działanie:</b> ${esc(x.action)} · <b>Rezultat:</b> ${esc(x.result)} ${safeLink(x.link)}</li>`).join("")}</ul>`;
+    });
+  }
   const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
 
   // ---------- Elementy wspólne ----------
@@ -471,7 +571,7 @@
     if (S.view === "month") { bindMonthPage(); loadMonth(); }
     if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
     if (S.view === "results") loadMetrics();
-    if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
+    if (S.view === "evalView" && S.readEval) { loadSigs(S.readEval.id, S.readEval.status); loadEvalEvidence(S.readEval); }
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
   }
@@ -496,12 +596,13 @@
       let next;
       if (!goals.length) next = { t: "Dodaj pierwszy cel SMART", s: "Cel pomoże Ci i przełożonemu zobaczyć, dokąd chcesz dojść.", btn: "Dodaj cel", go: "goals" };
       else if (last && last.status === "submitted") next = { t: "Twoja ocena jest złożona", s: "Przejrzyj ją przed rozmową z przełożonym.", btn: "Zobacz ocenę", go: "evals" };
-      else if (last && last.status === "discussed") next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Wnioski rozwojowe są w profilu.", btn: "Mój profil", go: "profile" };
+      else if (last && last.status === "discussed" && d.latestDev) next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Przełożony zapisał wnioski rozwojowe. Zamień je w cele z krokami.", btn: "Plan rozwoju", go: "profile" };
+      else if (last && last.status === "discussed") next = { t: "Ocena omówiona – ustal cele na kolejny okres", s: "Przełożony nie zapisał wniosków rozwojowych. Zaproponuj cel, który omówicie.", btn: "Otwórz cele", go: "goals" };
       else next = { t: "Sprawdź swoje cele", s: "Zaktualizuj postęp, zanim przyjdzie czas na ocenę.", btn: "Otwórz cele", go: "goals" };
       return `
-        <section class="next card anim"><div class="next-ic" aria-hidden="true">${KK_ICON("arrow")}</div>
+        <section class="next card anim">
           <div><h2>${esc(next.t)}</h2><p class="muted">${esc(next.s)}</p></div>
-          <button class="btn" data-nav="${next.go}">${esc(next.btn)}</button></section>
+          <button class="btn btn-next" data-nav="${next.go}"><span>${esc(next.btn)}</span>${KK_ICON("arrow")}</button></section>
         <div class="kpis">
           <div class="kpi"><b data-to="${d.evals.length}" data-dec="0">0</b><span>Złożone oceny</span></div>
           <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
@@ -526,10 +627,11 @@
       return `
         <div class="grid two">
           <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
-          <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5))) : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+          <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
+            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i dowody</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
         </div>
         <div class="grid two">
-          <div class="card"><h2>Plan rozwoju z oceny</h2><p>${d.latestDev ? esc(d.latestDev) : `<span class="muted">Plan pojawi się po omówieniu oceny.</span>`}</p></div>
+          <div class="card"><h2>Plan rozwoju z oceny</h2>${devPlan(d, items)}</div>
           <div class="card"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
@@ -537,17 +639,9 @@
         </div>`;
     }
     if (v === "goals") {
-      const list = S.goals.map(g => `
-        <div class="goal ${g.done ? "is-done" : ""}">
-          <div class="row"><b>${esc(g.s)}</b>${g.done ? '<span class="tag ok">zrealizowany</span>' : '<span class="tag info">w toku</span>'}</div>
-          <div class="muted">Miara: ${esc(g.m)} · Termin: ${esc(g.t)}</div>
-          <div class="row" style="margin-top:8px"><label class="muted" for="p${g.id}">Postęp <b id="pv${g.id}">${g.progress}</b>%</label>
-            <input id="p${g.id}" type="range" min="0" max="100" step="5" value="${g.progress}" data-goal="${g.id}" class="range"></div>
-          ${bar(g.progress, 100)}
-          <button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>
-        </div>`).join("") || `<p class="muted">Nie masz jeszcze celów. Dodaj pierwszy – najlepiej taki, który da się zmierzyć.</p>`;
-      return `<div class="row" style="margin-bottom:12px"><span class="muted">Cele SMART: konkretny, mierzalny, osiągalny, istotny, z terminem.</span>
-        <button class="btn" data-act="addGoal">+ Nowy cel</button></div>
+      const list = S.goals.map(goalCard).join("") || `<p class="muted">Nie masz jeszcze celów. Dodaj pierwszy – najlepiej taki, który da się zmierzyć.</p>`;
+      return `<div class="row" style="margin-bottom:12px"><span class="muted">Cele SMART: konkretny, mierzalny, osiągalny, istotny, z terminem. Postęp liczy się z wykonanych kroków.</span>
+        <button class="btn" data-act="addGoal">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
         <div class="card">${list}</div>`;
     }
     if (v === "evidence") return evidencePage(false);
@@ -584,9 +678,9 @@
             : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}"`)
             : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}"`)}</td></tr>`).join("");
       return `
-        <section class="next card anim"><div class="next-ic" aria-hidden="true">${KK_ICON("arrow")}</div>
+        <section class="next card anim">
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
-          <button class="btn" data-nav="evals">Przejdź do ocen</button></section>
+          <button class="btn btn-next" data-nav="evals"><span>Przejdź do ocen</span>${KK_ICON("arrow")}</button></section>
         ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
@@ -1090,8 +1184,18 @@
   function evalReadPage() {
     const e = S.readEval; if (!e) return `<p class="muted">Ładowanie…</p>`;
     const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ, data: e.data });
-    const items = MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => `
-      <div class="card"><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}</div>`).join("");
+    // Kompetencja = rozwijane „Szczegóły”: wskaźniki z punktami i przykładami oraz dowody z okresu oceny
+    const items = `<h2 style="margin:8px 0 12px">Kryteria – szczegóły</h2>` + MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => {
+      const sc = scores[m.k]?.avg;
+      return `
+      <details class="comp" id="comp-${esc(m.k.replace(/[^A-ZĄĆĘŁŃÓŚŹŻ]/g, ""))}" ${S.readFocus === m.k ? "open" : ""}>
+        <summary><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3><span class="muted">${sc === null || sc === undefined ? "brak oceny" : `${fmt(sc)} pkt`}</span><span class="more">Szczegóły</span></summary>
+        <div class="comp-body">
+          <h4>Wskaźniki</h4>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}
+          <h4>Dowody z okresu oceny</h4><div data-comp-ev="${esc(m.k)}"><p class="muted">Wczytywanie…</p></div>
+        </div>
+      </details>`;
+    }).join("");
     const m = S.readMeta || {};
     const who = `<dl class="meta"><dt>Oceniany</dt><dd>${first(m.employee?.name)}${m.employee?.position ? ", " + esc(m.employee.position) : ""}</dd>
       <dt>Oceniający</dt><dd>${first(m.evaluator?.name)}${m.evaluator?.position ? ", " + esc(m.evaluator.position) : ""}</dd>
@@ -1238,7 +1342,7 @@
       toast(r.earlyException ? "Utworzono szkic oceny (wyjątek od reguły 6 miesięcy zapisany w dzienniku)." : "Utworzono szkic oceny."); await openWizard(r.id);
     },
     openEval: b => openWizard(+b.dataset.id),
-    readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.view = "evalView"; render(); window.scrollTo(0, 0); },
+    readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.readFocus = b.dataset.comp || null; S.view = "evalView"; render(); window.scrollTo(0, 0); },
     submitEval: async () => {
       if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
       try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); surveyModal(S.cur.id); }
@@ -1272,21 +1376,47 @@
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
     toggleGoal: async b => { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshData(); render(); },
-    addGoal: () => openModal(`
+    addStep: async b => {
+      const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
+      if (!t || !t.trim()) return;
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshData(); render(); } catch (ex) { toast(ex.message); }
+    },
+    goalFromArea: b => act("addGoal", b),
+    addGoal: b => openModal(`
       <h2>Nowy cel SMART</h2>
       <form id="goalForm" novalidate>
-        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required>
+        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required value="${esc(b?.dataset?.area ? "Rozwój: " + b.dataset.area : "")}">
         <label class="f" for="gM">Mierzalnie (Measurable)</label><input id="gM" maxlength="200" required>
         <label class="f" for="gA">Osiągalnie (Achievable)</label><input id="gA" maxlength="200" required>
         <label class="f" for="gR">Istotnie (Relevant)</label><input id="gR" maxlength="200" required>
-        <label class="f" for="gT">Termin (Time-bound)</label><input id="gT" type="date" required>
+        <label class="f" for="gT">Termin (Time-bound)</label>
+        <input id="gT" class="date-in" inputmode="numeric" autocomplete="off" placeholder="DD.MM.RRRR" maxlength="10" required aria-describedby="gTHint gTErr">
+        <small id="gTHint" class="muted">Wpisz same cyfry – kropki dodają się same, np. 31122026.</small>
+        <div class="field-err" id="gTErr" role="alert"></div>
+        <fieldset class="plain"><legend class="f">Kroki (1–8) – po nich widać postęp</legend>
+          <p class="muted">Każdy krok da się sprawdzić: wykonany albo nie. Np. „Ukończone szkolenie”, „Pierwszy raport wysłany”.</p>
+          <div class="step-rows" id="gSteps">${[0, 1, 2].map(i => `<div class="step-row"><input data-step-in maxlength="150" aria-label="Krok ${i + 1}" placeholder="Krok ${i + 1}"></div>`).join("")}</div>
+          <button type="button" class="btn sm g" id="gAddStep" style="margin-top:8px">${KK_ICON("plus")}<span>Dodaj krok</span></button>
+        </fieldset>
+        <div class="field-err" id="gErr" role="alert"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Dodaj cel</button></div>
       </form>`, () => {
+      const date = dateMask($("#gT"), $("#gTErr"), { min: todayISO(), maxYears: 5 });
+      $("#gAddStep").addEventListener("click", () => {
+        const n = document.querySelectorAll("[data-step-in]").length;
+        if (n >= 8) return toast("Najwyżej 8 kroków.");
+        $("#gSteps").insertAdjacentHTML("beforeend", `<div class="step-row"><input data-step-in maxlength="150" aria-label="Krok ${n + 1}" placeholder="Krok ${n + 1}"></div>`);
+        document.querySelectorAll("[data-step-in]")[n].focus();
+      });
       $("#goalForm").addEventListener("submit", async e => {
         e.preventDefault();
         const v = id => $("#" + id).value.trim();
-        try { await api("POST", "/api/goals", { s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t: v("gT") }); closeModal(); toast("Dodano cel."); await refreshData(); render(); }
-        catch (ex) { toast(ex.message); }
+        const t = date.iso();
+        if (!t) { $("#gT").focus(); return; }
+        const steps = [...document.querySelectorAll("[data-step-in]")].map(x => x.value.trim()).filter(Boolean);
+        if (!steps.length) { $("#gErr").textContent = "Dodaj co najmniej jeden krok – po nim widać postęp."; document.querySelector("[data-step-in]").focus(); return; }
+        try { await api("POST", "/api/goals", { s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t, steps }); closeModal(); toast("Dodano cel."); await refreshData(); render(); }
+        catch (ex) { $("#gErr").textContent = ex.message; }
       });
     }),
     addEmp: () => openModal(`
@@ -1442,9 +1572,10 @@
     if (t.dataset.field && S.cur) {
       S.cur.data[t.dataset.field] = t.value; queueSave(); return;
     }
-    if (t.dataset.goal) {
-      $("#pv" + t.dataset.goal).textContent = t.value;
-      try { await api("PATCH", `/api/goals/${t.dataset.goal}`, { progress: +t.value }); await refreshData(); } catch (_) {}
+    if (t.dataset.goalStep) {
+      const [gid, si] = t.dataset.goalStep.split(":");
+      try { await api("PATCH", `/api/goals/${gid}`, { step: +si, done: t.checked }); await refreshData(); render(); }
+      catch (ex) { t.checked = !t.checked; toast(ex.message); }
     }
   });
   document.addEventListener("input", e => {
