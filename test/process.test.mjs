@@ -50,7 +50,7 @@ test('wyjątek dla istniejącego szkicu', async () => {
   assert.ok((await mgr.get(`/api/evals/${id}`)).body.timing.exception);
 });
 test('model zawiera cykl 24 mies. i regułę 6 mies.; dashboard pokazuje termin kolejnej oceny', async () => {
-  assert.deepEqual((await mgr.get('/api/model')).body.cycle, { cycleMonths: 24, minGapMonths: 6 });
+  assert.deepEqual((await mgr.get('/api/model')).body.cycle, { cycleMonths: 24, minGapMonths: 6, reevalMonths: 6, kickoffDays: 30 });
   const emp = await empWithPeriodic();
   const row = (await mgr.get('/api/dashboard')).body.team.find(t => t.id === emp);
   assert.equal(row.nextDue, '2028-06-30');

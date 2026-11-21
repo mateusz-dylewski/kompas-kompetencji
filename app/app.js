@@ -81,6 +81,68 @@
         <label class="f" for="actLink">Link (ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC)</label><input id="actLink" readonly value="${esc(a.link)}">`
         : `<p>Link wysłano na adres e-mail pracownika. Jest ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC.</p>`}
       <div class="btns"><button type="button" class="btn" data-act="closeModal">Zamknij</button></div>`, () => { const i = $("#actLink"); if (i) i.select(); });
+  // Rozmowa rozpoczynająca: arkusz, data, kryteria dodatkowe (maks. S.maxExtra, bez obowiązkowych), obowiązki, oczekiwania, cele
+  async function kickoffModal(empId) {
+    const emp = (S.dash.team || []).find(t => t.id === empId);
+    const list = (await api("GET", `/api/kickoffs?employeeId=${empId}`)).kickoffs;
+    const cur = list[0] && !list[0].ackAt ? list[0] : null;
+    const v = cur || { typ: "C", date: new Date().toISOString().slice(0, 10), extraCriteria: [], duties: "", expectations: "", goals: "" };
+    const extras = typ => MODEL.filter(m => !isMand(m.k, typ)).map(m => `<label class="choice"><input type="checkbox" data-extra="${esc(m.k)}" ${v.extraCriteria.includes(m.k) ? "checked" : ""}><span>${esc(nameOf(m.k))}</span></label>`).join("");
+    openModal(`
+      <h2 id="kTitle">Rozmowa rozpoczynająca – ${first(emp ? emp.name : "")}</h2>
+      <p class="muted">Termin: 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny.${list[0] && list[0].ackAt ? ` Ostatnia rozmowa: ${esc(list[0].date)} (zapoznano).` : ""}</p>
+      <form id="kForm" novalidate>
+        <fieldset class="plain"><legend class="f">Arkusz</legend>
+          <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>B – kierujący zespołem</span></label>
+          <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>C – pozostałe stanowiska</span></label></fieldset>
+        <label class="f" for="kDate">Data rozmowy</label><input id="kDate" type="date" required value="${esc(v.date)}">
+        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div></fieldset>
+        <label class="f" for="kDuties">Obowiązki na stanowisku</label><textarea id="kDuties" required minlength="10" maxlength="2000">${esc(v.duties)}</textarea>
+        <label class="f" for="kExp">Oczekiwania wobec realizacji kryteriów</label><textarea id="kExp" required minlength="10" maxlength="2000">${esc(v.expectations)}</textarea>
+        <label class="f" for="kGoals">Cele na okres oceny</label><textarea id="kGoals" required minlength="10" maxlength="2000">${esc(v.goals)}</textarea>
+        <div class="err" id="kErr" role="alert"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
+      </form>`, () => {
+      document.querySelectorAll('[name="kTyp"]').forEach(r => r.addEventListener("change", () => { v.typ = r.value; v.extraCriteria = []; $("#kExtras").innerHTML = extras(r.value); }));
+      $("#kForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const extra = [...document.querySelectorAll("[data-extra]:checked")].map(x => x.dataset.extra);
+        if (extra.length > S.maxExtra) { $("#kErr").textContent = `Najwyżej ${S.maxExtra} kryteria dodatkowe.`; return; }
+        const body = { typ: document.querySelector('[name="kTyp"]:checked').value, date: $("#kDate").value, extraCriteria: extra, duties: $("#kDuties").value, expectations: $("#kExp").value, goals: $("#kGoals").value };
+        try {
+          if (cur) await api("PUT", `/api/kickoffs/${cur.id}`, body); else await api("POST", "/api/kickoffs", { employeeId: empId, ...body });
+          closeModal(); toast("Zapisano rozmowę rozpoczynającą. Pracownik potwierdzi zapoznanie w swoim panelu."); await refreshData(); render();
+        } catch (ex) { $("#kErr").textContent = ex.data?.fields ? Object.values(ex.data.fields).join(" ") : ex.message; }
+      });
+    }, "kTitle");
+  }
+  // Dobrowolna ankieta po złożeniu oceny: zapisywana anonimowo (tylko wartość i miesiąc), do metryk zbiorczych
+  const surveyModal = evalId => openModal(`
+      <h2>Jedno pytanie (dobrowolne)</h2>
+      <p>Jak oceniasz swoje przygotowanie do rozmowy oceniającej z pomocą aplikacji?</p>
+      <form id="svForm"><fieldset class="plain"><legend class="sr">Ocena od 1 do 5</legend>
+        ${[1, 2, 3, 4, 5].map(n => `<label class="choice"><input type="radio" name="sv" value="${n}"><span>${n}${n === 1 ? " – słabo" : n === 5 ? " – bardzo dobrze" : ""}</span></label>`).join("")}</fieldset>
+        <p class="muted">Odpowiedź jest anonimowa: zapisujemy tylko wartość i miesiąc, bez Twoich danych i bez oceny. Wyniki widać zbiorczo, od 5 przełożonych.</p>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Pomiń</button><button class="btn" type="submit">Wyślij</button></div></form>`, () => {
+      $("#svForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        const r = document.querySelector('[name="sv"]:checked'); if (!r) return toast("Wybierz wartość albo pomiń.");
+        try { await api("POST", `/api/evals/${evalId}/survey`, { rating: +r.value }); closeModal(); toast("Dziękujemy."); } catch (ex) { toast(ex.message); }
+      });
+    });
+  async function loadMetrics() {
+    const box = $("#metricsCard"); if (!box) return;
+    let m; try { m = await api("GET", "/api/metrics"); } catch (ex) { box.querySelector("p").textContent = ex.message; return; }
+    const pct = v => (v === null || v === undefined ? "—" : `${v}%`);
+    box.innerHTML = `<h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2>` + (m.suppressed
+      ? `<div class="note warn">Metryki pokazujemy, gdy dane pochodzą od co najmniej ${m.kMin} przełożonych (obecnie ${m.managers}). Nie mierzymy pojedynczych osób.</div>`
+      : `<ul class="c">
+          <li>Ocenianie: miesiące okresu z co najmniej jednym dowodem – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
+          <li>Ocena na piśmie: od szkicu do złożenia – mediana <b>${m.submit.medianDays ?? "—"} dni</b>; poprawki po złożeniu: <b>${pct(m.submit.revisedPct)}</b></li>
+          <li>Rozmowa rozpoczynająca w terminie 30 dni: <b>${pct(m.kickoff.onTimePct)}</b> (${m.kickoff.n}); zmiana kryteriów dodatkowych po rozmowie: <b>${pct(m.kickoff.criteriaChangedPct)}</b></li>
+          <li>Przygotowanie do rozmowy (ankieta 1–5): ${m.prep.suppressed ? `za mało odpowiedzi (${m.prep.n})` : `mediana <b>${m.prep.median}</b> z ${m.prep.n} odpowiedzi`}</li></ul>
+        <p class="muted">Mediany i odsetki z ${m.evals} ocen ${m.managers} przełożonych. Bez danych o osobach, czasie pracy i aktywności. Czas przygotowania „z aplikacją i bez” oraz dokumenty poza systemem wymagają badania pilotażowego.</p>`);
+  }
   const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
 
   // ---------- Elementy wspólne ----------
@@ -408,6 +470,7 @@
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
     if (S.view === "month") { bindMonthPage(); loadMonth(); }
     if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
+    if (S.view === "results") loadMetrics();
     if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -444,6 +507,12 @@
           <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
           <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
         </div>
+        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(d.kickoff.date)})</h2>
+          <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
+          <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
+          <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
+          ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
+            : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
           <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
           <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
@@ -506,7 +575,8 @@
       const toDiscuss = d.team.filter(t => t.status === "submitted");
       const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
       const rows = d.team.map(t => `
-        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}</div></div></td>
+        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button></div></div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
@@ -517,7 +587,7 @@
         <section class="next card anim"><div class="next-ic" aria-hidden="true">${KK_ICON("arrow")}</div>
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
           <button class="btn" data-nav="evals">Przejdź do ocen</button></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} <button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button></li>`).join("")}</ul></div>` : ""}
+        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
           <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
@@ -536,6 +606,7 @@
         : `<p class="muted">Średnie z ${agg.n} ocen. Widok zbiorczy: nie pokazuje wyników pojedynczych osób.</p>${agg.competencies.map(x => `<div class="sb"><div class="row"><span class="sb-l">${compIc(x.k)}${esc(nameOf(x.k))}</span><span class="muted">${fmt(x.avg)} pkt</span></div>${bar(x.avg)}</div>`).join("")}`;
       return `<div class="grid two">
         <div class="card"><h2>Wyniki zespołu</h2>${body}</div>
+        <div class="card" id="metricsCard"><h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2><p class="muted">Wczytywanie…</p></div>
         <div class="card"><h2>Jak czytać ten widok</h2>
           <ul class="c"><li>Kompetencje posortowane od najsłabszej. To punkt startowy do rozmów, nie wyrok.</li>
           <li>Zbiorcze wyniki służą do planowania szkoleń i mentoringu.</li>
@@ -1149,9 +1220,11 @@
     logout: async () => { await api("POST", "/api/logout").catch(() => {}); S.user = null; S.view = "home"; renderLogin(); },
     newEval: async (b) => {
       const emp = (S.dash.team || []).find(t => t.id === +b.dataset.emp);
-      const typ = prompt("Rodzaj oceny: pierwsza, B lub C", "B");
+      // Po rozmowie rozpoczynającej: arkusz z rozmowy i okres od dnia zapoznania z kryteriami
+      const k = emp.kickoff && emp.kickoff.ackAt && !emp.kickoff.evalId ? emp.kickoff : null;
+      const typ = prompt("Rodzaj oceny: pierwsza, B lub C", k ? k.typ : "B");
       if (!typ || !["pierwsza", "B", "C"].includes(typ.trim())) return toast("Nieprawidłowy rodzaj oceny.");
-      const from = prompt("Okres od (RRRR-MM-DD)", "2026-01-01"), to = prompt("Okres do (RRRR-MM-DD)", "2026-06-30");
+      const from = prompt(k ? "Okres od (RRRR-MM-DD) – dzień zapoznania z kryteriami" : "Okres od (RRRR-MM-DD)", k ? k.ackAt.slice(0, 10) : "2026-01-01"), to = prompt("Okres do (RRRR-MM-DD)", "2026-06-30");
       const body = { employeeId: emp.id, typ: typ.trim(), periodFrom: from, periodTo: to };
       let r;
       try { r = await api("POST", "/api/evals", body); }
@@ -1168,7 +1241,7 @@
     readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.view = "evalView"; render(); window.scrollTo(0, 0); },
     submitEval: async () => {
       if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
-      try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); }
+      try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); surveyModal(S.cur.id); }
       catch (e) { toast(e.message); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
     },
     discussEval: async () => {
@@ -1234,6 +1307,12 @@
     }),
     resendActivation: async b => {
       try { const r = await api("POST", `/api/employees/${b.dataset.emp}/activation`); activationInfo(r.activation); }
+      catch (ex) { toast(ex.message); }
+    },
+    kickoff: b => kickoffModal(+b.dataset.emp),
+    ackKickoff: async b => {
+      if (!confirm("Potwierdzasz zapoznanie z obowiązkami, kryteriami i celami na ten okres oceny?")) return;
+      try { await api("POST", `/api/kickoffs/${b.dataset.id}/acknowledge`); toast("Zapisano zapoznanie."); await refreshData(); render(); }
       catch (ex) { toast(ex.message); }
     },
     closeModal: () => closeModal(),
