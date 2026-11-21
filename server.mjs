@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { buildPdf, buildXml, computeResults } from './lib/documents.mjs';
+import { buildXml, computeResults } from './lib/documents.mjs';
+import { buildFormPdf } from './lib/forms.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8080;
@@ -317,7 +318,7 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
   const format = url.searchParams.get('format') === 'xml' ? 'xml' : 'pdf';
   const inline = url.searchParams.get('inline') === '1';
   const kind = ev.typ;
-  const emp = db.prepare('SELECT name,position FROM users WHERE id=?').get(ev.employee_id);
+  const emp = db.prepare('SELECT name,position,unit FROM users WHERE id=?').get(ev.employee_id);
   const mgr = db.prepare('SELECT name,position,unit FROM users WHERE id=?').get(ev.evaluator_id);
   const data = JSON.parse(ev.data || '{}');
   const model = MODEL;
@@ -332,7 +333,7 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
     res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.xml"`, 'cache-control': 'no-store', ...SECURITY });
     return res.end(body);
   }
-  const pdfBytes = await buildPdf(kind, ctx);
+  const pdfBytes = await buildFormPdf(kind, ctx);
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(pdfBytes));
 });

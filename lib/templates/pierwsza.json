@@ -1,0 +1,373 @@
+[
+ {
+  "p": "Załącznik nr 2"
+ },
+ {
+  "p": "WZÓR"
+ },
+ {
+  "p": "ARKUSZ PIERWSZEJ OCENY W SŁUŻBIE CYWILNEJ"
+ },
+ {
+  "p": "CZĘŚĆ OGÓLNA"
+ },
+ {
+  "t": 0,
+  "rows": [
+   [
+    "NAZWA URZĘDU",
+    ""
+   ]
+  ]
+ },
+ {
+  "p": "DANE OCENIANEGO"
+ },
+ {
+  "t": 1,
+  "rows": [
+   [
+    "Imię",
+    ""
+   ],
+   [
+    "Nazwisko",
+    ""
+   ],
+   [
+    "Komórka organizacyjna",
+    ""
+   ],
+   [
+    "Stanowisko pracy",
+    ""
+   ],
+   [
+    "Data nawiązania stosunku pracy)",
+    "(dd.mm.rrrr)"
+   ]
+  ]
+ },
+ {
+  "p": "DANE BEZPOŚREDNIEGO PRZEŁOŻONEGO"
+ },
+ {
+  "t": 2,
+  "rows": [
+   [
+    "Imię",
+    ""
+   ],
+   [
+    "Nazwisko",
+    ""
+   ],
+   [
+    "Komórka organizacyjna",
+    ""
+   ],
+   [
+    "Stanowisko pracy",
+    ""
+   ]
+  ]
+ },
+ {
+  "p": "DANE KIERUJĄCEGO KOMÓRKĄ ORGANIZACYJNĄ"
+ },
+ {
+  "t": 3,
+  "rows": [
+   [
+    "Imię",
+    ""
+   ],
+   [
+    "Nazwisko",
+    ""
+   ],
+   [
+    "Komórka organizacyjna",
+    ""
+   ],
+   [
+    "Stanowisko pracy",
+    ""
+   ]
+  ]
+ },
+ {
+  "p": "ROZMOWA WSTĘPNA"
+ },
+ {
+  "t": 4,
+  "rows": [
+   [
+    "Data przeprowadzenia rozmowy wstępnej",
+    "(dd.mm.rrrr)"
+   ],
+   [
+    "Termin wyznaczony na złożenie sprawozdania dotyczącego zadań realizowanych przez ocenianego w trakcie przepracowanego okresu",
+    "od (dd.mm.rrrr) – do (dd.mm.rrrr)"
+   ],
+   [
+    "Okres, w którym powinna zostać dokonana pierwsza ocena w służbie cywilnej",
+    "od (dd.mm.rrrr) – do (dd.mm.rrrr)"
+   ]
+  ]
+ },
+ {
+  "t": 5,
+  "rows": [
+   [
+    "Potwierdzamy przeprowadzenie rozmowy wstępnej oraz wyznaczenie terminu na złożenie sprawozdania i zapoznanie z nim ocenianego."
+   ],
+   [
+    "………………………………….",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "podpis bezpośredniego przełożonego"
+   ],
+   [
+    "………………………………….",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "podpis ocenianego"
+   ]
+  ]
+ },
+ {
+  "p": "ROZMOWA OCENIAJĄCA"
+ },
+ {
+  "t": 6,
+  "rows": [
+   [
+    "Data przeprowadzenia rozmowy oceniającej",
+    "(dd.mm.rrrr)"
+   ]
+  ]
+ },
+ {
+  "t": 7,
+  "rows": [
+   [
+    "Potwierdzamy przeprowadzenie rozmowy oceniającej i omówienie w trakcie tej rozmowy wszystkich wymaganych zagadnień)."
+   ],
+   [
+    "…………………………",
+    "…………………………",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "imię i nazwisko lub pieczątka bezpośredniego przełożonego",
+    "podpis bezpośredniego przełożonego"
+   ],
+   [
+    "…………………………",
+    "…………………………",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "imię i nazwisko lub pieczątka ocenianego",
+    "podpis ocenianego"
+   ]
+  ]
+ },
+ {
+  "p": "OCENA POSTAWY OCENIANEGO, JEGO ZAANGAŻOWANIA I POSTĘPÓW W PRACY, RELACJI ZE WSPÓŁPRACOWNIKAMI ORAZ TERMINOWOŚCI WYKONYWANIA ZADAŃ"
+ },
+ {
+  "t": 8,
+  "rows": [
+   [
+    "ELEMENTY OCENY)",
+    "OCENA CZĄSTKOWA (należy wstawić znak „X” w odpowiednie pole)"
+   ],
+   [
+    "ELEMENTY OCENY)",
+    "poniżej oczekiwań",
+    "na poziomie oczekiwań",
+    "powyżej oczekiwań"
+   ],
+   [
+    "ELEMENTY OCENY)",
+    "3 punkty",
+    "5 punktów",
+    "7 punktów"
+   ],
+   [
+    "Rzetelność",
+    "",
+    "",
+    ""
+   ],
+   [
+    "Wykorzystywanie wiedzy i doskonalenie zawodowe",
+    "",
+    "",
+    ""
+   ],
+   [
+    "Organizacja pracy i orientacja na osiąganie celów",
+    "",
+    "",
+    ""
+   ],
+   [
+    "Komunikacja",
+    "",
+    "",
+    ""
+   ],
+   [
+    "Współpraca",
+    "",
+    "",
+    ""
+   ],
+   [
+    "OCENA ŁĄCZNA)",
+    ""
+   ]
+  ]
+ },
+ {
+  "p": "PIERWSZA OCENA W SŁUŻBIE CYWILNEJ"
+ },
+ {
+  "t": 9,
+  "rows": [
+   [
+    "OCENIANY ZALICZYŁ EGZAMIN ZE SŁUŻBY PRZYGOTOWAWCZEJ (należy wstawić znak „X” w odpowiednie pole)"
+   ],
+   [
+    "TAK",
+    "",
+    "NIE",
+    "",
+    "NIE DOTYCZY)",
+    ""
+   ]
+  ]
+ },
+ {
+  "t": 10,
+  "rows": [
+   [
+    "SPRAWOZDANIE ZOSTAŁO ZŁOŻONE W WYZNACZONYM TERMINIE (należy wstawić znak „X” w odpowiednie pole)"
+   ],
+   [
+    "TAK",
+    "",
+    "NIE",
+    ""
+   ]
+  ]
+ },
+ {
+  "t": 11,
+  "rows": [
+   [
+    "PIERWSZA OCENA W SŁUŻBIE CYWILNEJ (należy wstawić znak „X” w odpowiednie pole)"
+   ],
+   [
+    "POZYTYWNA)",
+    "",
+    "NEGATYWNA",
+    ""
+   ]
+  ]
+ },
+ {
+  "t": 12,
+  "rows": [
+   [
+    "UZASADNIENIE PRZYZNANEJ OCENY)"
+   ],
+   [
+    ""
+   ]
+  ]
+ },
+ {
+  "p": "WNIOSKI DOTYCZĄCE ROZWOJU ZAWODOWEGO OCENIANEGO"
+ },
+ {
+  "t": 13,
+  "rows": [
+   [
+    "WNIOSKI DOTYCZĄCE ROZWOJU ZAWODOWEGO OCENIANEGO)"
+   ],
+   [
+    ""
+   ]
+  ]
+ },
+ {
+  "t": 14,
+  "rows": [
+   [
+    "POTWIERDZENIE DOKONANIA PIERWSZEJ OCENY W SŁUŻBIE CYWILNEJ"
+   ],
+   [
+    "…………………………",
+    "…………………………",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "imię i nazwisko lub pieczątka bezpośredniego przełożonego",
+    "podpis bezpośredniego przełożonego"
+   ],
+   [
+    "…………………………",
+    "…………………………",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "imię i nazwisko lub pieczątka kierującego komórką organizacyjną",
+    "podpis kierującego komórką organizacyjną"
+   ]
+  ]
+ },
+ {
+  "t": 15,
+  "rows": [
+   [
+    "Zapoznałam(-łem) się z pierwszą oceną w służbie cywilnej."
+   ],
+   [
+    "…………………………",
+    "…………………………",
+    "………………………………….",
+    "…………………………………."
+   ],
+   [
+    "miejscowość",
+    "data (dd.mm.rrrr)",
+    "imię i nazwisko lub pieczątka ocenianego",
+    "podpis ocenianego"
+   ]
+  ]
+ }
+]

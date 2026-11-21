@@ -65,7 +65,7 @@ Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostę
 
 Po wypełnieniu oceny (krok „Rozmowa i wynik”) można pobrać lub podejrzeć:
 
-- **PDF:** Arkusz pierwszej oceny, Arkusz B (kierownicze) i Arkusz C (pozostałe stanowiska), wg rozporządzenia z 4.04.2016 (Dz. U. poz. 470).
+- **PDF:** układ odtwarza oficjalne wzory z pakietu wyzwania (Arkusz pierwszej oceny, Arkusz B, Arkusz C). Struktura bloków i tabel jest w `lib/templates/*.json`, wyekstrahowana z plików .docx. Renderer: `lib/forms.mjs`.
 - **XML:** własny schemat `urn:kompas-kompetencji:arkusz:v1`. Oficjalnego XSD nie znaleziono, więc format trzeba uzgodnić z zamawiającym.
 
 Dane do dokumentu: kryteria obowiązkowe (B i C mają różne listy), dodatkowe (maks. 3), oceny cząstkowe i średnia, poziom wg przedziałów z rozporządzenia, wynik pozytywny/negatywny, uzasadnienie, wnioski rozwojowe.
