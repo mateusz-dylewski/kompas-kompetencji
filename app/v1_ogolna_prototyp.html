@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kompas Kompetencji</title>
+<style>
+:root{--primary:#1b4f9c;--primary-d:#133a75;--bg:#f2f4f7;--card:#fff;--text:#1d2433;--muted:#5b6578;--line:#dfe3ea;--ok:#1e7b46;--warn:#b26a00;--radius:12px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1420;--card:#1a2130;--text:#e8ecf3;--muted:#9aa4b5;--line:#2a3345;--primary:#6a9be6;--primary-d:#4f80d4}}
+:root[data-theme="dark"]{--bg:#0f1420;--card:#1a2130;--text:#e8ecf3;--muted:#9aa4b5;--line:#2a3345;--primary:#6a9be6;--primary-d:#4f80d4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--primary);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
+header .logo{width:36px;height:36px;border-radius:50%;background:#fff;color:var(--primary);display:grid;place-items:center;font-weight:700}
+header h1{font-size:18px;margin:0}
+header small{opacity:.85;display:block;font-size:12px}
+nav{display:flex;gap:8px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+nav button{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;font-weight:600;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
+main{max-width:920px;margin:0 auto;padding:16px}
+.grid{display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:760px){.grid.two{grid-template-columns:1fr 1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card h2{font-size:17px;margin:0 0 10px}
+.muted{color:var(--muted);font-size:14px}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden;margin:4px 0 12px}
+.bar i{display:block;height:100%;background:var(--primary)}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--line);margin-right:4px}
+.tag.ok{background:#d9f2e3;color:var(--ok)}.tag.warn{background:#fdebc8;color:var(--warn)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .tag.ok{background:#1d3b2a}:root:not([data-theme="light"]) .tag.warn{background:#3d2e10}}
+form{display:grid;gap:10px}
+label{font-size:14px;font-weight:600}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+.btn{padding:12px 16px;border:0;border-radius:8px;background:var(--primary);color:#fff;font-weight:700;cursor:pointer}
+.btn:hover{background:var(--primary-d)}
+.btn.ghost{background:transparent;color:var(--primary);border:1px solid var(--primary)}
+.btn:focus-visible,nav button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #ffb703;outline-offset:2px}
+ul.clean{list-style:none;padding:0;margin:0}
+ul.clean li{padding:10px 0;border-bottom:1px solid var(--line)}
+ul.clean li:last-child{border:0}
+.notice{font-size:13px;color:var(--muted);border-left:3px solid var(--primary);padding:8px 12px;margin-top:16px}
+.hidden{display:none}
+.consent{display:flex;gap:8px;align-items:flex-start;font-weight:400}
+.consent input{width:auto;margin-top:4px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" aria-hidden="true">K</div>
+  <div><h1>Kompas Kompetencji</h1><small>Rozwój, który widać. Wsparcie, które działa.</small></div>
+</header>
+
+<nav role="tablist" aria-label="Widok">
+  <button role="tab" id="t-emp" aria-controls="v-emp" aria-selected="true">Pracownik</button>
+  <button role="tab" id="t-emr" aria-controls="v-emr" aria-selected="false">Pracodawca</button>
+  <button role="tab" id="t-law" aria-controls="v-law" aria-selected="false">Prywatność</button>
+</nav>
+
+<main>
+  <!-- ===== POZYCJA PRACOWNIKA ===== -->
+  <section id="v-emp" role="tabpanel" aria-labelledby="t-emp">
+    <div class="grid two">
+      <div class="card">
+        <h2>Twój profil kompetencji</h2>
+        <p class="muted">Samoocena 1–5. Dane widzisz tylko Ty i wskazana przez Ciebie osoba.</p>
+        <div id="skills"></div>
+      </div>
+      <div class="card">
+        <h2>Twoje cele SMART</h2>
+        <ul class="clean" id="goals"></ul>
+        <form id="goalForm" style="margin-top:12px">
+          <label for="gS">Konkretny cel (Specific)</label>
+          <input id="gS" required maxlength="120" placeholder="np. Obsługa narzędzia analitycznego">
+          <label for="gM">Mierzalny wskaźnik (Measurable)</label>
+          <input id="gM" required maxlength="120" placeholder="np. 2 raporty miesięcznie samodzielnie">
+          <label for="gA">Osiągalny (Achievable)</label>
+          <input id="gA" required maxlength="120" placeholder="np. 2 godziny szkolenia tygodniowo">
+          <label for="gR">Istotny (Relevant)</label>
+          <input id="gR" required maxlength="120" placeholder="np. Przejęcie raportowania zespołu">
+          <label for="gT">Termin (Time-bound)</label>
+          <input id="gT" type="date" required>
+          <button class="btn" type="submit">Dodaj cel</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Rekomendowane kroki</h2>
+        <ul class="clean" id="steps"></ul>
+        <p class="notice">Rekomendacje są podpowiedziami, nie oceną i nie wpływają automatycznie na decyzje o zatrudnieniu lub wynagrodzeniu.</p>
+      </div>
+      <div class="card">
+        <h2>Zgoda na udostępnienie pracodawcy</h2>
+        <label class="consent"><input type="checkbox" id="consentShare"> Udostępnij pracodawcy moje cele i profil w formie zanonimizowanej (dobrowolne, możesz cofnąć w każdej chwili).</label>
+        <p class="muted" id="consentState"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== POZYCJA PRACODAWCY ===== -->
+  <section id="v-emr" role="tabpanel" aria-labelledby="t-emr" class="hidden">
+    <div class="grid two">
+      <div class="card">
+        <h2>Kompetencje zespołu (zbiorczo)</h2>
+        <p class="muted">Pokazujemy wyłącznie średnie z grup min. 5 osób. Nie ma widoku indywidualnego.</p>
+        <div id="teamSkills"></div>
+      </div>
+      <div class="card">
+        <h2>Luki i szanse</h2>
+        <ul class="clean" id="gaps"></ul>
+      </div>
+      <div class="card">
+        <h2>Jak mogę wesprzeć zespół?</h2>
+        <ul class="clean" id="helps"></ul>
+      </div>
+      <div class="card">
+        <h2>Cele zespołu (SMART)</h2>
+        <p class="muted" id="teamGoalsInfo"></p>
+        <div class="row"><span>Cele z zgodą na udostępnienie</span><b id="sharedCount">0</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== PRYWATNOŚĆ ===== -->
+  <section id="v-law" role="tabpanel" aria-labelledby="t-law" class="hidden">
+    <div class="card">
+      <h2>Ochrona danych i zgodność z prawem</h2>
+      <ul class="clean">
+        <li><span class="tag ok">RODO</span> Dane przetwarzane na podstawie zgody (art. 6 ust. 1 lit. a) lub uzasadnionego interesu z testem równowagi; zgoda dobrowolna i cofalna.</li>
+        <li><span class="tag ok">Minimalizacja</span> Pracodawca widzi wyłącznie agregaty z grup min. 5 osób; brak ocen indywidualnych.</li>
+        <li><span class="tag ok">Brak decyzji automatycznych</span> Wyniki nie służą do zwolnień ani ocen okresowych bez udziału człowieka (art. 22 RODO).</li>
+        <li><span class="tag ok">AI Act (UE 2024/1689)</span> Narzędzie nie jest systemem wysokiego ryzyka w rozumieniu zatrudnienia, o ile nie jest używane do oceny pracowników; wymaga to potwierdzenia prawnego przed wdrożeniem.</li>
+        <li><span class="tag ok">Dostępność</span> Cel: WCAG 2.1 AA; zgodność z ustawą o dostępności cyfrowej i dyrektywą (UE) 2019/882.</li>
+        <li><span class="tag warn">Do zrobienia przed wdrożeniem</span> DPIA, umowa powierzenia (art. 28 RODO), polityka prywatności, prawo do usunięcia danych, audyt bezpieczeństwa.</li>
+      </ul>
+      <p class="notice">Prototyp. Ten ekran nie stanowi porady prawnej. Dane prototypu zapisują się wyłącznie w przeglądarce.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const KEY = "kk_v1";
+  const SKILLS = ["Komunikacja", "Analiza danych", "Praca zespołowa", "Obsługa narzędzi cyfrowych", "Zarządzanie czasem"];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  // Stan (per przeglądarka; w produkcji: backend z uwierzytelnieniem)
+  let state = { skills: {}, goals: [], share: false };
+  try { state = { ...state, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch (_) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {} };
+  SKILLS.forEach(s => state.skills[s] ??= 3);
+
+  // Pracownik: suwaki samooceny
+  function renderSkills() {
+    $("skills").innerHTML = SKILLS.map(s => `
+      <div>
+        <div class="row"><label for="s_${esc(s)}">${esc(s)}</label><span class="muted">${state.skills[s]}/5</span></div>
+        <input type="range" min="1" max="5" id="s_${esc(s)}" value="${state.skills[s]}" data-skill="${esc(s)}">
+        <div class="bar"><i style="width:${state.skills[s]*20}%"></i></div>
+      </div>`).join("");
+    $("skills").querySelectorAll("input[type=range]").forEach(el => el.addEventListener("input", e => {
+      state.skills[e.target.dataset.skill] = +e.target.value; save(); renderAll();
+    }));
+  }
+
+  function renderGoals() {
+    $("goals").innerHTML = state.goals.length ? state.goals.map((g, i) => `
+      <li><div class="row"><b>${esc(g.S)}</b><span class="tag ${g.done ? "ok" : "warn"}">${g.done ? "zrealizowany" : "w toku"}</span></div>
+      <div class="muted">Miara: ${esc(g.M)} · Termin: ${esc(g.T)}</div>
+      <div class="muted">Osiągalny: ${esc(g.A)} · Istotny: ${esc(g.R)}</div>
+      <button class="btn ghost" data-i="${i}" style="margin-top:6px;padding:6px 10px">${g.done ? "Cofnij" : "Oznacz jako zrobiony"}</button></li>`).join("")
+      : `<li class="muted">Brak celów. Dodaj pierwszy poniżej.</li>`;
+    $("goals").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      const g = state.goals[+b.dataset.i]; g.done = !g.done; save(); renderAll();
+    }));
+  }
+
+  function steps() {
+    const sorted = Object.entries(state.skills).sort((a, b) => a[1] - b[1]);
+    const [low] = sorted;
+    const out = [];
+    out.push(`Najmocniejsza strona: <b>${esc(sorted[sorted.length-1][0])}</b> — rozważ rolę mentora.`);
+    if (low) out.push(`Obszar do rozwoju: <b>${esc(low[0])}</b> (${low[1]}/5). Proponowany krok: 2 godziny ćwiczeń tygodniowo przez 6 tygodni.`);
+    const open = state.goals.filter(g => !g.done).length;
+    out.push(open ? `Masz ${open} cel(e) w toku. Przegląd raz w miesiącu.` : "Dodaj cel SMART, aby zaplanować rozwój.");
+    return out;
+  }
+
+  // Pracodawca: agregaty tylko przy k >= 5
+  function renderEmployer() {
+    const K = 5;
+    const people = [{ ...state.skills }, ...demoTeam()]; // demo: symulowany zespół
+    const n = people.length;
+    if (n < K) {
+      $("teamSkills").innerHTML = `<p class="muted">Za mało osób (min. ${K}) do pokazania wyników zbiorczych.</p>`;
+      return;
+    }
+    const avg = {};
+    SKILLS.forEach(s => avg[s] = people.reduce((a, p) => a + p[s], 0) / n);
+    $("teamSkills").innerHTML = SKILLS.map(s => `
+      <div><div class="row"><span>${esc(s)}</span><span class="muted">śr. ${avg[s].toFixed(1)}/5</span></div>
+      <div class="bar"><i style="width:${avg[s]*20}%"></i></div></div>`).join("");
+    const sorted = Object.entries(avg).sort((a, b) => a[1] - b[1]);
+    $("gaps").innerHTML = sorted.slice(0, 2).map(([s, v]) =>
+      `<li><span class="tag warn">luka</span> <b>${esc(s)}</b> (śr. ${v.toFixed(1)}/5)</li>`).join("") +
+      `<li><span class="tag ok">mocna strona</span> <b>${esc(sorted[sorted.length-1][0])}</b></li>`;
+    $("helps").innerHTML = [
+      `Szkolenie grupowe: <b>${esc(sorted[0][0])}</b> — zaplanuj 8 godzin w ciągu kwartału.`,
+      `Rotacja zadań i mentoring wewnętrzny w obszarze <b>${esc(sorted[sorted.length-1][0])}</b>.`,
+      `Sprawdź dofinansowanie szkoleń (np. Krajowy Fundusz Szkoleniowy, KFS) i środki z Funduszu Europejskiego.`,
+      `Przegląd celów SMART z zespołem co kwartał, bez oceny indywidualnej.`
+    ].map(t => `<li>${t}</li>`).join("");
+    $("teamGoalsInfo").textContent = `Zespół: ${n} osób (w tym symulacja demo).`;
+    $("sharedCount").textContent = state.share ? state.goals.length : 0;
+  }
+
+  function demoTeam() {
+    // Dane demonstracyjne do prezentacji; w produkcji zastąpione danymi z systemu
+    return [
+      { "Komunikacja": 4, "Analiza danych": 2, "Praca zespołowa": 4, "Obsługa narzędzi cyfrowych": 3, "Zarządzanie czasem": 3 },
+      { "Komunikacja": 3, "Analiza danych": 2, "Praca zespołowa": 5, "Obsługa narzędzi cyfrowych": 4, "Zarządzanie czasem": 2 },
+      { "Komunikacja": 4, "Analiza danych": 3, "Praca zespołowa": 4, "Obsługa narzędzi cyfrowych": 2, "Zarządzanie czasem": 3 },
+      { "Komunikacja": 2, "Analiza danych": 2, "Praca zespołowa": 3, "Obsługa narzędzi cyfrowych": 3, "Zarządzanie czasem": 4 },
+      { "Komunikacja": 5, "Analiza danych": 3, "Praca zespołowa": 4, "Obsługa narzędzi cyfrowych": 3, "Zarządzanie czasem": 3 }
+    ];
+  }
+
+  function renderAll() {
+    renderSkills(); renderGoals();
+    $("steps").innerHTML = steps().map(t => `<li>${t}</li>`).join("");
+    $("consentShare").checked = !!state.share;
+    $("consentState").textContent = state.share ? "Udostępnianie włączone." : "Udostępnianie wyłączone.";
+    renderEmployer();
+  }
+
+  $("goalForm").addEventListener("submit", e => {
+    e.preventDefault();
+    state.goals.push({ S: $("gS").value, M: $("gM").value, A: $("gA").value, R: $("gR").value, T: $("gT").value, done: false });
+    e.target.reset(); save(); renderAll();
+  });
+  $("consentShare").addEventListener("change", e => { state.share = e.target.checked; save(); renderAll(); });
+
+  // Zakładki
+  const tabs = [["t-emp","v-emp"],["t-emr","v-emr"],["t-law","v-law"]];
+  tabs.forEach(([t, v]) => $(t).addEventListener("click", () => {
+    tabs.forEach(([t2, v2]) => { $(t2).setAttribute("aria-selected", t2 === t); $(v2).classList.toggle("hidden", v2 !== v); });
+  }));
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="56" viewBox="0 0 300 56" role="img" aria-label="Kompas Kompetencji 2027">
+  <circle cx="26" cy="28" r="22" fill="none" stroke="#1c3f74" stroke-width="3"/>
+  <path d="M34 18 L29 29 L18 34 L23 23 Z" fill="#2c6fd1"/>
+  <circle cx="26" cy="28" r="2.5" fill="#1c3f74"/>
+  <text x="60" y="27" font-family="system-ui,Arial,sans-serif" font-size="19" font-weight="700" fill="#1c3f74">Kompas Kompetencji</text>
+  <text x="60" y="46" font-family="system-ui,Arial,sans-serif" font-size="13" fill="#5a6678">2027</text>
+</svg>
