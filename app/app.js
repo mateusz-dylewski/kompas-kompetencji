@@ -240,9 +240,8 @@
   }
   function footer(extra = "") {
     return `<footer class="foot-gov ${extra}"><div class="logos">
-      <img src="app/assets/logo-mc.png" alt="Ministerstwo Cyfryzacji">
-      <span class="kk-brand"><img class="kk-mark" src="app/assets/icon-kk.png" alt="" width="44" height="44"><img src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027" width="200" height="37"></span></div>
-      <small>Kompas Kompetencji 2027</small></footer>`;
+      <img src="app/assets/logo-mc.png" alt="Ministerstwo Cyfryzacji"></div>
+    </footer>`;
   }
 
   // ---------- Dane ----------
