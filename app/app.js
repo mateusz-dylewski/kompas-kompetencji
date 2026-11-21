@@ -150,16 +150,21 @@
         </form>
         <p class="note">Konta demonstracyjne są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
       </div></div>${footer("foot-login")}</div>`;
-    const DEMO = { przelozony: "przelozony@demo.kk", pracownik: "pracownik1@demo.kk" };
-    document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => {
-      $("#lEmail").value = DEMO[b.dataset.demo]; $("#lPass").value = "Demo-kompas-2026!"; $("#lPass").focus();
-    }));
+    // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
+    const demoRow = $(".demo-row");
+    fetch("/api/demo").then(r => r.json()).then(d => {
+      if (!d.enabled) { demoRow.hidden = true; return; }
+      const DEMO = { przelozony: d.manager, pracownik: d.employee };
+      document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => {
+        $("#lEmail").value = DEMO[b.dataset.demo]; if (d.password) $("#lPass").value = d.password; $("#lPass").focus();
+      }));
+    }).catch(() => { demoRow.hidden = true; });
     $("#loginForm").addEventListener("submit", async e => {
       e.preventDefault();
       try {
         const j = await api("POST", "/api/login", { email: $("#lEmail").value, password: $("#lPass").value });
         S.user = j.user; S.view = "home"; await load(); render();
-      } catch (ex) { renderLogin(ex.message); }
+      } catch (ex) { const em = $("#lEmail").value; renderLogin(ex.message); $("#lEmail").value = em; $("#lPass").focus(); }
     });
   }
   function footer(extra = "") {
@@ -206,7 +211,7 @@
             <span class="spacer"></span>${aiPill}
             <button class="btn sm g hdr-logout" data-act="logout" aria-label="Wyloguj">⎋</button>
           </header>
-          <main class="view" id="view">
+          <main class="view" id="view" tabindex="-1">
             ${opts.hidePageHead ? "" : `<div class="page-h"><h1>${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
             ${content}
           </main>
@@ -216,6 +221,7 @@
       </div>`;
   }
 
+  let lastPageKey = "";
   function render() {
     if (!S.user) return renderLogin();
     const root = $("#root");
@@ -228,7 +234,18 @@
       navView = p[0]; title = p[1]; sub = p[3];
       html = u.role === "pracownik" ? empPage(S.view) : mgrPage(S.view);
     }
+    // Fokus: przy zmianie strony/kroku przenosimy go na treść (czytnik ogłasza nowy widok);
+    // przy odświeżeniu tej samej strony (np. wybór poziomu) wracamy do tego samego pola
+    const pageKey = S.view + (S.view === "wizard" && S.cur ? ":" + S.cur.step : "");
+    const a = document.activeElement;
+    const sel = a && a !== document.body && root.contains(a) ? (a.id ? "#" + CSS.escape(a.id)
+      : a.name ? `[name="${CSS.escape(a.name)}"][value="${CSS.escape(a.value)}"]`
+      : a.dataset.act ? `[data-act="${CSS.escape(a.dataset.act)}"]${a.dataset.id ? `[data-id="${CSS.escape(a.dataset.id)}"]` : ""}`
+      : a.dataset.nav ? `.side-nav [data-nav="${CSS.escape(a.dataset.nav)}"]` : a.dataset.wiz ? `[data-wiz="${CSS.escape(a.dataset.wiz)}"]` : null) : null;
+    const pageChanged = pageKey !== lastPageKey; lastPageKey = pageKey;
     root.innerHTML = shell(html, navView, title, sub, opts);
+    if (pageChanged && sel) $("#view")?.focus({ preventScroll: true });
+    else if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
     bindShell();
     animateIn(root);
     if (S.view === "log") loadLog();

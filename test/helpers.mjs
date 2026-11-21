@@ -4,16 +4,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LOCAL_DEMO_PASSWORD } from '../lib/seed-config.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const DEMO_PASS = 'Demo-kompas-2026!'; // lokalna wartość domyślna z konfiguracji seedu (tylko tryb lokalny)
+export const DEMO_PASS = LOCAL_DEMO_PASSWORD; // lokalna wartość domyślna z konfiguracji seedu (tylko tryb lokalny)
 
 export async function startServer(env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kk-test-'));
   const child = spawn(process.execPath, ['--no-warnings', 'server.mjs'], {
     cwd: ROOT,
     // AI kierujemy na zamknięty port: testy idą ścieżką reguł, bez czekania na model
-    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', ...env },
+    // Tryb lokalny z domyślnym hasłem demo, niezależnie od zmiennych w powłoce
+    env: { ...process.env, PORT: '0', KK_DATA_DIR: dir, KK_AI_URL: 'http://127.0.0.1:9', KK_MODE: 'local', KK_DEMO_PASSWORD: '', KK_SEED_DEMO: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';

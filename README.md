@@ -30,7 +30,15 @@ Testy używają wbudowanego `node:test`, bez dodatkowych zależności. `test/doc
 | Przełożony | przelozony@demo.kk | Demo-kompas-2026! |
 | Pracownik | pracownik1@demo.kk … pracownik6@demo.kk | Demo-kompas-2026! |
 
-Dane demo tworzą się przy pierwszym uruchomieniu (`data/kompas.db`). Aby zresetować: zatrzymaj serwer i usuń folder `data/`.
+Dane demo (fikcyjne) tworzą się przy pierwszym uruchomieniu (`data/kompas.db`). Aby zresetować: zatrzymaj serwer i usuń folder `data/`.
+
+Hasło kont demo pochodzi z konfiguracji seedu (`lib/seed-config.mjs`):
+
+- `KK_DEMO_PASSWORD`: własne hasło demo (min. 10 znaków). Ekran logowania nie podpowiada go wtedy.
+- Bez tej zmiennej działa publiczna wartość domyślna z tabeli powyżej, **tylko w trybie lokalnym**.
+- `KK_MODE=production`: bez domyślnego hasła i bez kont demo. Seed jest możliwy tylko z `KK_SEED_DEMO=1` i `KK_DEMO_PASSWORD`. Cookie dostaje flagę `Secure`, a odpowiedzi nagłówek HSTS.
+- `KK_SEED_DEMO=0`: nie twórz kont demo także lokalnie.
+
 Hasła demo są tylko do testów lokalnych. Nie używaj ich nigdzie poza tym prototypem.
 
 ## AI (lokalny Qwen)
@@ -128,7 +136,10 @@ Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową w
 
 ## Ograniczenia prototypu
 
-- Brak HTTPS i rotacji sesji; sesje w pamięci serwera.
+- Brak HTTPS; sesje i licznik nieudanych logowań są w pamięci serwera (reset po restarcie).
+- Limit logowania: 5 nieudanych prób w 10 minut na adres IP i na e-mail (`429` z `Retry-After`). Adres IP pochodzi z gniazda, bez obsługi nagłówków proxy. Test automatyczny obejmuje blokadę po IP (wszystkie żądania testowe idą z 127.0.0.1).
+- Dowody, check-iny, feedback i oceny cząstkowe kwartalne zapisuje w MVP tylko przełożony. Nie ma usuwania wpisów, tylko edycja.
+- Redakcja nazwisk przed wysłaniem do AI działa na rdzeniu słowa i może nadmiarowo zastąpić zwykłe słowo o tym samym rdzeniu.
 - Brak rejestracji kont przez system zewnętrzny; konta zakłada przełożony.
 - Limit kryteriów dodatkowych (3) do potwierdzenia z rozporządzeniem.
 - Mapowanie poziomów pierwszej oceny (3/5/7 pkt) na opisy modelu wymaga weryfikacji z Arkuszem A. Skala 3/5/7 jest oznaczona w kodzie jako „do weryfikacji z przepisami z 2015 r.”.
@@ -151,6 +162,23 @@ npm install
 Nazwa urzędu w nagłówku: ustaw zmienną `KK_UNIT`, np. `KK_UNIT="Ministerstwo Cyfryzacji" node server.mjs`. Bez niej dokument używa nazwy działu przełożonego.
 
 Ograniczenia: arkusz pierwszej oceny nie zawiera jeszcze daty nawiązania stosunku pracy ani rozmowy wstępnej. Ustalenia poziomów dla pierwszej oceny (3/5/7 pkt) wymagają weryfikacji z przepisami 2015.
+
+## Bezpieczeństwo (stan prototypu)
+
+- Cookie sesji `kk_sid`: `HttpOnly; SameSite=Strict; Path=/` (w produkcji także `Secure`). Po zalogowaniu poprzednia sesja z tej przeglądarki jest unieważniana (rotacja) i serwer wydaje nowy identyfikator.
+- Limit prób logowania (patrz „Ograniczenia”). Blokady trafiają do dziennika (`login_blocked`).
+- Nagłówki na stronach i w API: CSP (`script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`. HSTS tylko w trybie produkcyjnym.
+- Ochrona CSRF jak dotąd: zmiany wyłącznie przez JSON plus `SameSite=Strict`.
+
+## Dostępność nowych ekranów – jak sprawdzić
+
+Każde pole formularza ma `<label for>` albo jest opakowane etykietą. Grupy poziomów mają `role="radiogroup"` z `aria-label`, a komunikaty błędów `role="alert"`. Wyniki ładowane po filtrze są w regionie `aria-live`. Okna dialogowe mają `aria-modal`, `aria-labelledby`, pułapkę fokusu (Tab/Shift+Tab), zamykanie klawiszem Esc i powrót fokusu do przycisku, który je otworzył. Przy zmianie strony lub kroku kreatora fokus przechodzi na treść (`main`). Po wybraniu poziomu wraca na to samo pole.
+
+Kontrola ręczna (bez dodawania zależności do projektu):
+
+1. **Klawiatura:** zaloguj się jako przełożony i przejdź klawiszem Tab przez ekrany „Miesiąc”, „Dowody” i „Zestawienie” oraz przez okna „+ Dowód”, „+ Feedback” i „+ Ocena cząstkowa”. Fokus powinien być zawsze widoczny i nie powinien opuszczać okna dialogowego. Esc zamyka okno.
+2. **axe:** rozszerzenie przeglądarki „axe DevTools” na każdym ekranie albo jednorazowo `npx @axe-core/cli http://localhost:8080` (wymaga zalogowanej sesji, więc wygodniej przez rozszerzenie). Oczekiwany wynik: 0 naruszeń „critical/serious”.
+3. **Czytnik ekranu:** VoiceOver (macOS: Cmd+F5) lub NVDA. Sprawdź, że wybór poziomu, błędy formularzy i wyniki filtrów są ogłaszane.
 
 ## Zgodność, dostępność, AI Act (stan prototypu)
 

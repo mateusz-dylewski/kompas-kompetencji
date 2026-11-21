@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
 import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS } from './lib/cycle.mjs';
+import { demoConfig, DEMO_MANAGER, DEMO_EMPLOYEE } from './lib/seed-config.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,10 @@ const AI_URL = process.env.KK_AI_URL || 'http://127.0.0.1:11434';
 const AI_MODEL = process.env.KK_AI_MODEL || 'qwen2.5:14b';
 const K_MIN = 5; // minimalna liczba osób do pokazania agregatów zespołu
 const SESSION_MS = 8 * 3600 * 1000;
+const DEMO = demoConfig(); // hasła demo z konfiguracji seedu (KK_DEMO_PASSWORD; domyślne tylko lokalnie)
+const PROD = DEMO.mode === 'production';
+// Limit prób logowania: 5 nieudanych w 10 minut na adres IP i na e-mail
+const LOGIN_MAX_FAILS = 5, LOGIN_WINDOW_MS = 10 * 60 * 1000;
 
 // ---------- Baza danych ----------
 // KK_DATA_DIR: katalog bazy i klucza podpisu (domyślnie ./data, nie commitować); testy używają katalogu tymczasowego
@@ -129,10 +134,10 @@ const aiLog = (evalId, uid, action, input, out) => db.prepare('INSERT INTO ai_lo
 
 // Dane demonstracyjne (tylko gdy baza jest pusta)
 function seed() {
-  if (db.prepare('SELECT COUNT(*) n FROM users').get().n) return;
-  const demoPass = 'Demo-kompas-2026!';
+  if (!DEMO.seed || db.prepare('SELECT COUNT(*) n FROM users').get().n) return;
+  const demoPass = DEMO.password;
   const ins = db.prepare('INSERT INTO users(email,name,role,position,unit,manager_id,pass,avatar) VALUES(?,?,?,?,?,?,?,?)');
-  const mgr = ins.run('przelozony@demo.kk', 'Joanna Mazur', 'przelozony', 'Dyrektor Departamentu Cyfryzacji', 'Departament Cyfryzacji', null, hashPass(demoPass), '/app/assets/faces/f1.jpg').lastInsertRowid;
+  const mgr = ins.run(DEMO_MANAGER, 'Joanna Mazur', 'przelozony', 'Dyrektor Departamentu Cyfryzacji', 'Departament Cyfryzacji', null, hashPass(demoPass), '/app/assets/faces/f1.jpg').lastInsertRowid;
   // Dane przykładowe: imiona, nazwiska i stanowiska wymyślone; zdjęcia to darmowe placeholdery do podmiany
   const staff = [
     ['Katarzyna Wiśniewska', 'Specjalistka ds. analiz danych', 'f3'],
@@ -142,7 +147,7 @@ function seed() {
     ['Magdalena Kaczmarek', 'Specjalistka ds. komunikacji', 'f7'],
     ['Piotr Lewandowski', 'Referent ds. dostępności cyfrowej', 'f6'],
   ];
-  const emps = staff.map(([n, pos, av], i) => ins.run(`pracownik${i + 1}@demo.kk`, n, 'pracownik', pos, 'Departament Cyfryzacji', mgr, hashPass(demoPass), `/app/assets/faces/${av}.jpg`).lastInsertRowid);
+  const emps = staff.map(([n, pos, av], i) => ins.run(DEMO_EMPLOYEE(i + 1), n, 'pracownik', pos, 'Departament Cyfryzacji', mgr, hashPass(demoPass), `/app/assets/faces/${av}.jpg`).lastInsertRowid);
   let seedN = 7;
   const rnd = () => ((seedN = (seedN * 9301 + 49297) % 233280) / 233280);
   const insE = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)');
@@ -226,7 +231,7 @@ function sessionUser(req) {
 
 // ---------- Pomocnicze ----------
 const send = (res, code, obj, extra = {}) => {
-  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra });
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...SECURITY, ...extra });
   res.end(JSON.stringify(obj));
 };
 const fail = (res, code, msg, extra) => send(res, code, { error: msg, ...(extra || {}) });
@@ -417,23 +422,49 @@ migrateEvalSchema();
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
+// Nieudane logowania: klucz (ip:… / email:…) → znaczniki czasu z ostatnich 10 minut (pamięć serwera)
+const loginFails = new Map();
+const recentFails = key => (loginFails.get(key) || []).filter(t => Date.now() - t < LOGIN_WINDOW_MS);
+const retryAfter = keys => {
+  let wait = 0;
+  for (const k of keys) { const r = recentFails(k); if (r.length >= LOGIN_MAX_FAILS) wait = Math.max(wait, Math.ceil((r[0] + LOGIN_WINDOW_MS - Date.now()) / 1000)); }
+  return wait;
+};
+const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${PROD ? '; Secure' : ''}`;
+const sidFrom = req => /(?:^|;\s*)kk_sid=([a-f0-9]{64})/.exec(req.headers.cookie || '')?.[1] || null;
 route('POST', '/api/login', async (req, res) => {
   const b = await readJson(req);
-  const u = db.prepare('SELECT * FROM users WHERE email=?').get(str(b.email, 200).toLowerCase());
+  const email = str(b.email, 200).toLowerCase();
+  const keys = [`ip:${req.socket.remoteAddress || ''}`, `email:${email}`];
+  const wait = retryAfter(keys);
+  if (wait) {
+    audit(null, 'login_blocked', email);
+    return send(res, 429, { error: `Zbyt wiele nieudanych prób logowania. Spróbuj ponownie za ${Math.ceil(wait / 60)} min.` }, { 'retry-after': String(wait) });
+  }
+  const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
   if (!u || !checkPass(String(b.password || ''), u.pass)) {
-    audit(null, 'login_fail', str(b.email, 200));
+    for (const k of keys) loginFails.set(k, [...recentFails(k), Date.now()]);
+    audit(null, 'login_fail', email);
     return fail(res, 401, 'Nieprawidłowy e-mail lub hasło.');
   }
+  loginFails.delete(`email:${email}`);
+  // Rotacja sesji: poprzedni identyfikator z tej przeglądarki jest unieważniany, zawsze wydajemy nowy
+  const old = sidFrom(req);
+  if (old) sessions.delete(old);
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, { uid: u.id, exp: Date.now() + SESSION_MS });
-  audit(u.id, 'login');
-  send(res, 200, { user: publicUser(u) }, { 'set-cookie': `kk_sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS / 1000}` });
+  audit(u.id, 'login', old ? 'session_rotated' : '');
+  send(res, 200, { user: publicUser(u) }, { 'set-cookie': `kk_sid=${token}; ${cookieFlags}; Max-Age=${SESSION_MS / 1000}` });
 });
 route('POST', '/api/logout', async (req, res) => {
-  const m = /kk_sid=([a-f0-9]{64})/.exec(req.headers.cookie || '');
-  if (m) sessions.delete(m[1]);
-  send(res, 200, { ok: true }, { 'set-cookie': 'kk_sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+  const sid = sidFrom(req);
+  if (sid) sessions.delete(sid);
+  send(res, 200, { ok: true }, { 'set-cookie': `kk_sid=; ${cookieFlags}; Max-Age=0` });
 });
+// Konta demo na ekranie logowania (tylko lokalnie). Hasło podajemy wyłącznie, gdy to publiczna wartość domyślna.
+route('GET', '/api/demo', async (req, res) => send(res, 200, DEMO.seed && !PROD
+  ? { enabled: true, manager: DEMO_MANAGER, employee: DEMO_EMPLOYEE(1), password: DEMO.hintPassword }
+  : { enabled: false }));
 route('GET', '/api/me', async (req, res, u) => send(res, 200, { user: publicUser(u), ai: await ollamaStatus() }));
 route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN,
   cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS } }));
@@ -1185,9 +1216,12 @@ route('GET', '/api/evals/:id/signatures', async (req, res, u, p) => {
 // ---------- Serwer ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 const SECURITY = {
-  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
-  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin',
+  // HSTS tylko w trybie produkcyjnym (za HTTPS); lokalnie serwer działa po HTTP
+  ...(PROD ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
 };
 const STATIC = new Set(['/', '/index.html', '/app/app.js', '/app/app.css', '/app/kompetencje.js', '/app/icons.js']);
 
@@ -1214,7 +1248,7 @@ const server = http.createServer(async (req, res) => {
     const pa = route_.pattern.split('/'), ua = url.pathname.split('/');
     const params = {};
     pa.forEach((seg, i) => { if (seg.startsWith(':')) params[seg.slice(1)] = Number(ua[i]); });
-    const publicPaths = ['/api/login', '/api/logout', '/api/model'];
+    const publicPaths = ['/api/login', '/api/logout', '/api/model', '/api/demo'];
     let u = null;
     if (!publicPaths.includes(url.pathname)) {
       u = sessionUser(req);
@@ -1229,4 +1263,8 @@ const server = http.createServer(async (req, res) => {
 }).listen(PORT, '127.0.0.1', () => console.log(`Kompas Kompetencji: http://localhost:${server.address().port}  (AI: ${AI_URL}, model ${AI_MODEL})`));
 
 // Wygaszanie sesji
-setInterval(() => { const t = Date.now(); for (const [k, s] of sessions) if (s.exp < t) sessions.delete(k); }, 60000).unref();
+setInterval(() => {
+  const t = Date.now();
+  for (const [k, s] of sessions) if (s.exp < t) sessions.delete(k);
+  for (const [k] of loginFails) if (!recentFails(k).length) loginFails.delete(k);
+}, 60000).unref();

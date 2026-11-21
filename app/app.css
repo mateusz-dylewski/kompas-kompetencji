@@ -262,3 +262,4 @@ ul.c li{margin:4px 0}
 .dist{display:flex;gap:6px;flex-wrap:wrap}
 .dist span{border:1px solid var(--ln);padding:2px 8px;font-size:13px}
 fieldset.plain{border:0;padding:0;margin:12px 0 0}
+.view:focus{outline:none}
