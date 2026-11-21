@@ -139,7 +139,7 @@
     $("#root").innerHTML = `
       <div class="login"><div class="login-main"><div class="login-card">
         <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się, aby przejść do panelu</div></div></div>
-        <div class="demo-row" role="group" aria-label="Konta demonstracyjne">
+        <div class="demo-row" role="group" aria-label="Konta testowe">
           <button type="button" class="demo-btn" data-demo="przelozony" title="Wypełnij danymi przełożonego (demo)"><span aria-hidden="true">${KK_ICON("star")}</span><span>Demo: przełożony</span></button>
           <button type="button" class="demo-btn" data-demo="pracownik" title="Wypełnij danymi pracownika (demo)"><span aria-hidden="true">${KK_ICON("user")}</span><span>Demo: pracownik</span></button>
         </div>
@@ -151,7 +151,7 @@
           <button class="btn w" style="margin-top:16px" type="submit">Zaloguj się</button>
           ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
         </form>
-        <p class="note">Konta demonstracyjne są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
+        <p class="note">Konta testowe są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
       </div></div>${footer("foot-login")}</div>`;
     // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
     const demoRow = $(".demo-row");
@@ -174,7 +174,7 @@
     return `<footer class="foot-gov ${extra}"><div class="logos">
       <img src="app/assets/logo-mc.png" alt="Ministerstwo Cyfryzacji">
       <img src="app/assets/logo-kk.svg" alt="Kompas Kompetencji 2027"></div>
-      <small>Prototyp · Kompas Kompetencji 2027</small></footer>`;
+      <small>Kompas Kompetencji 2027</small></footer>`;
   }
 
   // ---------- Dane ----------
@@ -195,7 +195,7 @@
   // ---------- Powłoka: sticky menu boczne (desktop) + dolna nawigacja (mobile) ----------
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
-    const aiPill = S.ai.ok ? `<span class="pill on" title="Model lokalny: ${esc(S.ai.model)}">AI lokalnie</span>` : `<span class="pill off" title="Uruchom Ollama, aby włączyć AI">Tryb reguł</span>`;
+    const aiPill = S.ai.ok ? `<span class="pill on" title="Model lokalny: ${esc(S.ai.model)}">AI lokalnie</span>` : `<span class="pill off" title="Lokalny model AI jest wyłączony">AI wyłączone</span>`;
     const navBtns = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false).map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
     return `
       <div class="app">
@@ -373,7 +373,7 @@
           <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone</span></div>
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
         </div>
-        ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy). Reguła 6 miesięcy wymaga potwierdzenia prawnego.</p>
+        ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy).</p>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(x.lastEval) : "—"}</td><td>${x.due ? esc(x.due) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
@@ -870,7 +870,14 @@
     const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ, data: e.data });
     const items = MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => `
       <div class="card"><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}</div>`).join("");
-    return `<div class="card"><div class="row"><h2>${esc(TYP[e.typ])}</h2>${pill(e.status)}</div>
+    const m = S.readMeta || {};
+    const who = `<dl class="meta"><dt>Oceniany</dt><dd>${first(m.employee?.name)}${m.employee?.position ? ", " + esc(m.employee.position) : ""}</dd>
+      <dt>Oceniający</dt><dd>${first(m.evaluator?.name)}${m.evaluator?.position ? ", " + esc(m.evaluator.position) : ""}</dd>
+      <dt>Utworzono</dt><dd>${esc((e.created || "").slice(0, 16).replace("T", " "))}</dd>
+      <dt>Ostatnia zmiana</dt><dd>${esc((e.updated || "").slice(0, 16).replace("T", " "))}</dd>
+      <dt>Zapoznanie ocenianego</dt><dd>${e.ack_at ? esc(e.ack_at.slice(0, 16).replace("T", " ")) : "jeszcze nie"}</dd>
+      <dt>Sprzeciw</dt><dd>${e.objection_at ? esc(e.objection_at.slice(0, 16).replace("T", " ")) + (e.objection_result ? " – " + esc(e.objection_result) : " – do rozpatrzenia") : "brak"}</dd></dl>`;
+    return `<div class="card">${who}<div class="row"><h2>${esc(TYP[e.typ])}</h2>${pill(e.status)}</div>
       <p class="muted">Okres ${esc(e.period_from || "")} – ${esc(e.period_to || "")}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11)" : ""}` : ""}</p>
       <div class="grid two"><div>${radar(scores)}</div><div>${scoreBars(scores)}</div></div></div>
       ${items}
@@ -912,7 +919,7 @@
       S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
     } catch (e) { toast(e.message); }
   }
-  // Podpisy (mock) i zapoznanie z oceną – stan z serwera
+  // Podpisy i zapoznanie z oceną – stan z serwera
   async function loadSigs(id, status) {
     const box = $("#sigBox"); if (!box) return;
     try {
@@ -923,9 +930,12 @@
       const ackDone = !!r.ackAt;
       const deadlinePassed = r.objectionDeadline && Date.now() > Date.parse(r.objectionDeadline);
       box.innerHTML = `<h2>Podpisy i zapoznanie</h2>
-        <p class="muted">Podpis symulowany (mock) do czasu integracji z podpisem kwalifikowanym lub zaufanym.</p>
+        <p class="muted">Podpis potwierdza integralność treści oceny (skrót SHA-256).</p>
         ${rows ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Osoba</th><th scope="col">Czas</th><th scope="col">Weryfikacja</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">Brak podpisów.</p>`}
-        ${isMgr && status !== "draft" && !hasMgrSig ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="signEval" data-id="${id}">Podpisz ocenę (symulacja)</button></div>` : ""}
+        ${isMgr && r.objectionAt && !r.objectionResult ? `<div class="note warn"><b>Sprzeciw pracownika</b> z ${esc(r.objectionAt.slice(0, 10))}: ${esc(r.objectionText || "")}<br><b>Rozpatrz do:</b> ${esc((r.decisionDeadline || "").slice(0, 10))} (14 dni, art. 83 ust. 3).
+          <div class="btns" style="justify-content:flex-start"><button class="btn" data-act="decideObjection" data-id="${id}" data-result="uwzglednione">Uwzględnij – popraw ocenę</button><button class="btn g" data-act="decideObjection" data-id="${id}" data-result="nieuwzglednione">Nie uwzględniaj</button></div></div>` : ""}
+        ${isMgr && r.objectionResult ? `<p class="muted">Sprzeciw rozpatrzony: <b>${esc(r.objectionResult)}</b>${r.revision ? ` · wersja oceny: ${r.revision + 1}` : ""}</p>` : ""}
+        ${isMgr && status !== "draft" && !hasMgrSig ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="signEval" data-id="${id}">Podpisz ocenę</button></div>` : ""}
         ${!isMgr ? `<p><b>Zapoznanie:</b> ${ackDone ? esc(r.ackAt.slice(0, 10)) : "jeszcze nie"}${r.objectionDeadline ? ` · <b>Termin na sprzeciw:</b> ${esc(r.objectionDeadline.slice(0, 10))}` : ""}${r.objectionAt ? ` · <b>Sprzeciw złożono:</b> ${esc(r.objectionAt.slice(0, 10))}` : ""}</p>
           ${!ackDone ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="ackEval" data-id="${id}">Zapoznałem(-łam) się z oceną</button></div>` : ""}
           ${ackDone && !r.objectionAt && !deadlinePassed ? `<div class="btns" style="justify-content:flex-start"><button class="btn g" data-act="objectionEval" data-id="${id}">Złóż sprzeciw</button></div>` : ""}
@@ -964,7 +974,7 @@
       toast(r.earlyException ? "Utworzono szkic oceny (wyjątek od reguły 6 miesięcy zapisany w dzienniku)." : "Utworzono szkic oceny."); await openWizard(r.id);
     },
     openEval: b => openWizard(+b.dataset.id),
-    readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.view = "evalView"; render(); window.scrollTo(0, 0); },
+    readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.view = "evalView"; render(); window.scrollTo(0, 0); },
     submitEval: async () => {
       if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
       try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); }
@@ -1048,13 +1058,23 @@
     addPartial: () => partialModal(null),
     editPartial: b => { const p = (S.monthPartials || []).find(x => x.id === +b.dataset.id); if (p) return partialModal(p); },
     editEvidence: b => { const ev = (S.evidence || []).find(x => x.id === +b.dataset.id); if (ev) evidenceModal(ev, {}, b.dataset.after === "month" ? () => loadMonth() : undefined); },
+    decideObjection: async b => {
+      const result = b.dataset.result;
+      if (!confirm(result === "uwzglednione" ? "Uwzględnić sprzeciw? Ocena wróci do poprawy, a poprzednia wersja zostanie zapisana." : "Nie uwzględniać sprzeciwu? Pracownik zobaczy decyzję.")) return;
+      try {
+        const r = await api("POST", `/api/evals/${b.dataset.id}/objection-decision`, { result });
+        toast(r.reopened ? "Ocena wróciła do poprawy." : "Zapisano decyzję.");
+        if (r.reopened) return openWizard(+b.dataset.id);
+        loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status);
+      } catch (e) { toast(e.message); }
+    },
     saveSettings: async () => {
       const modules = Object.fromEntries([...document.querySelectorAll("[data-mod]")].map(cb => [cb.dataset.mod, cb.checked]));
       try { await api("PUT", "/api/settings", { modules }); await load(); toast("Zapisano ustawienia."); render(); }
       catch (e) { toast(e.message); }
     },
     signEval: async b => {
-      try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano (symulacja)."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
+      try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
       catch (e) { toast(e.message); }
     },
     ackEval: async b => {

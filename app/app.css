@@ -276,3 +276,6 @@ input[type="checkbox"]:disabled:checked::after{border-color:#fff}
 .choice:has(input:disabled) .muted{color:var(--mu)}
 .choice:has(input:disabled) b{color:var(--tx)}
 .choice:has(input:disabled:checked){background:#e4e7eb;border-color:#9aa3ad}
+.meta{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0 0 14px;font-size:14px}
+.meta dt{color:var(--mu);font-weight:600}
+.meta dd{margin:0}

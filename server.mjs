@@ -49,12 +49,17 @@ for (const sql of [
   'ALTER TABLE evals ADD COLUMN objection_text TEXT',
   'ALTER TABLE audit ADD COLUMN prev_hash TEXT',
   'ALTER TABLE audit ADD COLUMN hash TEXT',
+  'ALTER TABLE evals ADD COLUMN objection_result TEXT',
+  'ALTER TABLE evals ADD COLUMN objection_decided_at TEXT',
+  'ALTER TABLE evals ADD COLUMN revision INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE audit ADD COLUMN prev_value TEXT',
   'ALTER TABLE audit ADD COLUMN new_value TEXT',
   'ALTER TABLE evals ADD COLUMN early_exception TEXT',
 ]) { try { db.exec(sql); } catch (_) { /* już istnieje */ } }
 db.exec(`
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS revisions(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, rev INTEGER NOT NULL,
+  data TEXT NOT NULL, status_before TEXT NOT NULL, reason TEXT, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, signer_id INTEGER NOT NULL,
   role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
 CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
@@ -693,7 +698,8 @@ route('GET', '/api/evals/:id', async (req, res, u, p) => {
   if (!canSee) return fail(res, 403, 'Brak dostępu.');
   const emp = db.prepare('SELECT name,position,avatar FROM users WHERE id=?').get(ev.employee_id);
   const timing = u.role === 'przelozony' && ev.typ !== 'pierwsza' ? { ...timingCheck(empEvals(ev.employee_id), refDate(ev), ev.id), exception: ev.early_exception ? JSON.parse(ev.early_exception) : null } : null;
-  send(res, 200, { eval: evalRow(ev), employee: emp, missing: u.role === 'przelozony' ? missingForSubmit(ev) : [], timing });
+  const evaluator = db.prepare('SELECT name,position FROM users WHERE id=?').get(ev.evaluator_id);
+  send(res, 200, { eval: evalRow(ev), employee: emp, evaluator, missing: u.role === 'przelozony' ? missingForSubmit(ev) : [], timing });
 });
 route('PUT', '/api/evals/:id', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
@@ -1243,6 +1249,25 @@ route('POST', '/api/evals/:id/objection', async (req, res, u, p) => {
   audit(u.id, 'objection_eval', ev.id);
   send(res, 201, { ok: true });
 });
+// Rozpatrzenie sprzeciwu przez przełożonego (art. 83 ust. 3: 14 dni). Uwzględnienie → ocena wraca do poprawy (art. 83 ust. 3, zmiana lub ponowne sporządzenie).
+route('POST', '/api/evals/:id/objection-decision', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  if (!ev.objection_at || ev.objection_decided_at) return fail(res, 409, 'Brak sprzeciwu do rozpatrzenia.');
+  const b = await readJson(req);
+  const result = b.result === 'uwzglednione' ? 'uwzględniono' : b.result === 'nieuwzglednione' ? 'nieuwzględniono' : null;
+  if (!result) return fail(res, 400, 'Wybierz: uwzględniono albo nieuwzględniono.');
+  const note = str(b.note, 1000);
+  const at = now();
+  if (result === 'uwzględniono') {
+    db.prepare('INSERT INTO revisions(eval_id,rev,data,status_before,reason,at) VALUES(?,?,?,?,?,?)').run(ev.id, ev.revision, ev.data, ev.status, `sprzeciw: ${ev.objection_text || ''}`, at);
+    db.prepare("UPDATE evals SET status='draft', revision=revision+1, ack_at=NULL, objection_at=NULL, objection_text=NULL, objection_result=?, objection_decided_at=?, updated=? WHERE id=?").run(result, at, at, ev.id);
+  } else {
+    db.prepare('UPDATE evals SET objection_result=?, objection_decided_at=?, updated=? WHERE id=?').run(result, at, at, ev.id);
+  }
+  audit(u.id, 'objection_decision', `${ev.id}:${result}${note ? ': ' + note : ''}`);
+  send(res, 200, { ok: true, result, reopened: result === 'uwzględniono' });
+});
 route('GET', '/api/evals/:id/signatures', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   const can = ev && ((u.role === 'przelozony' && ev.evaluator_id === u.id) || (u.role === 'pracownik' && ev.employee_id === u.id && ev.status !== 'draft'));
@@ -1250,7 +1275,7 @@ route('GET', '/api/evals/:id/signatures', async (req, res, u, p) => {
   const rows = db.prepare('SELECT s.id,s.signer_id,s.role,s.signed_at,s.doc_sha256,s.sig_value,u.name FROM signatures s JOIN users u ON u.id=s.signer_id WHERE s.eval_id=? ORDER BY s.id').all(ev.id);
   const current = docHash(ev);
   const signed = rows.map(r => ({ ...r, valid: r.sig_value === sigValue(r.doc_sha256, r.signer_id, r.role, r.signed_at), unchanged: r.doc_sha256 === current }));
-  send(res, 200, { signatures: signed.map(({ sig_value, signer_id, ...x }) => x), ackAt: ev.ack_at, objectionAt: ev.objection_at, objectionDeadline: ev.ack_at ? new Date(Date.parse(ev.ack_at) + 7 * 86400000).toISOString() : null });
+  send(res, 200, { signatures: signed.map(({ sig_value, signer_id, ...x }) => x), ackAt: ev.ack_at, objectionAt: ev.objection_at, objectionText: ev.objection_text, objectionResult: ev.objection_result || null, decisionDeadline: ev.objection_at ? new Date(Date.parse(ev.objection_at) + 14 * 86400000).toISOString() : null, revision: ev.revision, objectionDeadline: ev.ack_at ? new Date(Date.parse(ev.ack_at) + 7 * 86400000).toISOString() : null });
 });
 
 // ---------- Serwer ----------
