@@ -271,6 +271,10 @@
           <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
           <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
         </div>
+        ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
+          <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
+          <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
+          <p class="muted">Masz wgląd w kryteria i termin przed złożeniem oceny (§ 6 rozporządzenia). Poziomy zobaczysz po złożeniu.</p></div>`).join("")}
         <div class="card"><h2>Gdzie jesteś w procesie</h2>${last ? timeline(last.status) : `<p class="muted">Gdy przełożony przygotuje ocenę, zobaczysz tu jej postęp.</p>`}
           <p class="muted">Ocena opisuje zachowania z okresu, a nie Twoją osobę. Masz prawo zapoznać się z nią przed rozmową.</p></div>`;
     }
@@ -329,7 +333,7 @@
       const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
       const rows = d.team.map(t => `
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div></div></div></td>
-          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td>
+          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
             : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}"`)
@@ -347,7 +351,7 @@
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
         </div>
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th>Ocena</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
     if (v === "results") {
       const agg = d.aggregate;
@@ -693,7 +697,8 @@
     const L = isFirst ? LEVELS3.map((l, i) => [l, PTS3[i], i + 1]) : LEVELS5.map((l, i) => [l, PTS5[i], i]);
     const done = comp.w.filter((_, wi) => c.ratings[comp.k + "|" + wi]).length;
     return `<div class="card"><div class="row"><h2 class="h-comp">${compIc(comp.k)}${esc(nameOf(comp.k))}</h2><span class="tag info">${done}/${comp.w.length} ocenione</span></div>
-      <p class="muted">Wybierz poziom, który najlepiej opisuje to, co faktycznie obserwowałeś/aś. Dodaj jeden konkretny przykład: sytuacja, działanie, rezultat.</p></div>
+      <p class="muted">Wybierz poziom, który najlepiej opisuje to, co faktycznie obserwowałeś/aś. Dodaj jeden konkretny przykład: sytuacja, działanie, rezultat.</p>
+      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z dowodów (puste pola)</button></div>` : ""}</div>
       ${comp.w.map((w, wi) => {
         const id = comp.k + "|" + wi, r = c.ratings[id] || {};
         const exId = "ex" + comp.k.length + "_" + wi;
@@ -758,6 +763,8 @@
         <label class="choice"><input type="radio" name="wynik" value="pozytywna" data-field="wynik" ${d.wynik === "pozytywna" ? "checked" : ""} ${ro}><span><b>Pozytywna</b></span></label>
         <label class="choice"><input type="radio" name="wynik" value="negatywna" data-field="wynik" ${d.wynik === "negatywna" ? "checked" : ""} ${ro}><span><b>Negatywna</b></span></label>
       </fieldset>`}</div>
+      ${timingNote(c)}
+      ${c.status === "draft" ? draftLinks(c.id) : ""}
       ${docLinks(c.id)}`;
     return form + `<div class="card"><h2>Podsumowanie</h2>
       <p>Średnia: <b data-to="${overall ?? 0}" data-dec="1">${overall === null ? "—" : fmt(overall)}</b> pkt</p>
@@ -778,6 +785,22 @@
     if (!v.wynik) return `<div class="note" role="status"><b>Ocena okresowa:</b> zostanie wyliczona po przyznaniu ocen cząstkowych we wszystkich kryteriach (§ 11 rozporządzenia).</div>`;
     return `<div class="note ${v.wynik === "negatywna" ? "warn" : ""}" role="status"><b>Ocena okresowa (wyliczona wg § 11): ${v.wynik.toUpperCase()}</b>
       <br>Średnia ocen cząstkowych ${fmt(v.avg)} pkt – ${esc(levelFor(v.avg))}.${v.reasons.length ? `<br>Podstawa oceny negatywnej (§ 11 ust. 4): ${esc(v.reasons.join("; "))}. Uzasadnienie jest obowiązkowe.` : ""}</div>`;
+  }
+  // Termin: reguła 6 miesięcy między ocenami okresowymi i cykl 24 miesięcy
+  function timingNote(c) {
+    const t = c.timing; if (!t) return "";
+    if (t.exception) return `<div class="note">Wyjątek od reguły ${t.earliest ? `6 miesięcy (najwcześniej ${esc(t.earliest)})` : "6 miesięcy"} zapisany ${esc(String(t.exception.at).slice(0, 10))}: ${esc(t.exception.reason)}</div>`;
+    if (!t.ok) return `<div class="note warn" role="alert"><b>Zbyt wczesna ocena.</b> Poprzednia ocena okresowa: ${esc(t.prevDate)}. Najwcześniejszy termin: ${esc(t.earliest)}. Złożenie będzie zablokowane bez wyjątku.
+      ${c.status === "draft" ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="earlyException">Zapisz wyjątek z uzasadnieniem</button></div>` : ""}</div>`;
+    return t.nextDue ? `<p class="muted">Termin cyklu (24 miesiące od poprzedniej oceny): ${esc(t.nextDue)}.</p>` : "";
+  }
+  function draftLinks(id) {
+    const base = `/api/evals/${id}/document?variant=szkic`;
+    return `<div class="docs"><h3>Szkic z dowodów i check-inów</h3><p class="muted">Materiał roboczy: dowody i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
+      <div class="btns" style="justify-content:flex-start">
+        <a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
+        <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>
+      </div></div>`;
   }
   function docLinks(id) {
     const base = `/api/evals/${id}/document`;
@@ -821,13 +844,13 @@
     const e = r.eval;
     S.cur = { id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id, evidence: [],
       empName: r.employee?.name || "", empAvatar: r.employee?.avatar || null, data: e.data, criteria: e.data.criteria || [], ratings: e.data.ratings || {},
-      step: 0, missing: r.missing || [], aiText: "", aiSource: "" };
+      step: 0, missing: r.missing || [], aiText: "", aiSource: "", timing: r.timing || null };
     S.maxExtra = 3;
     await refreshWizardEvidence();
     try { S.cur.quarterly = (await api("GET", `/api/partials?employeeId=${e.employee_id}${e.period_from ? `&from=${e.period_from}` : ""}${e.period_to ? `&to=${e.period_to}` : ""}`)).partials; } catch (_) { S.cur.quarterly = []; }
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
-  async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; }
+  async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; S.cur.timing = r.timing || null; }
   async function runAi(kind) {
     const out = $("#aiOut"); if (out) out.innerHTML = `<div class="ai-out">Model przygotowuje odpowiedź…</div>`;
     try {
@@ -874,8 +897,17 @@
       const typ = prompt("Rodzaj oceny: pierwsza, B lub C", "B");
       if (!typ || !["pierwsza", "B", "C"].includes(typ.trim())) return toast("Nieprawidłowy rodzaj oceny.");
       const from = prompt("Okres od (RRRR-MM-DD)", "2026-01-01"), to = prompt("Okres do (RRRR-MM-DD)", "2026-06-30");
-      const r = await api("POST", "/api/evals", { employeeId: emp.id, typ: typ.trim(), periodFrom: from, periodTo: to });
-      toast("Utworzono szkic oceny."); await openWizard(r.id);
+      const body = { employeeId: emp.id, typ: typ.trim(), periodFrom: from, periodTo: to };
+      let r;
+      try { r = await api("POST", "/api/evals", body); }
+      catch (e) {
+        if (e.data?.code !== "too_early") throw e;
+        // Reguła 6 miesięcy: wyjątek tylko z uzasadnieniem (trafia do dziennika)
+        const reason = prompt(`${e.message}\n\nUzasadnienie wyjątku (min. 10 znaków) albo Anuluj:`);
+        if (!reason) return toast("Nie utworzono oceny.");
+        r = await api("POST", "/api/evals", { ...body, exception: { reason } });
+      }
+      toast(r.earlyException ? "Utworzono szkic oceny (wyjątek od reguły 6 miesięcy zapisany w dzienniku)." : "Utworzono szkic oceny."); await openWizard(r.id);
     },
     openEval: b => openWizard(+b.dataset.id),
     readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.view = "evalView"; render(); window.scrollTo(0, 0); },
@@ -937,6 +969,21 @@
       return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
     },
     addFeedback: () => feedbackModal(null),
+    // Uzupełnia puste pola „Przykład z okresu” treścią dowodów – nie ustawia poziomów (decyduje oceniający)
+    fillFromEvidence: b => {
+      const c = S.cur, k = b.dataset.comp, comp = MODEL.find(m => m.k === k); let n = 0;
+      comp.w.forEach((_, wi) => {
+        const id = k + "|" + wi, list = (c.evidence || []).filter(e => e.indicator === id);
+        if (!list.length || (c.ratings[id] && (c.ratings[id].ex || "").trim())) return;
+        c.ratings[id] = { ...(c.ratings[id] || {}), ex: list.slice(0, 2).map(e => `${e.date}: ${e.situation} – ${e.action} → ${e.result}`).join("\n") }; n++;
+      });
+      c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z dowodami.");
+    },
+    earlyException: async () => {
+      const reason = prompt("Uzasadnienie wyjątku od reguły 6 miesięcy (min. 10 znaków). Wpis trafi do dziennika:");
+      if (!reason) return;
+      await api("POST", `/api/evals/${S.cur.id}/early-exception`, { reason }); await refreshMissing(); toast("Zapisano wyjątek."); render();
+    },
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = `<div class="ai-out">Asystent przygotowuje pytania…</div>`;
       try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"} · propozycja do przemyślenia</p>`; }

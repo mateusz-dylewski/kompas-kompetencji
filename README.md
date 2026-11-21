@@ -120,6 +120,12 @@ Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową w
 
 **Asystent AI** (`/api/ai/talk`, `/api/ai/formal`, `/api/ai/development`, nowy `/api/ai/checkin`) przeformułowuje teksty i proponuje pytania do rozmowy. Nie zmienia i nie zapisuje ocen, dowodów ani check-inów. Testy porównują stan danych przed i po wywołaniach. `/api/ai/checkin` wysyła do modelu tylko nazwy wskaźników i liczby dowodów. Przed każdym wywołaniem modelu serwer zastępuje znacznikiem `[osoba]` imiona, nazwiska (z odmianą) i adresy e-mail wszystkich kont, także te wpisane ręcznie w uzasadnienia. Test przechwytuje prompty atrapą Ollama.
 
+## Proces i dokumenty: szkic z dowodów, terminy
+
+- **Szkic z dowodów i check-inów:** w ostatnim kroku kreatora („Podsumowanie”) są przyciski „Podgląd szkicu PDF” i „Szkic XML” (`GET /api/evals/:id/document?variant=szkic&format=pdf|xml`). Szkic zawiera dowody, feedback i check-iny z okresu oceny, pogrupowane według kryteriów i wskaźników. **Nie zawiera poziomów, ocen cząstkowych ani wyniku**: oceniający uzupełnia je w kreatorze i zatwierdza ocenę, składając ją. Przycisk „Wstaw przykłady z dowodów” wypełnia tylko puste pola „Przykład z okresu” i nie ustawia poziomów. Format XML szkicu: `urn:kompas-kompetencji:szkic:v1` (własny).
+- **Terminy** (`lib/cycle.mjs`, `GET /api/model` → `cycle`): cykl ocen okresowych 24 miesiące (`CYCLE_MONTHS`) i reguła 6 miesięcy między ocenami (`MIN_GAP_MONTHS`) zgodnie z poradnikiem (art. 81 ust. 8 ustawy, **do weryfikacji prawnej**). Datą odniesienia jest termin sporządzenia oceny, a gdy go brak, koniec okresu. Utworzenie lub złożenie zbyt wczesnej oceny B/C zwraca `409` z `code: "too_early"` i najwcześniejszym terminem. Wyjątek wymaga uzasadnienia (pole `exception.reason` przy tworzeniu albo `POST /api/evals/:id/early-exception`). Zapisuje się w kolumnie `evals.early_exception` i w dzienniku (`eval_early_exception`). Dashboard przełożonego pokazuje termin kolejnej oceny.
+- **§ 6 – wgląd pracownika:** na ekranie startowym pracownik widzi kryteria i termin sporządzenia przygotowywanej oceny jeszcze przed jej złożeniem, bez poziomów.
+
 ## Ograniczenia prototypu
 
 - Brak HTTPS i rotacji sesji; sesje w pamięci serwera.

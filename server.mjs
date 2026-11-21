@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { buildXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
+import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
+import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS } from './lib/cycle.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,7 @@ for (const sql of [
   'ALTER TABLE audit ADD COLUMN hash TEXT',
   'ALTER TABLE audit ADD COLUMN prev_value TEXT',
   'ALTER TABLE audit ADD COLUMN new_value TEXT',
+  'ALTER TABLE evals ADD COLUMN early_exception TEXT',
 ]) { try { db.exec(sql); } catch (_) { /* już istnieje */ } }
 db.exec(`
 CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NOT NULL, signer_id INTEGER NOT NULL,
@@ -433,7 +435,12 @@ route('POST', '/api/logout', async (req, res) => {
   send(res, 200, { ok: true }, { 'set-cookie': 'kk_sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
 });
 route('GET', '/api/me', async (req, res, u) => send(res, 200, { user: publicUser(u), ai: await ollamaStatus() }));
-route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN }));
+route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN,
+  cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS } }));
+// Terminy: ostatnia ocena okresowa pracownika, najwcześniejszy termin kolejnej (6 mies.) i termin cyklu (24 mies.)
+const empEvals = empId => db.prepare('SELECT id,typ,status,period_from,period_to,data,updated FROM evals WHERE employee_id=?').all(empId);
+const TOO_EARLY = t => `Zbyt wczesna ocena: od poprzedniej oceny okresowej (${t.prevDate}) musi upłynąć ${MIN_GAP_MONTHS} miesięcy (najwcześniej ${t.earliest}). Możesz zapisać wyjątek z uzasadnieniem – trafi do dziennika.`;
+const exceptionReason = b => str(b?.exception?.reason, 1000);
 
 // Dashboard pracownika
 route('GET', '/api/dashboard', async (req, res, u) => {
@@ -442,8 +449,14 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     const latest = evals[0] || null;
     const goals = db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(u.id);
     const manager = u.manager_id ? db.prepare('SELECT name FROM users WHERE id=?').get(u.manager_id) : null;
+    // § 6 rozporządzenia: oceniany zna kryteria i termin sporządzenia oceny także przed jej złożeniem (bez poziomów)
+    const upcoming = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status='draft' ORDER BY id").all(u.id).map(e => {
+      const d = JSON.parse(e.data || '{}');
+      return { id: e.id, typ: e.typ, periodFrom: e.period_from, periodTo: e.period_to, terminOceny: d.terminOceny || null, criteria: (d.criteria || []).map(k => MODEL.find(c => c.k === k)?.n || k) };
+    });
+    const tc = timingCheck(empEvals(u.id), today());
     return send(res, 200, {
-      role: u.role, manager: manager?.name || null,
+      role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue,
       evals: evals.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, updated: e.updated })),
       latestScores: latest ? scoreEval(latest) : null,
       latestDev: latest?.data?.dev || '',
@@ -460,7 +473,9 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     const e = byEmp[t.id];
     const st = e ? e.status : 'none';
     counts[st]++;
-    return { id: t.id, name: t.name, position: t.position, avatar: t.avatar || null, status: st, evalId: e?.id || null, typ: e?.typ || null, updated: e?.updated || null };
+    const tc = timingCheck(empEvals(t.id), today());
+    return { id: t.id, name: t.name, position: t.position, avatar: t.avatar || null, status: st, evalId: e?.id || null, typ: e?.typ || null, updated: e?.updated || null,
+      nextDue: tc.nextDue, earliestNext: tc.earliest };
   });
   // Agregaty tylko przy n >= K_MIN (ochrona przed identyfikacją)
   const done = Object.values(byEmp).filter(e => e.status !== 'draft');
@@ -512,16 +527,46 @@ route('POST', '/api/evals', async (req, res, u) => {
   if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
   const typ = ['pierwsza', 'B', 'C'].includes(b.typ) ? b.typ : null;
   if (!typ) return fail(res, 400, 'Nieprawidłowy typ oceny.');
+  const errs = {};
+  for (const k of ['periodFrom', 'periodTo']) if (b[k] && !isDate(b[k])) errs[k] = 'Data: RRRR-MM-DD.';
+  if (isDate(b.periodFrom) && isDate(b.periodTo) && b.periodFrom > b.periodTo) errs.periodTo = 'Koniec okresu nie może być przed początkiem.';
+  if (Object.keys(errs).length) return invalid(res, errs);
+  // Reguła 6 miesięcy między ocenami okresowymi (blokada z możliwością wyjątku zapisanego w dzienniku)
+  let exception = null;
+  if (typ !== 'pierwsza') {
+    const tc = timingCheck(empEvals(emp.id), b.periodTo || today());
+    if (!tc.ok) {
+      const reason = exceptionReason(b);
+      if (reason.length < 10) return fail(res, 409, TOO_EARLY(tc), { code: 'too_early', earliest: tc.earliest, prevDate: tc.prevDate, prevEvalId: tc.prevId });
+      exception = { reason, by: u.id, at: now(), earliest: tc.earliest, prevEvalId: tc.prevId };
+    }
+  }
   const data = sanitizeData({ criteria: MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m))).map(c => c.k), ratings: {} }, typ);
-  const id = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
-    .run(emp.id, u.id, typ, str(b.periodFrom, 10), str(b.periodTo, 10), 'draft', JSON.stringify(data), now(), now()).lastInsertRowid;
-  audit(u.id, 'create_eval', id);
-  send(res, 201, { id });
+  const id = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated,early_exception) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, typ, str(b.periodFrom, 10), str(b.periodTo, 10), 'draft', JSON.stringify(data), now(), now(), exception ? JSON.stringify(exception) : null).lastInsertRowid;
+  audit(u.id, 'create_eval', id, null, { employeeId: emp.id, typ, periodFrom: str(b.periodFrom, 10), periodTo: str(b.periodTo, 10) });
+  if (exception) audit(u.id, 'eval_early_exception', id, null, exception);
+  send(res, 201, { id, earlyException: !!exception });
 });
 const ownEval = (u, id) => db.prepare('SELECT * FROM evals WHERE id=?').get(id) || null;
+// Wyjątek od reguły 6 miesięcy dla istniejącego szkicu (np. po zmianie okresu) – z uzasadnieniem, w dzienniku
+route('POST', '/api/evals/:id/early-exception', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  if (ev.status !== 'draft') return fail(res, 409, 'Wyjątek zapisuje się przed złożeniem oceny.');
+  const b = await readJson(req);
+  const reason = str(b.reason, 1000);
+  if (reason.length < 10) return invalid(res, { reason: 'Uzasadnij wyjątek (min. 10 znaków).' });
+  const tc = timingCheck(empEvals(ev.employee_id), refDate(ev), ev.id);
+  const exception = { reason, by: u.id, at: now(), earliest: tc.earliest, prevEvalId: tc.prevId };
+  db.prepare('UPDATE evals SET early_exception=? WHERE id=?').run(JSON.stringify(exception), ev.id);
+  audit(u.id, 'eval_early_exception', ev.id, ev.early_exception ? JSON.parse(ev.early_exception) : null, exception);
+  send(res, 200, { ok: true, timingOk: tc.ok });
+});
 route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev) return fail(res, 404, 'Nie znaleziono.');
+  if (new URL(req.url, 'http://x').searchParams.get('variant') === 'szkic') return draftDocument(req, res, u, ev);
   const canSee = (u.role === 'przelozony' && ev.evaluator_id === u.id) || (u.role === 'pracownik' && ev.employee_id === u.id && ev.status !== 'draft');
   if (!canSee) return fail(res, 403, 'Brak dostępu.');
   const url = new URL(req.url, 'http://x');
@@ -550,13 +595,35 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(pdfBytes));
 });
+// Szkic dokumentu z dowodów i check-inów okresu: bez poziomów, ocen cząstkowych i wyniku (uzupełnia oceniający)
+async function draftDocument(req, res, u, ev) {
+  if (u.role !== 'przelozony' || ev.evaluator_id !== u.id) return fail(res, 403, 'Szkic z dowodów jest dla oceniającego.');
+  const q = qs(req), format = q.get('format') === 'xml' ? 'xml' : 'pdf', inline = q.get('inline') === '1';
+  const from = isDate(ev.period_from) ? ev.period_from : '0000-01-01', to = isDate(ev.period_to) ? ev.period_to : '9999-12-31';
+  const ctx = { ev: { ...ev, data: JSON.parse(ev.data || '{}') }, model: MODEL,
+    emp: db.prepare('SELECT name,position,unit FROM users WHERE id=?').get(ev.employee_id), mgr: db.prepare('SELECT name,position,unit FROM users WHERE id=?').get(ev.evaluator_id),
+    evidence: db.prepare('SELECT * FROM evidence WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(ev.employee_id, from, to).map(evidenceRow),
+    feedback: db.prepare('SELECT * FROM feedback WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(ev.employee_id, from, to).map(feedbackRow),
+    checkins: db.prepare('SELECT * FROM checkins WHERE employee_id=? AND month>=? AND month<=? ORDER BY month').all(ev.employee_id, from.slice(0, 7), to.slice(0, 7)).map(checkinRow) };
+  ctx.unit = ctx.mgr.unit || process.env.KK_UNIT || 'Nazwa urzędu (uzupełnij)';
+  audit(u.id, 'download_draft', `${ev.id}:${format}`);
+  const base = `szkic-oceny-${ev.id}`;
+  if (format === 'xml') {
+    res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.xml"`, 'cache-control': 'no-store', ...SECURITY });
+    return res.end(buildDraftXml(ctx));
+  }
+  const bytes = await buildDraftPdf(ctx);
+  res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
+  res.end(Buffer.from(bytes));
+}
 route('GET', '/api/evals/:id', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev) return fail(res, 404, 'Nie znaleziono.');
   const canSee = (u.role === 'przelozony' && ev.evaluator_id === u.id) || (u.role === 'pracownik' && ev.employee_id === u.id && ev.status !== 'draft');
   if (!canSee) return fail(res, 403, 'Brak dostępu.');
   const emp = db.prepare('SELECT name,position,avatar FROM users WHERE id=?').get(ev.employee_id);
-  send(res, 200, { eval: evalRow(ev), employee: emp, missing: u.role === 'przelozony' ? missingForSubmit(ev) : [] });
+  const timing = u.role === 'przelozony' && ev.typ !== 'pierwsza' ? { ...timingCheck(empEvals(ev.employee_id), refDate(ev), ev.id), exception: ev.early_exception ? JSON.parse(ev.early_exception) : null } : null;
+  send(res, 200, { eval: evalRow(ev), employee: emp, missing: u.role === 'przelozony' ? missingForSubmit(ev) : [], timing });
 });
 route('PUT', '/api/evals/:id', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
@@ -582,6 +649,10 @@ route('POST', '/api/evals/:id/submit', async (req, res, u, p) => {
   if (ev.status !== 'draft') return fail(res, 409, 'Ocena już złożona.');
   const miss = missingForSubmit(ev);
   if (miss.length) return fail(res, 422, 'Ocena nie jest kompletna.', { missing: miss.slice(0, 50) });
+  if (ev.typ !== 'pierwsza' && !ev.early_exception) {
+    const tc = timingCheck(empEvals(ev.employee_id), refDate(ev), ev.id);
+    if (!tc.ok) return fail(res, 409, TOO_EARLY(tc), { code: 'too_early', earliest: tc.earliest, prevDate: tc.prevDate, prevEvalId: tc.prevId });
+  }
   // Wynik oceny okresowej zapisujemy jako wartość wyliczoną z ocen cząstkowych (§ 11), nie wpisywaną ręcznie
   const data = parseData(ev);
   if (isSchema2(ev.typ, data)) {
