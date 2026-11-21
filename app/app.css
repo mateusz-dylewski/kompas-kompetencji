@@ -30,7 +30,7 @@ button{cursor:pointer}
 .demo-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
 .demo-btn{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border:1.5px dashed var(--navy);border-radius:0;background:var(--sky);color:var(--navy);font-weight:700;font-size:13px;cursor:pointer;transition:transform .15s var(--ease),background .2s}
 .demo-btn span:first-child{font-size:22px}
-.demo-btn:hover{transform:translateY(-2px);background:#d8e6fb}
+.demo-btn:hover{background:#d8e6fb;border-color:var(--navy-d)}
 .foot-login{margin-top:auto;padding-bottom:18px}
 #bgwave{position:fixed;left:0;bottom:0;width:100%;height:50vh;opacity:var(--wave-op);pointer-events:none;z-index:0}
 #root,.app{position:relative;z-index:1}
@@ -49,12 +49,12 @@ textarea{min-height:76px;resize:vertical}
 .err{color:var(--bad);background:var(--bad-bg);border-radius:0;padding:10px 12px;margin-top:12px;font-size:14px;animation:shake .4s}
 
 /* ---------- Przyciski ---------- */
-.btn{min-height:46px;padding:10px 18px;border:0;border-radius:0;background:var(--navy);color:#fff;font-weight:700;font-size:15px;transition:transform .15s var(--ease),background .2s,opacity .2s}
-.btn:hover{background:var(--navy-d);transform:translateY(-1px)}
-.btn:active{transform:scale(.98)}
+.btn{min-height:38px;padding:8px 14px;border:0;border-radius:0;background:var(--navy);color:#fff;font-weight:700;font-size:15px;transition:background .2s,border-color .2s,color .2s,opacity .2s}
+.btn:hover{background:var(--navy-d)}
+.btn:active{background:#002a5c}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .btn.g{background:var(--card);color:var(--navy);border:1.5px solid var(--navy)}
-.btn.sm{min-height:36px;padding:6px 12px;font-size:13px;border-radius:0}
+.btn.sm{min-height:32px;padding:4px 10px;font-size:13px;border-radius:0}
 .btn.w{width:100%}
 
 /* ---------- Powłoka aplikacji ---------- */
@@ -76,7 +76,7 @@ textarea{min-height:76px;resize:vertical}
 .bottom button,.side button{background:none;border:0;color:var(--mu);display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;font-size:11px;font-weight:700;border-radius:0;transition:color .2s}
 .bottom button .ic{width:46px;height:30px;border-radius:0;display:grid;place-items:center;font-size:16px;transition:background .25s,transform .25s var(--ease)}
 .bottom button[aria-current="page"]{color:var(--navy)}
-.bottom button[aria-current="page"] .ic{background:var(--sky);transform:translateY(-2px)}
+.bottom button[aria-current="page"] .ic{background:var(--sky)}
 main{padding:16px 16px 100px;max-width:1100px;width:100%;margin:0 auto}
 
 /* ---------- Komponenty ---------- */
@@ -116,7 +116,7 @@ ul.c li{margin:4px 0}
 .table tbody tr:hover{background:var(--sky)}
 .steps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px}
 .steps span{font-size:12px;font-weight:700;padding:5px 11px;border-radius:0;border:1px solid var(--ln);color:var(--mu);transition:all .3s var(--ease)}
-.steps span.on{background:var(--navy);color:#fff;border-color:var(--navy);transform:scale(1.04)}
+.steps span.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .steps span.done{color:var(--ok);border-color:var(--ok)}
 .timeline{display:flex;gap:8px;align-items:center;margin:8px 0}
 .timeline .dot{width:14px;height:14px;border-radius:50%;background:var(--ln);flex:none;transition:background .4s}
@@ -125,8 +125,8 @@ ul.c li{margin:4px 0}
 .timeline .line i{display:block;height:100%;width:0;background:var(--ok);transition:width .8s var(--ease)}
 .timeline .line.on i{width:100%}
 .timeline small{font-size:12px;color:var(--mu);white-space:nowrap}
-.choice{display:flex;gap:12px;align-items:flex-start;border:1.5px solid var(--ln);border-radius:0;padding:14px;margin:10px 0;cursor:pointer;background:var(--card);transition:border-color .2s,background .2s,transform .2s var(--ease)}
-.choice:hover{transform:translateY(-1px)}
+.choice{display:flex;gap:12px;align-items:flex-start;border:1.5px solid var(--ln);border-radius:0;padding:14px;margin:10px 0;cursor:pointer;background:var(--card);transition:border-color .2s,background .2s}
+.choice:hover{border-color:var(--navy)}
 .choice input{width:auto;margin-top:4px;accent-color:var(--navy)}
 .choice:has(input:checked){border-color:var(--navy);background:var(--sky)}
 .choice:has(input:disabled){opacity:.7}
@@ -134,8 +134,8 @@ ul.c li{margin:4px 0}
 .ind{padding:12px 0;border-top:1px dashed var(--ln)}
 .lv{display:grid;gap:8px;margin:8px 0;grid-template-columns:1fr}
 @media(min-width:720px){.lv{grid-template-columns:repeat(5,1fr)}}
-.lv label{border:1.5px solid var(--ln);border-radius:0;padding:10px;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:flex-start;background:var(--card);transition:border-color .2s,background .2s,transform .15s}
-.lv label:hover{transform:translateY(-1px)}
+.lv label{border:1.5px solid var(--ln);border-radius:0;padding:10px;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:flex-start;background:var(--card);transition:border-color .2s,background .2s}
+.lv label:hover{border-color:var(--navy)}
 .lv label:has(input:checked){border-color:var(--navy);background:var(--sky);font-weight:700}
 .lv input{width:auto;margin-top:3px;accent-color:var(--navy)}
 .desc{font-size:12px;color:var(--mu);font-weight:400}
@@ -197,8 +197,8 @@ ul.c li{margin:4px 0}
 @media(min-width:760px){.crit-grid{grid-template-columns:1fr 1fr}}
 .ind-card{margin-bottom:12px}
 .ind-card .lv{margin-top:10px}
-.goal{border:1px solid var(--ln);border-radius:0;padding:14px;margin-bottom:12px;background:var(--card);transition:transform .2s var(--ease)}
-.goal:hover{transform:translateY(-1px)}
+.goal{border:1px solid var(--ln);border-radius:0;padding:14px;margin-bottom:12px;background:var(--card);transition:border-color .2s}
+.goal:hover{border-color:var(--navy)}
 .goal.is-done{opacity:.7}
 .range{width:min(260px,100%);accent-color:var(--navy)}
 .sb{margin-bottom:6px}
@@ -243,6 +243,6 @@ ul.c li{margin:4px 0}
 .lv label:has(input:checked) .desc,.choice:has(input:checked) .muted{color:#e3ecf8}
 .lv label:has(input:checked) b,.choice:has(input:checked) b{color:#fff}
 .lv label:has(input:checked) input,.choice:has(input:checked) input{accent-color:#fff}
-.act-btn{min-width:170px;min-height:40px;height:40px;justify-content:flex-start;padding:0 14px;font-size:14px}
+.act-btn{min-width:0;width:auto;min-height:34px;height:34px;justify-content:flex-start;padding:0 12px;font-size:13px;gap:6px}
 .act-btn .ic-svg{width:18px;height:18px}
 .table .act-btn{margin-left:auto}
