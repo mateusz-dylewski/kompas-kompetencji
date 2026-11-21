@@ -370,11 +370,12 @@
       selSync(sel);
     });
   }
-  function initSelects(root) {
-    enhanceSelects(root);
+  function initSelects() {
+    // Obserwujemy całe body: okna modalne (np. „Nowy feedback”) są dokładane poza #root
+    enhanceSelects(document.body);
     if (selObserving) return;
     selObserving = true;
-    new MutationObserver(() => enhanceSelects(root)).observe(root, { childList: true, subtree: true });
+    new MutationObserver(() => enhanceSelects(document.body)).observe(document.body, { childList: true, subtree: true });
     document.addEventListener("mousedown", e => { document.querySelectorAll(".kk-sel").forEach(w => { if (!w.contains(e.target)) selClose(w, false); }); });
   }
   function render() {
@@ -402,7 +403,7 @@
     if (pageChanged && sel) $("#view")?.focus({ preventScroll: true });
     else if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
     bindShell();
-    initSelects(root);
+    initSelects();
     animateIn(root);
     if (S.view === "log") loadLog();
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
