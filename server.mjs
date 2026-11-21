@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { buildXml, buildDraftPdf, buildDraftXml, computeResults, ptsFor, PTS5, EVAL_SCHEMA, isSchema2 } from './lib/documents.mjs';
-import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS, addMonths, lastPeriodic } from './lib/cycle.mjs';
+import { timingCheck, refDate, CYCLE_MONTHS, MIN_GAP_MONTHS, REEVAL_MONTHS, KICKOFF_DAYS, lastPeriodic, nextDueAfter, kickoffDue } from './lib/cycle.mjs';
 import { demoConfig, DEMO_MANAGER, DEMO_EMPLOYEE } from './lib/seed-config.mjs';
 import { buildFormPdf } from './lib/forms.mjs';
 import { securityConfig, clientIp, passwordProblem } from './lib/security.mjs';
@@ -111,6 +111,15 @@ try {
 } catch (_) { /* kolumna już istnieje */ }
 db.exec(`CREATE TABLE IF NOT EXISTS activation(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, token_sha256 TEXT NOT NULL UNIQUE,
   exp TEXT NOT NULL, used_at TEXT, created_by INTEGER, created TEXT NOT NULL)`);
+
+// Rozmowa rozpoczynająca okres oceny (poradnik KPRM, rozdz. 6.2): obowiązki, oczekiwania, cele, kryteria dodatkowe (maks. 3);
+// zapoznanie pracownika = podpis części I arkusza (mock). Od dnia zapoznania liczy się okres podlegający ocenie.
+db.exec(`CREATE TABLE IF NOT EXISTS kickoffs(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL, typ TEXT NOT NULL CHECK(typ IN ('B','C')),
+  date TEXT NOT NULL, prev_eval_id INTEGER, due TEXT, extra_criteria TEXT NOT NULL DEFAULT '[]', duties TEXT NOT NULL, expectations TEXT NOT NULL, goals TEXT NOT NULL,
+  ack_at TEXT, eval_id INTEGER, created TEXT NOT NULL, updated TEXT NOT NULL)`);
+// Ankieta przygotowania do rozmowy (1–5): bez identyfikatora osoby i oceny – tylko do zbiorczych metryk (K_MIN przełożonych)
+db.exec(`CREATE TABLE IF NOT EXISTS prep_survey(id INTEGER PRIMARY KEY, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), month TEXT NOT NULL)`);
+try { db.exec('ALTER TABLE evals ADD COLUMN survey_done INTEGER NOT NULL DEFAULT 0'); } catch (_) { /* już istnieje */ }
 
 // Dziennik: pieczęć HMAC każdego wpisu (klucz spoza bazy) i blokada UPDATE/DELETE na poziomie bazy
 try { db.exec('ALTER TABLE audit ADD COLUMN mac TEXT'); } catch (_) { /* już istnieje */ }
@@ -645,11 +654,88 @@ route('PUT', '/api/settings', async (req, res, u) => {
 });
 route('GET', '/api/assistant', async (req, res) => send(res, 200, ASSISTANT));
 route('GET', '/api/model', async (req, res) => send(res, 200, { model: MODEL, mandB: MAND_B, mandC: MAND_C, maxExtra: MAX_EXTRA, kMin: K_MIN,
-  cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS } }));
+  cycle: { cycleMonths: CYCLE_MONTHS, minGapMonths: MIN_GAP_MONTHS, reevalMonths: REEVAL_MONTHS, kickoffDays: KICKOFF_DAYS } }));
 // Terminy: ostatnia ocena okresowa pracownika, najwcześniejszy termin kolejnej (6 mies.) i termin cyklu (24 mies.)
 const empEvals = empId => db.prepare('SELECT id,typ,status,period_from,period_to,data,updated FROM evals WHERE employee_id=?').all(empId);
 const TOO_EARLY = t => `Zbyt wczesna ocena: od poprzedniej oceny okresowej (${t.prevDate}) musi upłynąć ${MIN_GAP_MONTHS} miesięcy (najwcześniej ${t.earliest}). Możesz zapisać wyjątek z uzasadnieniem – trafi do dziennika.`;
 const exceptionReason = b => str(b?.exception?.reason, 1000);
+
+// ---------- Rozmowa rozpoczynająca okres oceny ----------
+const latestKickoff = empId => db.prepare('SELECT * FROM kickoffs WHERE employee_id=? ORDER BY date DESC, id DESC LIMIT 1').get(empId) || null;
+const mandKeysFor = typ => MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m))).map(c => c.k);
+const kickoffRow = r => r && ({ id: r.id, employeeId: r.employee_id, evaluatorId: r.evaluator_id, typ: r.typ, date: r.date, due: r.due, prevEvalId: r.prev_eval_id,
+  late: !!(r.due && r.date > r.due), extraCriteria: JSON.parse(r.extra_criteria || '[]'), duties: r.duties, expectations: r.expectations, goals: r.goals,
+  criteria: [...mandKeysFor(r.typ), ...JSON.parse(r.extra_criteria || '[]')].map(k => ({ k, n: MODEL.find(c => c.k === k)?.n || k, mandatory: mandKeysFor(r.typ).includes(k) })),
+  ackAt: r.ack_at, evalId: r.eval_id, created: r.created, updated: r.updated });
+const kickoffAuditView = r => ({ typ: r.typ, date: r.date, extra_criteria: typeof r.extra_criteria === 'string' ? JSON.parse(r.extra_criteria) : r.extra_criteria, duties: r.duties, expectations: r.expectations, goals: r.goals });
+const KICKOFF_FIELDS = ['employeeId', 'typ', 'date', 'extraCriteria', 'duties', 'expectations', 'goals'];
+function sanitizeKickoff(b, cur = null) {
+  const errors = {}, v = {};
+  for (const k of Object.keys(b || {})) if (!KICKOFF_FIELDS.includes(k)) errors[k] = 'Nieznane pole.';
+  const has = k => !cur || b[k] !== undefined;
+  if (has('typ')) { if (['B', 'C'].includes(b.typ)) v.typ = b.typ; else errors.typ = 'Arkusz: B (kierujący zespołem) albo C (pozostałe stanowiska).'; }
+  if (has('date')) { if (isDate(b.date)) v.date = b.date; else errors.date = 'Podaj datę rozmowy (RRRR-MM-DD).'; }
+  for (const [k, label] of [['duties', 'obowiązki'], ['expectations', 'oczekiwania'], ['goals', 'cele']]) {
+    if (!has(k)) continue;
+    const t = str(b[k], 2000);
+    if (t.length >= 10) v[k] = t; else errors[k] = `Opisz ${label} (min. 10 znaków).`;
+  }
+  const typ = v.typ || cur?.typ;
+  if (has('extraCriteria') || v.typ) {
+    const list = b.extraCriteria !== undefined ? b.extraCriteria : JSON.parse(cur?.extra_criteria || '[]');
+    const mand = mandKeysFor(typ);
+    if (!Array.isArray(list) || list.some(k => !MODEL_KEYS.has(k)) || new Set(list).size !== list.length) errors.extraCriteria = 'Wybierz kryteria z modelu kompetencji.';
+    else if (list.length > MAX_EXTRA) errors.extraCriteria = `Najwyżej ${MAX_EXTRA} kryteria dodatkowe.`;
+    else if (list.some(k => mand.includes(k))) errors.extraCriteria = 'Kryterium obowiązkowe dla tego arkusza nie jest dodatkowe.';
+    else v.extra_criteria = JSON.stringify(list);
+  }
+  return { value: v, errors };
+}
+route('GET', '/api/kickoffs', async (req, res, u) => {
+  const { where, args } = scopedWhere(u, qs(req));
+  send(res, 200, { kickoffs: db.prepare(`SELECT * FROM kickoffs WHERE ${where.join(' AND ')} ORDER BY date DESC, id DESC`).all(...args).map(kickoffRow) });
+});
+route('POST', '/api/kickoffs', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Rozmowę rozpoczynającą zapisuje przełożony.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { value: v, errors } = sanitizeKickoff({ extraCriteria: [], ...b });
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const prev = lastPeriodic(empEvals(emp.id));
+  const due = kickoffDue(prev), at = now();
+  const id = db.prepare('INSERT INTO kickoffs(employee_id,evaluator_id,typ,date,prev_eval_id,due,extra_criteria,duties,expectations,goals,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(emp.id, u.id, v.typ, v.date, prev?.id ?? null, due, v.extra_criteria, v.duties, v.expectations, v.goals, at, at).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM kickoffs WHERE id=?').get(id);
+  audit(u.id, 'create_kickoff', `kickoff:${id}`, null, { employeeId: emp.id, due, ...kickoffAuditView(row) });
+  send(res, 201, { kickoff: kickoffRow(row) });
+});
+route('PUT', '/api/kickoffs/:id', async (req, res, u, p) => {
+  const cur = db.prepare('SELECT * FROM kickoffs WHERE id=?').get(p.id);
+  if (!cur || u.role !== 'przelozony' || cur.evaluator_id !== u.id) return fail(res, 404, 'Nie znaleziono rozmowy.');
+  if (cur.ack_at) return fail(res, 409, 'Pracownik zapoznał się już z ustaleniami (część I). Zmiany wymagają nowej rozmowy.');
+  const b = await readJson(req);
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść rozmowy na inną osobę.' });
+  const { value: v, errors } = sanitizeKickoff(b, cur);
+  if (Object.keys(errors).length) return invalid(res, errors);
+  const next = { ...cur, ...v };
+  const ch = diffObj(kickoffAuditView(cur), kickoffAuditView(next));
+  if (!ch) return send(res, 200, { kickoff: kickoffRow(cur), changed: false });
+  db.prepare('UPDATE kickoffs SET typ=?,date=?,extra_criteria=?,duties=?,expectations=?,goals=?,updated=? WHERE id=?')
+    .run(next.typ, next.date, next.extra_criteria, next.duties, next.expectations, next.goals, now(), cur.id);
+  audit(u.id, 'update_kickoff', `kickoff:${cur.id}`, ch.prev, ch.next);
+  send(res, 200, { kickoff: kickoffRow(db.prepare('SELECT * FROM kickoffs WHERE id=?').get(cur.id)), changed: true });
+});
+// Zapoznanie pracownika z obowiązkami, kryteriami i celami (część I arkusza) – od tej daty liczy się okres oceny
+route('POST', '/api/kickoffs/:id/acknowledge', async (req, res, u, p) => {
+  const cur = db.prepare('SELECT * FROM kickoffs WHERE id=?').get(p.id);
+  if (!cur || u.role !== 'pracownik' || cur.employee_id !== u.id) return fail(res, 404, 'Nie znaleziono rozmowy.');
+  if (cur.ack_at) return fail(res, 409, 'Zapoznanie już zarejestrowano.');
+  const at = now();
+  db.prepare('UPDATE kickoffs SET ack_at=?, updated=? WHERE id=?').run(at, at, cur.id);
+  audit(u.id, 'acknowledge_kickoff', `kickoff:${cur.id}`, { ack_at: null }, { ack_at: at });
+  send(res, 201, { ok: true, ackAt: at });
+});
 
 // Dashboard pracownika
 route('GET', '/api/dashboard', async (req, res, u) => {
@@ -665,7 +751,7 @@ route('GET', '/api/dashboard', async (req, res, u) => {
     });
     const tc = timingCheck(empEvals(u.id), today());
     return send(res, 200, {
-      role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue,
+      role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue, dueReason: tc.dueReason, kickoff: kickoffRow(latestKickoff(u.id)),
       evals: evals.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, updated: e.updated })),
       latestScores: latest ? scoreEval(latest) : null,
       latestDev: latest?.data?.dev || '',
@@ -710,12 +796,23 @@ route('GET', '/api/dashboard', async (req, res, u) => {
   const deadlines = team.map(t => {
     const mine = evals.filter(e => e.employee_id === t.id);
     const last = lastPeriodic(mine);
-    const due = last ? addMonths(refDate(last), CYCLE_MONTHS) : null;
+    const { nextDue: due, dueReason } = nextDueAfter(last);
     const days = due ? Math.round((Date.parse(due) - Date.parse(todayStr)) / 86400000) : null;
-    return { id: t.id, name: t.name, lastEval: last ? refDate(last) : null, due, days, text: due ? (days < 0 ? 'Termin minął' : `Ocena okresowa do ${due}`) : 'Brak poprzedniej oceny okresowej – sprawdź termin pierwszej oceny' };
+    const what = dueReason === 'ponowna_po_negatywnej' ? `Ponowna ocena po ocenie negatywnej (${REEVAL_MONTHS} mies.) do ${due}` : `Ocena okresowa do ${due}`;
+    return { id: t.id, name: t.name, lastEval: last ? refDate(last) : null, due, days, dueReason, text: due ? (days < 0 ? `Termin minął (${due})` : what) : 'Brak poprzedniej oceny okresowej – sprawdź termin pierwszej oceny' };
   }).sort((a, b) => (a.days ?? 1e9) - (b.days ?? 1e9));
   const dueById = Object.fromEntries(deadlines.map(d => [d.id, d.due]));
   teamRows.forEach(r => { r.nextDue = dueById[r.id] || null; });
+  // Rozmowa rozpoczynająca: po każdej ocenie okresowej, w ciągu 30 dni; potem zapoznanie pracownika (część I)
+  for (const r of teamRows) {
+    const last = lastPeriodic(evals.filter(e => e.employee_id === r.id));
+    const k = latestKickoff(r.id);
+    r.kickoff = k ? { id: k.id, date: k.date, ackAt: k.ack_at, typ: k.typ, evalId: k.eval_id } : null;
+    const due = kickoffDue(last);
+    const current = k && (!last || k.date >= refDate(last)); // rozmowa po ostatniej ocenie (albo przed pierwszą)
+    if (due && !current) alerts.push({ kind: 'kickoff', employeeId: r.id, name: r.name, text: due < todayStr ? `Termin rozmowy rozpoczynającej nowy okres minął (${due})` : `Rozmowa rozpoczynająca nowy okres do ${due}` });
+    else if (current && !k.ack_at) alerts.push({ kind: 'kickoff_ack', employeeId: r.id, name: r.name, text: `Rozmowa rozpoczynająca z ${k.date} czeka na zapoznanie pracownika` });
+  }
   send(res, 200, { role: u.role, alerts, deadlines, team: teamRows, counts, evals: evals.map(e => ({ id: e.id, employeeId: e.employee_id, typ: e.typ, status: e.status, updated: e.updated })), aggregate: agg, goalsOpen });
 });
 
@@ -771,12 +868,20 @@ route('POST', '/api/evals', async (req, res, u) => {
       exception = { reason, by: u.id, at: now(), earliest: tc.earliest, prevEvalId: tc.prevId };
     }
   }
-  const data = sanitizeData({ criteria: MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m))).map(c => c.k), ratings: {} }, typ);
+  // Rozmowa rozpoczynająca (zapoznana przez pracownika, jeszcze bez oceny, ten sam arkusz): kryteria dodatkowe
+  // i początek okresu (dzień zapoznania z kryteriami) przechodzą do szkicu oceny
+  const k = latestKickoff(emp.id);
+  const kick = k && k.ack_at && !k.eval_id && k.typ === typ ? k : null;
+  const extra = kick ? JSON.parse(kick.extra_criteria) : [];
+  const data = sanitizeData({ criteria: [...mandKeysFor(typ), ...extra], ratings: {} }, typ);
+  if (kick) data.kickoff = { id: kick.id, date: kick.date, ackAt: kick.ack_at, extraCriteria: extra };
+  const periodFrom = str(b.periodFrom, 10) || (kick ? kick.ack_at.slice(0, 10) : '');
   const id = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated,early_exception) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(emp.id, u.id, typ, str(b.periodFrom, 10), str(b.periodTo, 10), 'draft', JSON.stringify(data), now(), now(), exception ? JSON.stringify(exception) : null).lastInsertRowid;
-  audit(u.id, 'create_eval', id, null, { employeeId: emp.id, typ, periodFrom: str(b.periodFrom, 10), periodTo: str(b.periodTo, 10) });
+    .run(emp.id, u.id, typ, periodFrom, str(b.periodTo, 10), 'draft', JSON.stringify(data), now(), now(), exception ? JSON.stringify(exception) : null).lastInsertRowid;
+  if (kick) db.prepare('UPDATE kickoffs SET eval_id=? WHERE id=?').run(id, kick.id);
+  audit(u.id, 'create_eval', id, null, { employeeId: emp.id, typ, periodFrom, periodTo: str(b.periodTo, 10), kickoffId: kick?.id ?? null });
   if (exception) audit(u.id, 'eval_early_exception', id, null, exception);
-  send(res, 201, { id, earlyException: !!exception });
+  send(res, 201, { id, earlyException: !!exception, kickoffId: kick?.id ?? null });
 });
 const ownEval = (u, id) => db.prepare('SELECT * FROM evals WHERE id=?').get(id) || null;
 // Wyjątek od reguły 6 miesięcy dla istniejącego szkicu (np. po zmianie okresu) – z uzasadnieniem, w dzienniku
@@ -862,6 +967,9 @@ route('PUT', '/api/evals/:id', async (req, res, u, p) => {
   if (ev.status !== 'draft') return fail(res, 409, 'Ocena jest już złożona i nie można jej edytować.');
   const b = await readJson(req);
   const data = sanitizeData(b.data, ev.typ);
+  // Ustalenia z rozmowy rozpoczynającej ustawia serwer – klient ich nie zmienia
+  const kick0 = parseData(ev).kickoff;
+  if (kick0) data.kickoff = kick0;
   const pf = str(b.periodFrom, 10) || ev.period_from, pt = str(b.periodTo, 10) || ev.period_to;
   db.prepare('UPDATE evals SET data=?, period_from=?, period_to=?, updated=? WHERE id=?')
     .run(JSON.stringify(data), pf, pt, now(), ev.id);
@@ -1421,6 +1529,68 @@ route('POST', '/api/ai/checkin', async (req, res, u) => {
     aiLog(null, u.id, 'checkin', lines, { text: fallback, source: 'rules' });
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
   }
+});
+
+// ---------- Metryki wsparcia przełożonego (tylko zbiorczo) ----------
+// Mierzymy proces, nie osoby: wyniki pokazujemy dopiero, gdy dane pochodzą od co najmniej K_MIN przełożonych,
+// bez podziału na osoby i bez rankingu. Mediany zamiast średnich. Brak pomiaru czasu pracy i aktywności (sesji, kliknięć).
+const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const monthsBetween = (from, to) => {
+  const out = [], end = to.slice(0, 7);
+  let [y, m] = from.slice(0, 7).split('-').map(Number);
+  for (let k = from.slice(0, 7); k <= end && out.length < 61; k = `${y}-${String(m).padStart(2, '0')}`) { out.push(k); if (++m > 12) { m = 1; y++; } }
+  return out;
+};
+const share = (n, d) => (d ? Math.round(n / d * 100) : null);
+function supportMetrics() {
+  const evals = db.prepare("SELECT * FROM evals WHERE status!='draft' AND typ IN ('B','C')").all();
+  const managers = new Set(evals.map(e => e.evaluator_id)).size;
+  const base = { kMin: K_MIN, managers, suppressed: managers < K_MIN };
+  if (base.suppressed) return base;
+  const submitAt = new Map(db.prepare("SELECT target, MIN(at) at FROM audit WHERE action='submit_eval' GROUP BY target").all().map(r => [r.target, r.at]));
+  // 3. Ocenianie: w ilu miesiącach okresu jest co najmniej jeden dowód (nie liczba dowodów – nie zachęcamy do nadzoru)
+  const coverage = [];
+  for (const e of evals) {
+    if (!isDate(e.period_from) || !isDate(e.period_to) || e.period_from > e.period_to) continue;
+    const months = monthsBetween(e.period_from, e.period_to);
+    const withEv = new Set(db.prepare('SELECT DISTINCT substr(date,1,7) m FROM evidence WHERE employee_id=? AND date>=? AND date<=?').all(e.employee_id, e.period_from, e.period_to).map(r => r.m));
+    coverage.push(Math.round(withEv.size / months.length * 100));
+  }
+  // 5. Ocena na piśmie: dni od utworzenia szkicu do złożenia; poprawki po złożeniu (uwzględniony sprzeciw)
+  const days = evals.map(e => submitAt.get(String(e.id)) && (Date.parse(submitAt.get(String(e.id))) - Date.parse(e.created)) / 86400000).filter(d => d >= 0);
+  const revised = db.prepare("SELECT COUNT(DISTINCT eval_id) n FROM revisions").get().n;
+  // 1–2. Rozmowa rozpoczynająca: w terminie 30 dni; czy kryteria dodatkowe zmieniły się między rozmową a oceną
+  const kicks = db.prepare('SELECT * FROM kickoffs WHERE due IS NOT NULL').all();
+  const withKick = evals.map(e => ({ e, k: JSON.parse(e.data || '{}').kickoff })).filter(x => x.k);
+  const changed = withKick.filter(({ e, k }) => {
+    const mand = mandKeysFor(e.typ), fin = (JSON.parse(e.data || '{}').criteria || []).filter(c => !mand.includes(c)).sort();
+    return JSON.stringify(fin) !== JSON.stringify([...k.extraCriteria].sort());
+  }).length;
+  // 4. Rozmowa oceniająca: dobrowolna ankieta 1–5 bez identyfikatora osoby
+  const ratings = db.prepare('SELECT rating FROM prep_survey').all().map(r => r.rating);
+  return { ...base, evals: evals.length,
+    coverage: { medianPct: median(coverage), n: coverage.length },
+    submit: { medianDays: days.length ? Math.round(median(days) * 10) / 10 : null, n: days.length, revisedPct: share(revised, evals.length) },
+    kickoff: { onTimePct: share(kicks.filter(k => k.date <= k.due).length, kicks.length), n: kicks.length, criteriaChangedPct: share(changed, withKick.length), withKickoff: withKick.length },
+    prep: ratings.length >= K_MIN ? { n: ratings.length, distribution: Object.fromEntries([1, 2, 3, 4, 5].map(v => [v, ratings.filter(r => r === v).length])), median: median(ratings) } : { n: ratings.length, suppressed: true } };
+}
+route('GET', '/api/metrics', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Metryki są dla przełożonych.');
+  send(res, 200, supportMetrics());
+});
+// Ankieta po złożeniu oceny: „Jak oceniasz przygotowanie do rozmowy oceniającej?” (1–5), raz na ocenę, dobrowolnie.
+// Zapisujemy tylko wartość i miesiąc – bez osoby i bez oceny (anonimowo); ocena dostaje wyłącznie znacznik „ankieta wypełniona”.
+route('POST', '/api/evals/:id/survey', async (req, res, u, p) => {
+  const ev = ownEval(u, p.id);
+  if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  if (ev.status === 'draft') return fail(res, 409, 'Ankieta jest po złożeniu oceny.');
+  if (ev.survey_done) return fail(res, 409, 'Ankietę dla tej oceny już wypełniono.');
+  const b = await readJson(req);
+  const rating = Number(b.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return invalid(res, { rating: 'Wybierz wartość od 1 do 5.' });
+  db.prepare('INSERT INTO prep_survey(rating, month) VALUES(?, ?)').run(rating, today().slice(0, 7));
+  db.prepare('UPDATE evals SET survey_done=1 WHERE id=?').run(ev.id);
+  send(res, 201, { ok: true });
 });
 
 // Dziennik zdarzeń – przegląd dla przełożonego (zgodność z RODO / audyt)
