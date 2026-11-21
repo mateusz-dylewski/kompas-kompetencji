@@ -48,7 +48,8 @@ Lokalnie masz model `orcarouter/Qwen3.8-27B-Uncensored:iq2_m`. Nie jest on domy�
 
 ## Zasady projektowe (zgodność z prawem)
 
-- **RODO:** minimalizacja danych. Prompt do modelu nie zawiera imion ani nazwisk, tylko kompetencje, poziomy i uzasadnienia. Dziennik zdarzeń pozwala sprawdzić dostęp i zmiany.
+- **RODO:** minimalizacja danych. Prompt do modelu nie zawiera imion ani nazwisk, tylko kompetencje, poziomy i uzasadnienia. Imiona, nazwiska i e-maile wpisane w tekst są zastępowane znacznikiem `[osoba]`. Dziennik zdarzeń pozwala sprawdzić dostęp i zmiany.
+- **Bez sugerowanego wyniku:** dane miesięczne i kwartalne pokazujemy jako zestawienie (liczby, daty, rozkład poziomów), bez średniej i bez „przewidywanej oceny”.
 - **AI Act (UE 2024/1689):** wspieranie ocen pracowników w zatrudnieniu może zakwalifikować system jako wysokiego ryzyka (załącznik III). Dlatego AI tylko proponuje (pytania, przeformułowania, działania rozwojowe). Nie wystawia ocen, a decyzję zawsze podejmuje człowiek. Przed wdrożeniem wymagana jest analiza prawna.
 - **Agregaty zespołu:** wyniki zbiorcze pokazywane dopiero od 5 złożonych ocen.
 - **Dziennik zmian:** każda zmiana oceny, dowodu i feedbacku zapisuje autora, czas oraz poprzednią i nową wartość (`audit.prev_value`, `audit.new_value`, w łańcuchu skrótów SHA-256).
@@ -112,6 +113,12 @@ Kody błędów: `400` nieprawidłowe dane (`fields`: pole → komunikat, także 
 | GET/POST | `/api/partials`, PUT `/api/partials/:id` | Oceny cząstkowe kwartalne |
 
 Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową wartością.
+
+## Zestawienia zamiast wyników (ekran „Zestawienie”)
+
+`GET /api/summary?employeeId=&from=&to=` (domyślnie ostatnie 12 miesięcy) pokazuje fakty dla każdego wskaźnika: liczbę dowodów, daty pierwszego i ostatniego, liczbę odbytych check-inów z dowodami i liczbę feedbacku z rozkładem poziomów. Do tego rozkład poziomów z kwartalnych ocen cząstkowych dla każdego kryterium oraz listę check-inów. **Bez średniej miesięcznej i bez sugerowanego wyniku**, a test sprawdza, że w odpowiedzi nie ma takich pól. Zestawienia zespołowe (ekran „Wyniki”) działają jak dotąd: od `K_MIN` = 5 złożonych ocen.
+
+**Asystent AI** (`/api/ai/talk`, `/api/ai/formal`, `/api/ai/development`, nowy `/api/ai/checkin`) przeformułowuje teksty i proponuje pytania do rozmowy. Nie zmienia i nie zapisuje ocen, dowodów ani check-inów. Testy porównują stan danych przed i po wywołaniach. `/api/ai/checkin` wysyła do modelu tylko nazwy wskaźników i liczby dowodów. Przed każdym wywołaniem modelu serwer zastępuje znacznikiem `[osoba]` imiona, nazwiska (z odmianą) i adresy e-mail wszystkich kont, także te wpisane ręcznie w uzasadnienia. Test przechwytuje prompty atrapą Ollama.
 
 ## Ograniczenia prototypu
 

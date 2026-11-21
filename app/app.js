@@ -36,6 +36,7 @@
       ["evals", "Oceny", "clip", "Przygotuj ocenę krok po kroku"],
       ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i dowody z miesiąca – bez punktacji"],
       ["evidence", "Dowody", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
+      ["summary", "Zestawienie", "scale", "Liczby dowodów, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
     ],
@@ -47,7 +48,8 @@
 
   const S = { user: null, ai: { ok: false }, dash: null, evals: [], goals: [], view: "home", cur: null, readEval: null, mandB: [], mandC: [], maxExtra: 3,
     evFilter: { employeeId: "", competency: "", indicator: "", from: "", to: "" }, evidence: [],
-    month: { employeeId: "", month: new Date().toISOString().slice(0, 7) }, monthData: null };
+    month: { employeeId: "", month: new Date().toISOString().slice(0, 7) }, monthData: null,
+    sum: { employeeId: "", from: "", to: "" } };
 
   // ---------- API ----------
   async function api(method, url, body) {
@@ -232,6 +234,7 @@
     if (S.view === "log") loadLog();
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
     if (S.view === "month") { bindMonthPage(); loadMonth(); }
+    if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
     if (S.view === "evalView" && S.readEval) loadSigs(S.readEval.id, S.readEval.status);
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -360,6 +363,7 @@
     }
     if (v === "evidence") return evidencePage(true);
     if (v === "month") return monthPage();
+    if (v === "summary") return summaryPage();
     return evalsList(true);
   }
 
@@ -447,8 +451,10 @@
             <div class="grid two"><div><label class="f" for="ciDate">Data rozmowy</label><input id="ciDate" type="date" value="${esc(c.date || "")}" max="${new Date().toISOString().slice(0, 10)}"></div>
               <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
             <div id="ciErr" role="alert" class="err"></div>
-            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button></div>
-          </form></div>
+            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
+              <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button></div>
+          </form><div id="aiCkOut" aria-live="polite"></div>
+          <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę dowodów. Nie zapisuje niczego i nie proponuje ocen.</p></div>
         <div class="card"><div class="row"><h2>Dowody z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Dowód", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
           <p class="muted">Pokazujemy tylko wskaźniki z nowymi dowodami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
@@ -584,6 +590,45 @@
     const c = S.cur; if (!c) return;
     const q = new URLSearchParams({ employeeId: c.employeeId, ...(c.periodFrom ? { from: c.periodFrom } : {}), ...(c.periodTo ? { to: c.periodTo } : {}) });
     try { c.evidence = (await api("GET", "/api/evidence?" + q)).evidence; } catch (_) { c.evidence = []; }
+  }
+
+  // ---------- Zestawienie (przełożony): liczby, daty, rozkład poziomów – bez średniej i bez sugestii wyniku ----------
+  function summaryPage() {
+    const f = S.sum;
+    if (!f.employeeId && S.dash.team.length) f.employeeId = String(S.dash.team[0].id);
+    return `<div class="card"><form id="sumForm" class="grid two" aria-label="Wybór pracownika i okresu" novalidate>
+        <div><label class="f" for="sEmp">Pracownik</label><select id="sEmp">${empOptions(f.employeeId)}</select></div>
+        <div><label class="f" for="sFrom">Od (domyślnie 12 miesięcy wstecz)</label><input id="sFrom" type="date" value="${esc(f.from)}"></div>
+        <div><label class="f" for="sTo">Do</label><input id="sTo" type="date" value="${esc(f.to)}"></div>
+        <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button></div>
+      </form></div>
+      <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+  }
+  function bindSummaryPage() {
+    const fm = $("#sumForm"); if (!fm) return;
+    fm.addEventListener("submit", e => { e.preventDefault(); Object.assign(S.sum, { employeeId: $("#sEmp").value, from: $("#sFrom").value, to: $("#sTo").value }); loadSummary(); });
+  }
+  const distChips = d => `<span class="dist">${PTS5.map(p => `<span title="${p} pkt">${p} pkt: <b>${d[p] || 0}</b></span>`).join("")}</span>`;
+  async function loadSummary() {
+    const box = $("#sumBody"); if (!box) return;
+    const f = S.sum, q = new URLSearchParams({ employeeId: f.employeeId, ...(f.from ? { from: f.from } : {}), ...(f.to ? { to: f.to } : {}) });
+    try {
+      const s = await api("GET", "/api/summary?" + q);
+      box.innerHTML = `<div class="kpis">
+          <div class="kpi"><b>${s.evidenceTotal}</b><span>Dowody w okresie</span></div>
+          <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Check-iny odbyte / zapisane</span></div>
+          <div class="kpi"><b>${s.feedbackTotal}</b><span>Feedback</span></div>
+          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez dowodów</span></div></div>
+        <div class="card"><h2>Wskaźniki z dowodami lub feedbackiem</h2>
+          <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
+          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Dowody</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z dowodami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
+            ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
+            </tbody></table></div>` : `<p class="muted">Brak dowodów i feedbacku w okresie.</p>`}</div>
+        <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
+          ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
+            <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
+        <div class="card"><h2>Check-iny</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak check-inów w okresie.</p>`}</div>`;
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
   }
 
   // ---------- Kreator oceny: strony Dalej/Wstecz ----------
@@ -892,6 +937,12 @@
       return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
     },
     addFeedback: () => feedbackModal(null),
+    aiCheckin: async b => {
+      const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = `<div class="ai-out">Asystent przygotowuje pytania…</div>`;
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? "model AI lokalnie" : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (e) { out.innerHTML = ""; toast(e.message); }
+      b.disabled = false;
+    },
     editFeedback: b => { const f = (S.monthFeedback || []).find(x => x.id === +b.dataset.id); if (f) feedbackModal(f); },
     addPartial: () => partialModal(null),
     editPartial: b => { const p = (S.monthPartials || []).find(x => x.id === +b.dataset.id); if (p) return partialModal(p); },

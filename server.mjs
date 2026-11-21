@@ -340,7 +340,25 @@ async function ollamaStatus() {
     return { ok: true, model: AI_MODEL, modelInstalled: has, url: 'lokalnie' };
   } catch { return { ok: false, model: AI_MODEL }; }
 }
+// Minimalizacja danych (RODO): z treści wysyłanej do modelu usuwamy imiona i nazwiska wszystkich kont,
+// także gdy przełożony wpisał je w uzasadnieniu lub dowodzie. Prompt nie zawiera danych identyfikujących.
+function redactNames(text) {
+  const tokens = new Set();
+  for (const { name, email } of db.prepare('SELECT name,email FROM users').all()) {
+    for (const t of String(name).split(/\s+/)) if (t.length >= 3) tokens.add(t);
+    tokens.add(email);
+  }
+  let out = String(text);
+  for (const t of [...tokens].sort((a, b) => b.length - a.length)) {
+    // odmiana: rdzeń bez ostatniej litery + do 4 liter końcówki (Katarzyna → Katarzyny, Michał → Michałem)
+    const stem = !t.includes('@') && t.length >= 5 ? t.slice(0, -1) : t;
+    const re = new RegExp(`(?<![\\p{L}])${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\p{L}]{0,4}(?![\\p{L}])`, 'gu');
+    out = out.replace(re, '[osoba]');
+  }
+  return out;
+}
 async function llm(system, user) {
+  user = redactNames(user);
   const r = await fetch(`${AI_URL}/api/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: AI_MODEL, stream: false, think: false, options: { temperature: 0.3, num_predict: 700 },
@@ -916,6 +934,42 @@ route('GET', '/api/month', async (req, res, u) => {
   send(res, 200, { month, employeeId: emp.id, groups, evidenceCount: ev.length, checkin: checkinRow(checkin) || null, feedback: fb });
 });
 
+// ---------- Zestawienie dla przełożonego: liczby, daty i rozkład poziomów – bez średniej i bez sugestii wyniku ----------
+function summaryFor(empId, from, to) {
+  const inRange = (col = 'date') => `${col}>=? AND ${col}<=?`;
+  const ev = db.prepare(`SELECT indicator,date FROM evidence WHERE employee_id=? AND ${inRange()} ORDER BY date`).all(empId, from, to);
+  const fb = db.prepare(`SELECT indicator,level,date FROM feedback WHERE employee_id=? AND ${inRange()}`).all(empId, from, to);
+  const ci = db.prepare(`SELECT month,status FROM checkins WHERE employee_id=? AND month>=? AND month<=? ORDER BY month`).all(empId, from.slice(0, 7), to.slice(0, 7));
+  const pr = db.prepare('SELECT quarter,competency,pts FROM partial_ratings WHERE employee_id=? AND quarter>=? AND quarter<=? ORDER BY quarter').all(empId, quarterOf(from), quarterOf(to));
+  const doneMonths = new Set(ci.filter(c => c.status === 'odbyty').map(c => c.month));
+  const indicators = [];
+  for (const [key, ind] of INDICATORS) {
+    const e = ev.filter(x => x.indicator === key), f = fb.filter(x => x.indicator === key);
+    if (!e.length && !f.length) continue;
+    const months = new Set(e.map(x => x.date.slice(0, 7)));
+    indicators.push({ indicator: key, competency: ind.k, text: ind.text, evidenceCount: e.length, firstDate: e[0]?.date || null, lastDate: e.at(-1)?.date || null,
+      evidenceMonths: [...months], checkinsWithEvidence: [...months].filter(m => doneMonths.has(m)).length, feedbackCount: f.length,
+      feedbackLevels: Object.fromEntries(PTS5.map(p => [p, f.filter(x => x.level === p).length])) });
+  }
+  const competencies = [...new Set(pr.map(p => p.competency))].map(k => ({ competency: k,
+    partials: pr.filter(p => p.competency === k).map(p => ({ quarter: p.quarter, pts: p.pts })),
+    distribution: Object.fromEntries(PTS5.map(v => [v, pr.filter(p => p.competency === k && p.pts === v).length])) }));
+  return { from, to, indicators, indicatorsWithoutEvidence: [...INDICATORS.keys()].filter(k => !ev.some(x => x.indicator === k)).length,
+    evidenceTotal: ev.length, feedbackTotal: fb.length,
+    checkins: { total: ci.length, done: doneMonths.size, months: ci.map(c => ({ month: c.month, status: c.status })) }, competencies };
+}
+route('GET', '/api/summary', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Zestawienie jest dla przełożonego.');
+  const q = qs(req);
+  const emp = teamMember(u, q.get('employeeId'));
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const to = q.get('to') || today();
+  const from = q.get('from') || `${+to.slice(0, 4) - 1}${to.slice(4)}`;
+  if (!isDate(from) || !isDate(to) || from > to) return invalid(res, { from: 'Podaj poprawny okres (od ≤ do, RRRR-MM-DD).' });
+  audit(u.id, 'view_summary', `${emp.id}:${from}:${to}`);
+  send(res, 200, { employeeId: emp.id, ...summaryFor(emp.id, from, to) });
+});
+
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)
 route('POST', '/api/ai/talk', async (req, res, u) => {
   const b = await readJson(req);
@@ -967,6 +1021,30 @@ route('POST', '/api/ai/development', async (req, res, u) => {
     audit(u.id, 'ai_development'); aiLog(null, u.id, 'development', weak.join(','), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
+    send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
+  }
+});
+
+// Pytania do rozmowy miesięcznej: tylko nazwy wskaźników i liczby dowodów (bez treści dowodów i bez danych osoby).
+// Asystent niczego nie zapisuje w ocenach, dowodach ani check-inach.
+route('POST', '/api/ai/checkin', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const month = isMonth(b.month) ? b.month : today().slice(0, 7);
+  const rows = db.prepare('SELECT indicator, COUNT(*) n FROM evidence WHERE employee_id=? AND date>=? AND date<=? GROUP BY indicator').all(emp.id, `${month}-01`, monthEnd(month));
+  const lines = rows.map(r => `- ${INDICATORS.get(r.indicator)?.k.toLowerCase()} / ${INDICATORS.get(r.indicator)?.text.replace(/\n/g, ' ')}: ${r.n} dow.`).join('\n');
+  const fallback = rows.length
+    ? `Pytania do rozmowy (do 20 minut):\n- Co w ostatnim miesiącu poszło zgodnie z planem przy: ${rows.slice(0, 2).map(r => INDICATORS.get(r.indicator)?.k.toLowerCase()).join(', ')}?\n- Co utrudniało realizację zadań i czego potrzebujesz?\n- Jaki jeden cel ustalamy na kolejny miesiąc?`
+    : 'Brak dowodów w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
+  try {
+    const text = await llm(`Jesteś asystentem przełożonego w służbie cywilnej przed krótką (do 20 minut) rozmową miesięczną. ${RULES} Zaproponuj 3 pytania otwarte o rezultaty zadań i potrzebne wsparcie. Nie pytaj o czas pracy, obecność, stan zdrowia ani cechy osobowości. Nie proponuj ocen ani punktów.`,
+      `Wskaźniki z dowodami w miesiącu (liczba dowodów):\n${lines || 'brak'}`);
+    audit(u.id, 'ai_checkin', `${emp.id}:${month}`); aiLog(null, u.id, 'checkin', lines, { text, source: 'ai' });
+    send(res, 200, { text, source: 'ai', model: AI_MODEL });
+  } catch {
+    aiLog(null, u.id, 'checkin', lines, { text: fallback, source: 'rules' });
     send(res, 200, { text: fallback + '\n\n' + AI_RULE_NOTE, source: 'rules' });
   }
 });
