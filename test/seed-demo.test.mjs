@@ -46,6 +46,29 @@ test('seed: brak identycznych informacji u jednej osoby; przykłady w ocenach be
   assert.ok(withEx > 0, 'część przykładów wynika z informacji');
 });
 
+test('szkice demo: bez poziomu 0; działania w informacjach różnicowane u jednej osoby', async () => {
+  const evals = (await mgr.get('/api/evals')).body.evals;
+  const drafts = evals.filter(e => e.status === 'draft' && e.typ !== 'pierwsza');
+  assert.ok(drafts.length >= 2);
+  for (const d of drafts) {
+    const lv = Object.values(d.data.ratings).map(r => r.lvl);
+    assert.ok(lv.length > 0 && lv.every(l => l >= 1), `szkic ${d.id}: poziom 0 we wskaźniku`);
+    assert.ok(lv.filter(l => l === 2).length >= lv.length / 2, `szkic ${d.id}: większość powinna być na poziomie 2`);
+  }
+  const team = (await mgr.get('/api/dashboard')).body.team;
+  const variants = new Set();
+  for (const m of team) {
+    const ev = (await mgr.get(`/api/evidence?employeeId=${m.id}`)).body.evidence;
+    ev.forEach(e => variants.add(e.action));
+  }
+  assert.ok(variants.size >= 10, 'min. 10 wariantów działań');
+  for (const m of team) {
+    const ev = (await mgr.get(`/api/evidence?employeeId=${m.id}`)).body.evidence;
+    const acts = ev.map(e => e.action);
+    assert.ok(acts.length - new Set(acts).size <= Math.max(0, acts.length - variants.size), `duplikaty działań u osoby ${m.id}`);
+  }
+});
+
 test('każdy szkic oceny w demo da się wypełnić i złożyć (informacje z okresu przy każdym wskaźniku)', async () => {
   const drafts = (await mgr.get('/api/evals')).body.evals.filter(e => e.status === 'draft' && e.typ !== 'pierwsza');
   assert.ok(drafts.length >= 2, 'szkic B i szkic C');

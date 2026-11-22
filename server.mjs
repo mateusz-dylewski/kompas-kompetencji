@@ -251,7 +251,9 @@ function seed() {
     const criteria = (typ === 'pierwsza' ? MODEL.slice(0, 6) : MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m)))).map(c => c.k);
     const ratings = {};
     MODEL.filter(c => criteria.includes(c.k)).forEach(c => c.w.forEach((w, wi) => {
-      const lvl = typ === 'pierwsza' ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 5);
+      const lvl0 = typ === 'pierwsza' ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 5);
+      // szkice: poziomy realistyczne wokół oczekiwań (głównie 2, część 3, pojedyncze 1; bez 0)
+      const lvl = status === 'draft' ? [2, 2, 3, 2, 1][lvl0] : lvl0;
       ratings[`${c.k}|${wi}`] = { lvl, ex: '' };
     }));
     const data = { criteria, ratings, dev: 'Szkolenie z analizy danych do końca kwartału.' };
@@ -294,7 +296,7 @@ function seed() {
   // Ocena typu C (szkic) dla pracownika2 – oceny cząstkowe zgodne ze schematem 2
   const cCrit = MODEL.filter(c => MAND_C.some(m => c.k.startsWith(m))).map(c => c.k);
   const cRatings = {}; let ci = 0;
-  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: 2 + (ci++ % 3), ex: '' }; }));
+  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: [2, 2, 3, 2, 2, 3, 1][ci++ % 7], ex: '' }; }));
   const cData = { criteria: cCrit, ratings: cRatings, dev: 'Szkolenie z zasad redagowania dokumentów urzędowych.', schema: EVAL_SCHEMA, partials: {} };
   cCrit.forEach((k, i) => { cData.partials[k] = { pts: PTS5[2 + (i % 3)] }; });
   const cId = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
@@ -326,15 +328,23 @@ function seedEvidence(mgr, emps, rnd) {
   const SIT = ['Przygotowanie raportu kwartalnego dla kierownictwa', 'Odpowiedź na pismo innej komórki organizacyjnej', 'Wdrożenie nowej procedury obiegu dokumentów',
     'Spotkanie projektowe z zespołem wykonawcy', 'Obsługa wniosku o udostępnienie informacji publicznej', 'Aktualizacja rejestru umów'];
   const ACT = ['Sprawdzono wymagania i uzgodniono harmonogram z osobami zależnymi', 'Przygotowano wersję roboczą i zebrano uwagi przed terminem',
-    'Zgłoszono ryzyko opóźnienia z dwudniowym wyprzedzeniem i zaproponowano zmianę kolejności prac', 'Ustalenia podsumowano na piśmie i rozesłano uczestnikom'];
+    'Zgłoszono ryzyko opóźnienia z dwudniowym wyprzedzeniem i zaproponowano zmianę kolejności prac', 'Ustalenia podsumowano na piśmie i rozesłano uczestnikom',
+    'Zebrano dane z trzech źródeł i zweryfikowano ich spójność przed przekazaniem', 'Omówiono zakres z przełożonym i doprecyzowano oczekiwany efekt',
+    'Przygotowano krótką instrukcję dla pozostałych osób w zespole', 'Skonsultowano projekt z radcą prawnym i naniesiono zalecone zmiany',
+    'Uzupełniono braki w dokumentacji i oznaczono wersję końcową', 'Przeprowadzono krótkie szkolenie wewnętrzne dla osób korzystających z rozwiązania'];
   const RES = ['Dokument przekazany w terminie, bez poprawek merytorycznych', 'Termin dotrzymany, uwagi uwzględnione w jednej rundzie',
-    'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych'];
+    'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych',
+    'Dane przyjęte przez odbiorcę bez konieczności uzupełnień', 'Przełożony zatwierdził rozwiązanie bez zmian w zakresie',
+    'Instrukcja wykorzystana przez zespół w kolejnych zadaniach', 'Uwagi prawne wprowadzone, sprawa zamknięta w terminie',
+    'Dokumentacja kompletna, kontrola wewnętrzna bez uwag', 'Osoby przeszkolone samodzielnie wykonują zadanie'];
   const pick = a => a[Math.floor(rnd() * a.length)];
   const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
-  const used = new Set();
+  const used = new Set(), usedAct = new Map();
   const add = (eid, date, ind) => {
     let sit, act, res, key, n = 0;
-    do { sit = pick(SIT); act = pick(ACT); res = pick(RES); key = `${eid}|${sit}|${act}|${res}`; } while (used.has(key) && ++n < 200);
+    const ua = usedAct.get(eid) || usedAct.set(eid, new Set()).get(eid);
+    do { sit = pick(SIT); act = pick(ACT); res = pick(RES); key = `${eid}|${sit}|${act}|${res}`; } while ((used.has(key) || (ua.has(act) && ua.size < ACT.length)) && ++n < 400);
+    ua.add(act);
     if (used.has(key)) return; // wyczerpane kombinacje – bez duplikatu
     used.add(key);
     return ins.run(eid, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
@@ -348,7 +358,7 @@ function seedEvidence(mgr, emps, rnd) {
     inds.forEach((ind, i) => {
       const date = dd(dr.period_from, Math.floor((i + 0.5) * span / inds.length));
       for (;;) { // następna wolna kombinacja treści u tej osoby
-        const sit = SIT[n % SIT.length], act = ACT[Math.floor(n / SIT.length) % ACT.length], res = RES[(n + Math.floor(n / 24)) % RES.length]; n++;
+        const sit = SIT[Math.floor(n / ACT.length) % SIT.length], act = ACT[n % ACT.length], res = RES[(n + Math.floor(n / 24)) % RES.length]; n++;
         if (n > 500) return;
         if (db.prepare('SELECT 1 FROM evidence WHERE employee_id=? AND situation=? AND action=? AND result=?').get(dr.employee_id, sit, act, res)) continue;
         ins.run(dr.employee_id, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
