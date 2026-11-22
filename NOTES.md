@@ -1,3 +1,15 @@
+# Gotowe do prezentacji (gałąź feature/gotowe-do-prezentacji, 22.11.2026)
+
+Przegląd wszystkich ścieżek UI/UX po nocnej iteracji (na życzenie Janka: „gotowe rozwiązanie, nic nie wystaje, bez słowa prototyp”).
+
+**Dowody:** `npm test` 137/137; `node e2e/audit/ux-audit.mjs` – 86 ekranów i okien (przełożony i pracownik, desktop 1440 i telefon 390): 0 elementów wystających poza ekran, 0 uciętych tekstów, 0 poziomego przewijania, 0 dat RRRR-MM-DD, 0 słów „demo/mock/prototyp”, 0 błędów konsoli; persony krystyna 21/21, ewa 13/13, michal 9/9, juror 9/9, klawiatura 18/18, awaria 7/7 (desktop i telefon), kontrast 0.
+
+**Najważniejsze zmiany:** słownictwo wdrożeniowe (logowanie „Wejdź jako…”, README „rozwiązanie wdrożeniowe”, podpis „do integracji” zamiast „mock”); stopka tekstowa zamiast logo z godłem (zasada z CLAUDE.md); Start krótszy (działania zespołu w jednej kolumnie, terminy zwinięte, mniej powtarzalnych spraw w danych demo); białe pola formularzy z kontrastem ramki ≥ 3:1; kreator „Część X z 8”; daty DD.MM.RRRR wszędzie (także filtry z maską zamiast natywnych pól), miesiące i kwartały słownie, przecinek dziesiętny; profil – obszary do rozwoju tylko < 5 pkt; cele i kryteria czytelne na telefonie; asystent z przykładowymi pytaniami; dziennik z nazwiskami i czytelnymi propozycjami AI; błąd CSP (skrypt inline) usunięty.
+
+**Do przejrzenia:** logo `app/assets/logo-mc.png` (godło) zostało w repo, ale nie jest wyświetlane – decyzja Mateusza/Janka; `app/v1_ogolna_prototyp.html` (nieserwowany, 404) zostawiony; raport audytu bezpieczeństwa w `docs/bezpieczenstwo/` bez zmian (zapis historyczny); test danych demo sprawdza terminy planu w formacie DD.MM.RRRR (nadal wymaga daty).
+
+---
+
 # Podsumowanie dla Janka (koniec nocnej iteracji, 22.11.2026 07:46)
 
 **Wynik rubryki: 6,4 → 8,4 / 10** (cykl 0 → cykl 7). Persony (haiku): juror 6→7, Krystyna 5→7, Michał 6→7, Ewa 6→6, klawiatura 6→6.
@@ -36,7 +48,7 @@
 1. `npm install` (dociągnie Playwright tylko do testów person).
 2. Świeże dane demo: zatrzymaj serwer, przenieś/usuń `data/` (seed działa tylko na pustej bazie), `node server.mjs` → http://localhost:8080.
 3. Bez klucza AI działa tryb regułowy; z modelem: `node --env-file=.env server.mjs` (Twoja decyzja – w nocy nie używane).
-4. Scenariusz: logowanie „Demo: przełożony” → Start „Ocena w 3 krokach” → (a) „Ustal kryteria” → wybierz arkusz → „Zaproponuj kryteria (AI)” → (b) „Zbierz informacje i oceń” → szkic → kroki → „Złóż ocenę” → (c) Miesiąc → „Przygotuj brief do rozmowy”; potem „Demo: pracownik” → Start → „Przygotuj się do rozmowy”, Mój profil (plan rozwoju).
+4. Scenariusz: logowanie „Wejdź jako przełożony” → Start „Ocena w 3 krokach” → (a) „Ustal kryteria” → wybierz arkusz → „Zaproponuj kryteria (AI)” → (b) „Zbierz informacje i oceń” → szkic → kroki → „Złóż ocenę” → (c) Miesiąc → „Przygotuj brief do rozmowy”; potem „Demo: pracownik” → Start → „Przygotuj się do rozmowy”, Mój profil (plan rozwoju).
 
 **Co sprawdzić przed scaleniem z main:**
 - `npm test` (137/137) i `node e2e/personas/run.mjs all` na czystej kopii.

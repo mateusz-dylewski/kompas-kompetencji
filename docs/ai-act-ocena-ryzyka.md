@@ -12,7 +12,7 @@
 | Wymóg | Realizacja | Status |
 |---|---|---|
 | Zarządzanie ryzykiem (art. 9) | Ten dokument, lista ryzyk poniżej | szkic |
-| Dane i zarządzanie danymi (art. 10) | Dane demo, brak danych treningowych; model nie jest trenowany lokalnie | wdrożone (prototyp) |
+| Dane i zarządzanie danymi (art. 10) | Dane demo, brak danych treningowych; model nie jest trenowany lokalnie | wdrożone |
 | Dokumentacja techniczna (art. 11) | README, lib/, ten dokument | częściowo |
 | Rejestrowanie zdarzeń (art. 12) | Tabela `ai_log`: rodzaj, model, skrót wejścia (SHA-256), treść wyjścia, źródło, czas | wdrożone |
 | Przejrzystość (art. 13) | Każda podpowiedź ma etykietę „AI lokalnie” lub „reguły”; instrukcja: podpowiedź do przemyślenia | wdrożone |

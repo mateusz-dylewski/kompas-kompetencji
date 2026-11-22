@@ -1,6 +1,6 @@
 # DPIA – szkic (art. 35 RODO)
 
-1. **Opis przetwarzania:** oceny okresowe i pierwsze oceny pracowników służby cywilnej, cele SMART, zapoznanie i sprzeciw, podpisy symulowane.
+1. **Opis przetwarzania:** oceny okresowe i pierwsze oceny pracowników służby cywilnej, cele SMART, zapoznanie i sprzeciw, podpisy systemu (integracja z podpisem kwalifikowanym lub zaufanym przy wdrożeniu).
 2. **Dane:** imię, nazwisko, stanowisko, komórka, oceny kompetencji, uzasadnienia z przykładami z pracy, wnioski rozwojowe, dziennik działań.
 3. **Podstawa:** art. 6 ust. 1 lit. c RODO (obowiązek prawny – rozporządzenie o ocenach) oraz lit. e (zadanie publiczne).
 4. **Minimalizacja:** prompt AI bez imion; alerty bez treści ocen; agregaty tylko przy co najmniej 5 osobach.

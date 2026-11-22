@@ -20,7 +20,7 @@ Proces ma **pięć etapów**. Pierwszy i dwa ostatnie mają terminy lub formalne
 2. **Ocenianie** (cały okres). Obserwacja, informacje zwrotne i gromadzenie faktów, zapisywanych na bieżąco. *Aplikacja: dowody przy wskaźnikach, rozmowy miesięczne, feedback, zestawienie z rozkładem w czasie.*
 3. **Rozmowa oceniająca** przed oceną na piśmie. Omówienie realizacji kryteriów, celów i kierunków rozwoju. Ma być dialogiem, nie monologiem. *Aplikacja: szkic z dowodów, pytania do rozmowy od asystenta AI (tylko propozycje).*
 4. **Ocena na piśmie** (część II arkusza). Oceny cząstkowe w skali 1, 3, 5, 7, 9, średnia, ogólny poziom, ocena pozytywna albo negatywna, wnioski do IPRZ. Ocena negatywna wymaga uzasadnienia. *Aplikacja: kreator oceny, wynik wyliczany z ocen cząstkowych, uzasadnienie wymuszane przy ocenie negatywnej, PDF/XML arkusza.*
-5. **Zakończenie.** Podpisy, oryginał do akt osobowych, kopia dla pracownika. *Aplikacja: podpisy (mock), zapoznanie, sprzeciw (7 dni) i jego rozpatrzenie (14 dni). Osobnego dokumentu IPRZ jeszcze nie ma – są wnioski rozwojowe w arkuszu.*
+5. **Zakończenie.** Podpisy, oryginał do akt osobowych, kopia dla pracownika. *Aplikacja: podpisy systemu (do integracji z podpisem kwalifikowanym), zapoznanie, sprzeciw (7 dni) i jego rozpatrzenie (14 dni). Osobnego dokumentu IPRZ jeszcze nie ma – są wnioski rozwojowe w arkuszu.*
 
 ## Kryteria oceny
 
