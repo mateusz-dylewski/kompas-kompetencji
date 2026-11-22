@@ -1,5 +1,5 @@
 // Skrypty person (symulacja użytkowników) – Playwright.
-// Uruchomienie: node e2e/personas/run.mjs <persona|all>   persony: krystyna, michal, ewa, juror, klawiatura
+// Uruchomienie: node e2e/personas/run.mjs <persona|all>   persony: krystyna, michal, ewa, juror, klawiatura, awaria; PERSONA_AI=down|slow|ok
 // Każda persona dostaje własny serwer (losowy port, osobny katalog danych, atrapa modelu AI – bez prawdziwego API),
 // przechodzi swoją ścieżkę w dwóch rozmiarach (desktop 1440 px, mobile 390 px), robi zrzut po każdym kroku
 // i zapisuje do e2e/personas/out/<persona>/: *.png oraz log.json (kroki, czasy, błędy konsoli, problemy a11y).
@@ -15,12 +15,15 @@ const PASS = 'Demo-kompas-2026!';
 const VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844, isMobile: true, hasTouch: true } };
 
 // Atrapa modelu AI (API Ollama): odpowiada po polsku po 800 ms, żeby widać było stan „model myśli”
+// Tryb awarii: PERSONA_AI=ok (domyślnie) | down (500 na wszystko) | slow (odpowiedź po 6 s)
+const AI_MODE = ['down', 'slow'].includes(process.env.PERSONA_AI) ? process.env.PERSONA_AI : 'ok';
 function startMockAI() {
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', c => { b += c; }); req.on('end', () => {
       res.setHeader('content-type', 'application/json');
+      if (AI_MODE === 'down') { res.statusCode = 500; return res.end(JSON.stringify({ error: 'AI niedostępne (atrapa: down)' })); }
       if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'qwen2.5:14b' }] }));
-      setTimeout(() => res.end(JSON.stringify({ message: { content: 'Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n- Uzgodnienie harmonogramu z wykonawcą.\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?' } })), 800);
+      setTimeout(() => res.end(JSON.stringify({ message: { content: 'Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n- Uzgodnienie harmonogramu z wykonawcą.\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?' } })), AI_MODE === 'slow' ? 6000 : 800);
     });
   }).listen(0, '127.0.0.1');
   return new Promise(ok => srv.once('listening', () => ok(srv)));
@@ -35,15 +38,54 @@ const login = email => async p => {
 const nav = view => async (p, vp) => {
   const sel = vp === 'mobile' ? `.bottom [data-nav="${view}"]` : `.side [data-nav="${view}"]`;
   const loc = p.locator(sel);
-  if (await loc.count()) await loc.first().click(); else await p.locator(`[data-nav="${view}"]`).first().click();
+  if (vp === 'mobile' && !(await loc.first().isVisible().catch(() => false)) && await p.locator('#moreBtn').count()) {
+    if ((await p.locator('#moreBtn').getAttribute('aria-expanded')) !== 'true') await p.locator('#moreBtn').click();
+    await p.locator(sel).first().click();
+  } else if (await loc.count()) await loc.first().click(); else await p.locator(`[data-nav="${view}"]`).first().click();
   await p.waitForTimeout(400);
 };
 const clickAct = (act, opts = {}) => async p => { await p.locator(`[data-act="${act}"]${opts.id ? `[data-id="${opts.id}"]` : ''}`).first().click(); await p.waitForTimeout(opts.wait ?? 500); };
-const closeModal = async p => { if (await p.locator('#modal').count()) { await p.keyboard.press('Escape'); await p.waitForTimeout(200); if (await p.locator('#modal').count()) await p.locator('#modal [data-act="closeModal"]').first().click(); } };
+const closeModal = async p => {
+  if (!(await p.locator('#modal').count())) return;
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  if (await p.locator('#modal').count()) {
+    const b = p.locator('#modal [data-act="closeModal"]'); if (await b.count()) await b.first().click();
+    await p.waitForSelector('#modal', { state: 'detached', timeout: 3000 }).catch(() => {});
+  }
+  return { modalClosed: !(await p.locator('#modal').count()) };
+};
 const waitAI = async p => { await p.waitForFunction(() => !document.querySelector('.ai-thinking, .thinking'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300); };
+
+// Czy w widoku/modalu jest czytelny komunikat zamiast pustki lub wiszącego ładowania
+const aiFallbackCheck = async p => {
+  await p.waitForFunction(() => !document.querySelector('.ai-thinking, .thinking'), null, { timeout: 12000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  return p.evaluate(() => {
+    const txt = (document.querySelector('#modal') || document.querySelector('#view') || document.body).innerText || '';
+    return { aiFallbackVisible: /reguł|niedostępn|niedostepn/i.test(txt) && !/Ładowanie|Wczytywanie|myśli/i.test(txt), aiText: txt.replace(/\s+/g, ' ').slice(0, 160) };
+  });
+};
 
 // Scenariusze person: lista [nazwa kroku, funkcja]
 const SCENARIOS = {
+  // Awaria AI (uruchamiać z PERSONA_AI=down): czy użytkownik widzi komunikat zamiast pustki
+  awaria: [
+    ['logowanie', login('przelozony@demo.kk')],
+    ['miesiac', nav('month')],
+    ['brief-ai-awaria', async p => { await clickAct('aiBrief', { wait: 300 })(p); return aiFallbackCheck(p); }],
+    ['zamknij-brief', closeModal],
+    ['oceny', nav('evals')],
+    ['kreator-otworz', async p => { await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
+    ['pytania-do-rozmowy-ai-awaria', async p => {
+      for (let i = 0; i < 6 && !(await p.locator('[data-act="aiTalk"]').count()); i++) {
+        const n = p.locator('[data-wiz="next"]'); if (!(await n.count())) break;
+        await n.first().click(); await p.waitForTimeout(400);
+      }
+      if (!(await p.locator('[data-act="aiTalk"]').count())) return { aiFallbackVisible: null, aiText: 'brak przycisku aiTalk w kreatorze (krok pominięty)' };
+      await p.locator('[data-act="aiTalk"]').first().click();
+      return aiFallbackCheck(p);
+    }],
+  ],
   // Pani Krystyna – naczelniczka, ocena okresowa w 20 minut (a) kryteria, (b) ocena, (c) rozmowa
   krystyna: [
     ['logowanie-ekran', async () => {}],
@@ -131,11 +173,12 @@ async function runPersona(name) {
   const mock = await startMockAI();
   const srv = await startServer({ KK_AI_URL: `http://127.0.0.1:${mock.address().port}` });
   const browser = await chromium.launch();
-  const log = { persona: name, started: new Date().toISOString(), runs: {} };
+  const log = { persona: name, aiMode: AI_MODE, started: new Date().toISOString(), runs: {} };
   try {
     for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
       const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: !!vp.isMobile, hasTouch: !!vp.hasTouch, locale: 'pl-PL' });
       const p = await ctx.newPage();
+      p.setDefaultTimeout(8000);
       const run = { consoleErrors: [], pageErrors: [], failedRequests: [], steps: [] };
       p.on('console', m => { if (m.type() === 'error') run.consoleErrors.push(m.text().slice(0, 300)); });
       p.on('pageerror', e => run.pageErrors.push(String(e).slice(0, 300)));
@@ -148,7 +191,13 @@ async function runPersona(name) {
         i++;
         const st = { step: stepName, ok: true };
         const t = Date.now();
-        try { await fn(p, vpName); await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}); }
+        const isAI = /brief|przygotuj|pytania|ai-/i.test(stepName);
+        try {
+          const r = await fn(p, vpName); if (r && typeof r === 'object') Object.assign(st, r);
+          await p.waitForFunction(() => { const v = document.querySelector('#view'); return !v || !/Ładowanie|Wczytywanie/.test(v.innerText); }, null, { timeout: 8000 }).catch(() => {});
+          await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+          st.interactiveMs = Date.now() - t; st.ai = isAI;
+        }
         catch (e) { st.ok = false; st.error = String(e.message || e).split('\n')[0].slice(0, 200); }
         st.ms = Date.now() - t;
         const file = `${String(i).padStart(2, '0')}-${stepName}-${vpName}.png`;
@@ -168,9 +217,11 @@ async function runPersona(name) {
     stepsOk: `${r.steps.filter(s => s.ok).length}/${r.steps.length}`, failed: r.steps.filter(s => !s.ok).map(s => `${s.step}: ${s.error}`),
     consoleErrors: r.consoleErrors.length + r.pageErrors.length, http5xx: r.failedRequests.length, initialLoadMs: r.initialLoadMs,
     slowestStep: r.steps.reduce((a, s) => (s.ms > (a?.ms || 0) ? s : a), null)?.step, maxStepMs: Math.max(...r.steps.map(s => s.ms)),
+    screensOver2s: r.steps.filter(s => !s.ai && s.interactiveMs > 2000).map(s => `${s.step}: ${s.interactiveMs} ms`),
+    aiFallbackVisible: r.steps.filter(s => 'aiFallbackVisible' in s).map(s => `${s.step}: ${s.aiFallbackVisible}`),
     a11yIssues: [...new Set(r.steps.flatMap(s => s.a11y))].slice(0, 15),
   }]));
-  log.summary = sum;
+  log.summary = sum; log.aiMode = AI_MODE;
   fs.writeFileSync(path.join(outDir, 'log.json'), JSON.stringify(log, null, 2));
   return sum;
 }
