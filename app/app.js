@@ -28,16 +28,16 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Dowody i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
+      ["evidence", "Informacje i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
       ["evals", "Oceny", "clip", "Przygotuj ocenę krok po kroku"],
-      ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i dowody z miesiąca – bez punktacji"],
-      ["evidence", "Dowody", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
-      ["summary", "Zestawienie", "scale", "Liczby dowodów, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
+      ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i informacje z miesiąca – bez punktacji"],
+      ["evidence", "Informacje", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
+      ["summary", "Zestawienie", "scale", "Liczby informacji, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
@@ -137,7 +137,7 @@
     box.innerHTML = `<h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2>` + (m.suppressed
       ? `<div class="note warn">Metryki pokazujemy, gdy dane pochodzą od co najmniej ${m.kMin} przełożonych (obecnie ${m.managers}). Nie mierzymy pojedynczych osób.</div>`
       : `<ul class="c">
-          <li>Ocenianie: miesiące okresu z co najmniej jednym dowodem – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
+          <li>Ocenianie: miesiące okresu z co najmniej jedną informacją – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
           <li>Ocena na piśmie: od szkicu do złożenia – mediana <b>${m.submit.medianDays ?? "—"} dni</b>; poprawki po złożeniu: <b>${pct(m.submit.revisedPct)}</b></li>
           <li>Rozmowa rozpoczynająca w terminie 30 dni: <b>${pct(m.kickoff.onTimePct)}</b> (${m.kickoff.n}); zmiana kryteriów dodatkowych po rozmowie: <b>${pct(m.kickoff.criteriaChangedPct)}</b></li>
           <li>Przygotowanie do rozmowy (ankieta 1–5): ${m.prep.suppressed ? `za mało odpowiedzi (${m.prep.n})` : `mediana <b>${m.prep.median}</b> z ${m.prep.n} odpowiedzi`}</li></ul>
@@ -194,40 +194,139 @@
     input.addEventListener("blur", () => { const dg = maskDigits(input.value); if (dg.length) show(check(dg), true); });
     return { iso: () => { const dg = maskDigits(input.value), msg = check(dg); show(msg, true); return msg ? "" : `${dg.slice(4)}-${dg.slice(2, 4)}-${dg.slice(0, 2)}`; } };
   }
-  // ---------- Cele: karta z krokami (postęp = wykonane kroki / wszystkie) ----------
-  function goalCard(g) {
-    const n = g.steps.length, k = g.stepsDone;
-    const state = g.done ? '<span class="tag ok">zrealizowany</span>' : '<span class="tag info">w toku</span>';
-    const steps = n ? `
-          <div class="seg" role="img" aria-label="Wykonane kroki: ${k} z ${n}">${g.steps.map(x => `<i class="${x.done ? "on" : ""}"></i>`).join("")}</div>
-          <div class="muted">Wykonane kroki: <b>${k} z ${n}</b></div>
-          <ul class="steps">${g.steps.map((x, i) => `<li class="${x.done ? "is-done" : ""}"><input type="checkbox" id="gs${g.id}_${i}" data-goal-step="${g.id}:${i}" ${x.done ? "checked" : ""}><label for="gs${g.id}_${i}">${esc(x.t)}</label></li>`).join("")}</ul>
-          ${n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}`
-      : `<p class="muted">Ten cel nie ma kroków. Dodaj kroki, żeby postęp liczył się sam.</p>
-          <div class="btns" style="justify-content:flex-start;margin-top:8px"><button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>
-          <button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button></div>`;
-    return `
-        <div class="goal ${g.done ? "is-done" : ""}">
-          <div class="row"><b>${esc(g.s)}</b>${state}</div>
-          <div class="muted">Miara: ${esc(g.m)} · Termin: ${esc(isoToPl(g.t))}</div>${steps}
-        </div>`;
+  // ---------- Cele: kafelki (wyznacza przełożony; pracownik zgłasza krok, przełożony potwierdza) ----------
+  const goalStepState = x => (x.confirmed_at ? "confirmed" : x.reported_at ? "reported" : "open");
+  function goalTile(g, mode) {
+    const n = g.steps.length, k = g.stepsConfirmed, rep = g.stepsReported;
+    const state = g.done ? '<span class="tag ok">zrealizowany</span>' : rep ? `<span class="tag wr">${rep} do potwierdzenia</span>` : '<span class="tag info">w toku</span>';
+    const stepBtn = (x, i) => {
+      const st = goalStepState(x);
+      if (mode === "emp") return st === "confirmed" ? `<span class="muted">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
+        : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
+      return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
+    };
+    const label = { confirmed: "potwierdzony", reported: "zgłoszony – czeka na potwierdzenie", open: "do zrobienia" };
+    const body = n ? `
+        <div class="seg" role="img" aria-label="Potwierdzone kroki: ${k} z ${n}${rep ? `, zgłoszone: ${rep}` : ""}">${g.steps.map(x => `<i class="${{ confirmed: "on", reported: "rep", open: "" }[goalStepState(x)]}"></i>`).join("")}</div>
+        <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
+        <div class="trend" data-trend-goal="${g.id}"></div>
+        <details class="goal-steps"><summary>Kroki</summary>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
+          ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
+        </details>`
+      : `<p class="muted">Cel sprzed zmian – bez kroków.</p><button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>`;
+    return `<div class="goal-tile ${g.done ? "is-done" : ""}">
+        <div class="row"><b class="goal-t">${esc(g.s)}</b>${state}</div>
+        <div class="muted">Miara: ${esc(g.m)}<br>Termin: ${esc(isoToPl(g.t))}${g.legacy ? " · cel założony przez pracownika" : ""}</div>${body}
+      </div>`;
+  }
+  const goalTiles = (goals, mode) => goals.length ? `<div class="goal-tiles">${goals.map(g => goalTile(g, mode)).join("")}</div>`
+    : `<p class="muted">${mode === "emp" ? "Nie masz jeszcze celów. Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej." : "Brak celów. Dodaj pierwszy cel z krokami."}</p>`;
+  // Trend celu między spotkaniami: schody potwierdzonych kroków w kolejnych miesiącach, kropki = odbyte rozmowy miesięczne
+  function trendSvg(t) {
+    const W = 240, H = 46, n = t.series.length, x = i => (n < 2 ? W / 2 : 4 + i * (W - 8) / (n - 1)), y = v => H - 12 - (t.total ? v / t.total : 0) * (H - 18);
+    let d = "";
+    t.series.forEach((p, i) => { d += i ? ` H${x(i).toFixed(1)} V${y(p.confirmed).toFixed(1)}` : `M${x(0).toFixed(1)} ${y(p.confirmed).toFixed(1)}`; });
+    const dots = t.series.map((p, i) => (t.talks.includes(p.month) ? `<circle cx="${x(i).toFixed(1)}" cy="${H - 4}" r="3"/>` : "")).join("");
+    const label = `Potwierdzone kroki w kolejnych miesiącach: ${t.series.map(p => `${p.month} – ${p.confirmed}`).join(", ")}. Kropki: rozmowy miesięczne.`;
+    return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><path d="${d}"/>${dots}</svg>`;
+  }
+  async function fillTrends(empId) {
+    const boxes = document.querySelectorAll("[data-trend-goal]"); if (!boxes.length) return;
+    let r; try { r = await api("GET", "/api/goals/trend" + (empId ? `?employeeId=${empId}` : "")); } catch (_) { return; }
+    const byId = Object.fromEntries(r.goals.map(g => [g.id, g]));
+    boxes.forEach(b => {
+      const t = byId[b.dataset.trendGoal]; if (!t || t.series.length < 2) return;
+      b.innerHTML = trendSvg(t) + (t.sinceLastTalk !== null ? `<small class="muted">${t.sinceLastTalk > 0 ? `+${t.sinceLastTalk} ${t.sinceLastTalk === 1 ? "krok" : t.sinceLastTalk < 5 ? "kroki" : "kroków"} od ostatniej rozmowy` : "Bez nowych potwierdzeń od ostatniej rozmowy"}</small>` : "");
+    });
+  }
+  // Zmiana między dwiema ostatnimi ocenami okresowymi (bez średniej i prognozy)
+  async function loadCompare(empId) {
+    const box = $("#cmpBox"); if (!box) return;
+    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(ex.message)}</p>`; return; }
+    const arrow = { wzrost: "▲ wzrost", spadek: "▼ spadek", "bez zmian": "= bez zmian" };
+    box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2>` + (!r.available
+      ? `<p class="muted">Porównanie pojawi się, gdy będą dwie złożone oceny okresowe (B lub C).</p>`
+      : `<p class="muted">Ocena z ${esc(isoToPl(r.previousEval.date))} i z ${esc(isoToPl(r.currentEval.date))}. Tylko oceny cząstkowe z formalnych ocen okresowych – bez średniej i bez prognozy.</p>
+        <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Kryterium</th><th scope="col">Poprzednio</th><th scope="col">Teraz</th><th scope="col">Zmiana</th></tr></thead><tbody>
+        ${r.competencies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.previous} pkt</td><td>${c.current} pkt</td><td><span class="tag ${c.direction === "wzrost" ? "ok" : c.direction === "spadek" ? "wr" : ""}">${arrow[c.direction]}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">Brak wspólnych kryteriów w obu ocenach.</td></tr>`}</tbody></table></div>`);
+  }
+  // Brief do rozmowy: tekst z odnośnikami do faktów + fakty (JSON „kto co robił”) zbudowane przez serwer
+  const factLine = f => `<li id="fact-${esc(f.id.replace(/\./g, "-"))}"><b>[${esc(f.id)}]</b> <span class="muted">${esc(isoToPl(f.data))} · ${esc(f.rodzaj)}${f.kryterium ? " · " + esc(nameOf(f.kryterium)) : ""} · ${esc(f.kto_zapisal || f.kto || "")}${f.zrodlo ? " · źródło: " + esc(f.zrodlo) : ""}</span><br>${esc([f.sytuacja, f.dzialanie, f.rezultat, f.opis, f.co_zrobiono, f.co_wymaga_uwagi, f.krok ? `${f.cel}: ${f.krok}` : ""].filter(Boolean).join(" · "))}</li>`;
+  const briefHtml = text => esc(text).replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => `<a href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}">[${id}]</a>`);
+  async function briefModal(empId) {
+    const emp = (S.dash.team || []).find(t => t.id === empId);
+    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
+    const stop = startThinking($("#brBody"));
+    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); $("#brBody").innerHTML = `<p class="muted">${esc(ex.message)}</p>`; return; }
+    stop(); S.briefJson = r.json;
+    const j = r.json;
+    $("#brBody").innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
+      <div class="tabs" role="tablist"><button class="btn sm" role="tab" aria-selected="true" data-act="briefTab" data-tab="brief">Brief</button><button class="btn sm g" role="tab" aria-selected="false" data-act="briefTab" data-tab="json">Fakty (JSON)</button></div>
+      <div data-brief-pane="brief"><div class="ai-out brief-text">${briefHtml(r.brief)}</div>
+        <h3>Fakty</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}</div>
+      <div data-brief-pane="json" hidden><pre class="json-out">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></div>
+      <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
+    bindActs($("#brBody"));
+  }
+  // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
+  async function goalsModal(empId) {
+    const emp = (S.dash.team || []).find(t => t.id === empId);
+    const [goals, dp] = await Promise.all([api("GET", `/api/goals?employeeId=${empId}`).then(r => r.goals), api("GET", `/api/devplan?employeeId=${empId}`)]);
+    S.goalsCtx = { empId, where: "modal" };
+    openModal(`<h2 id="gmTitle">Cele i plan rozwoju – ${first(emp ? emp.name : "")}</h2>
+      <p class="muted">Pracownik zgłasza wykonanie kroku, Ty potwierdzasz. Postęp liczy tylko potwierdzone kroki.</p>
+      <div class="btns" style="justify-content:flex-start;margin-top:0;border:0;padding-top:0"><button class="btn" data-act="newGoalFor" data-emp="${empId}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
+      ${goalTiles(goals, "mgr")}
+      <h3>Plan rozwoju i komunikat</h3>
+      <p class="muted">Pracownik zobaczy to w swoim profilu („Plan rozwoju”). Każda zmiana zostaje w historii i w dzienniku.${dp.current ? ` Ostatnia zmiana: ${esc(isoToPl(dp.current.created.slice(0, 10)))}.` : ""}</p>
+      <form id="dpForm" novalidate>
+        <label class="f" for="dpPlan">Plan rozwoju (działania, szkolenia, terminy)</label><textarea id="dpPlan" required minlength="10" maxlength="3000">${esc(dp.current?.plan || "")}</textarea>
+        <label class="f" for="dpMsg">Komunikat do pracownika (opcjonalnie)</label><textarea id="dpMsg" maxlength="1000">${esc(dp.current?.message || "")}</textarea>
+        <div class="field-err" id="dpErr" role="alert"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button><button class="btn" type="submit">Zapisz plan</button></div>
+      </form>`, () => {
+      $("#dpForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        try { const r = await api("PUT", "/api/devplan", { employeeId: empId, plan: $("#dpPlan").value, message: $("#dpMsg").value }); $("#dpErr").textContent = ""; toast(r.changed ? "Zapisano plan rozwoju." : "Bez zmian."); }
+        catch (ex) { $("#dpErr").textContent = ex.message; }
+      });
+    }, "gmTitle");
+    fillTrends(empId);
+  }
+  async function loadMonthGoals() {
+    const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
+    try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; fillTrends(S.month.employeeId); }
+    catch (ex) { box.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+  }
+  // Po zmianie celu odśwież miejsce, w którym pracuje użytkownik
+  async function refreshGoals() {
+    if (S.user.role === "pracownik") { await refreshData(); return render(); }
+    if ($("#modal") && S.goalsCtx?.where === "modal") return goalsModal(S.goalsCtx.empId);
+    if (S.view === "month") return loadMonthGoals();
+    await refreshData(); render();
   }
   // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
   function devPlan(d, items) {
+    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<p style="margin:6px 0 0;white-space:pre-line">${esc(d.devPlan.plan)}</p>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
+    return mp + devPlanFromEval(d, items, !!d.devPlan);
+  }
+  function devPlanFromEval(d, items, hasPlan) {
     const weak = items.slice(0, 3).map(([k]) => k);
-    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))} <button class="btn sm g" data-act="goalFromArea" data-area="${esc(nameOf(k))}">${KK_ICON("plus")}<span>Cel z tego obszaru</span></button></li>`).join("")}</ul>` : "";
+    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
     if (d.latestDev) {
       const e = d.latestDevEval;
       return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
         <p>${esc(d.latestDev)}</p>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
+    if (hasPlan) return areas;
     const last = d.evals[0];
     const why = !last ? "Nie masz jeszcze złożonej oceny." : last.status === "submitted" ? "Ocena jest złożona – wnioski przełożony zapisze po rozmowie oceniającej." : "Przełożony nie zapisał wniosków rozwojowych w ostatniej ocenie.";
-    return `<p class="muted">${why} Na razie możesz sam zaproponować cele – omówicie je na rozmowie.</p>${areas}
+    return `<p class="muted">${why} Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej.</p>${areas}
       <div class="btns" style="justify-content:flex-start"><button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
   }
-  // Dowody z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
+  // Informacje z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
   async function loadEvalEvidence(e) {
     const boxes = document.querySelectorAll("[data-comp-ev]"); if (!boxes.length) return;
     const q = new URLSearchParams();
@@ -238,8 +337,8 @@
     try { list = (await api("GET", `/api/evidence?${q}`)).evidence; } catch (_) { list = null; }
     boxes.forEach(box => {
       const mine = (list || []).filter(x => x.competency === box.dataset.compEv);
-      box.innerHTML = list === null ? `<p class="muted">Dowody są niedostępne (moduł wyłączony w ustawieniach).</p>`
-        : !mine.length ? `<p class="muted">Brak zapisanych dowodów przy tej kompetencji w okresie oceny.</p>`
+      box.innerHTML = list === null ? `<p class="muted">Informacje są niedostępne (moduł wyłączony w ustawieniach).</p>`
+        : !mine.length ? `<p class="muted">Brak zapisanych informacji przy tej kompetencji w okresie oceny.</p>`
         : `<ul class="ev-list">${mine.map(x => `<li><span class="muted">${esc(isoToPl(x.date))} · ${esc(x.indicatorText)}</span><br><b>Sytuacja:</b> ${esc(x.situation)} · <b>Działanie:</b> ${esc(x.action)} · <b>Rezultat:</b> ${esc(x.result)} ${safeLink(x.link)}</li>`).join("")}</ul>`;
     });
   }
@@ -570,9 +669,11 @@
     animateIn(root);
     if (S.view === "log") loadLog();
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
-    if (S.view === "month") { bindMonthPage(); loadMonth(); }
+    if (S.view === "month") { bindMonthPage(); loadMonth(); S.goalsCtx = { empId: +S.month.employeeId, where: "month" }; loadMonthGoals(); }
     if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
     if (S.view === "results") loadMetrics();
+    if (S.view === "goals" && u.role === "pracownik") fillTrends(null);
+    if (S.view === "profile" && u.role === "pracownik") loadCompare(null);
     if (S.view === "evalView" && S.readEval) { loadSigs(S.readEval.id, S.readEval.status); loadEvalEvidence(S.readEval); }
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -616,6 +717,10 @@
           <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
           ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
             : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
+        ${(d.upcoming || []).length || d.kickoff ? `<div class="card"><h2>Przygotuj się do rozmowy</h2>
+          <p class="muted">Asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
+          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
+          <div id="aiPrepOut" aria-live="polite"></div></div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
           <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
           <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
@@ -630,21 +735,20 @@
         <div class="grid two">
           <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
           <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i dowody</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
         </div>
         <div class="grid two">
-          <div class="card"><h2>Plan rozwoju z oceny</h2>${devPlan(d, items)}</div>
+          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
           <div class="card"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
             <div id="aiDevOut"></div></div>
-        </div>`;
+        </div>
+        <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
     }
     if (v === "goals") {
-      const list = S.goals.map(goalCard).join("") || `<p class="muted">Nie masz jeszcze celów. Dodaj pierwszy – najlepiej taki, który da się zmierzyć.</p>`;
-      return `<div class="row" style="margin-bottom:12px"><span class="muted">Cele SMART: konkretny, mierzalny, osiągalny, istotny, z terminem. Postęp liczy się z wykonanych kroków.</span>
-        <button class="btn" data-act="addGoal">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
-        <div class="card">${list}</div>`;
+      return `<p class="muted" style="margin:0 0 12px">Cele ustala przełożony. Gdy wykonasz krok, zgłoś to – przełożony potwierdzi. Postęp liczy tylko potwierdzone kroki.</p>
+        ${goalTiles(S.goals, "emp")}`;
     }
     if (v === "evidence") return evidencePage(false);
     // evals
@@ -672,7 +776,8 @@
       const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
       const rows = d.team.map(t => `
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button></div></div></div></td>
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
+          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
@@ -683,7 +788,7 @@
         <section class="next card anim">
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
           <button class="btn btn-next" data-nav="evals"><span>Przejdź do ocen</span>${KK_ICON("arrow")}</button></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
+        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
           <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
@@ -714,7 +819,7 @@
     return evalsList(true);
   }
 
-  // ---------- Dowody: obserwacje przy wskaźnikach (sytuacja – działanie – rezultat) ----------
+  // ---------- Informacje: obserwacje przy wskaźnikach (sytuacja – działanie – rezultat) ----------
   const IND = MODEL.flatMap(c => c.w.map((w, wi) => ({ key: c.k + "|" + wi, k: c.k, wi, text: w.w.replace(/\n/g, " ") })));
   const indLabel = key => { const i = IND.find(x => x.key === key); return i ? `${nameOf(i.k)} – ${i.wi + 1}. ${i.text}` : key; };
   const indOptions = (sel, onlyK) => MODEL.filter(c => !onlyK || c.k === onlyK).map(c => `<optgroup label="${esc(nameOf(c.k))}">${c.w.map((w, wi) => {
@@ -724,11 +829,11 @@
   const empName = id => first(((S.dash && S.dash.team) || []).find(t => t.id === +id)?.name || "");
   const safeLink = u => (/^https?:\/\//i.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">link<span class="sr"> (otwiera się w nowej karcie)</span></a>` : "");
   function evidenceTable(list, { editable, showEmp }) {
-    if (!list.length) return `<p class="muted">Brak dowodów dla wybranych filtrów.</p>`;
-    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Dowody (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
+    if (!list.length) return `<p class="muted">Brak informacji dla wybranych filtrów.</p>`;
+    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
       ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
         <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
-        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
+        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>`;
   }
   function evidencePage(isMgr) {
@@ -741,13 +846,13 @@
         <div><label class="f" for="fFrom">Od</label><input id="fFrom" name="from" type="date" value="${esc(f.from)}"></div>
         <div><label class="f" for="fTo">Do</label><input id="fTo" name="to" type="date" value="${esc(f.to)}"></div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button>
-          ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj dowód</button>` : ""}</div>
+          ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj informację</button>` : ""}</div>
       </form></div>
-      <div class="card"><h2>Dowody</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
+      <div class="card"><h2>Informacje</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
         <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>
       ${isMgr ? "" : `<div class="card"><h2>Feedback o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Rozmowy miesięczne</h2><div id="ciMine"><p class="muted">Ładowanie…</p></div></div>
-        <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem dowodów.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
+        <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem informacji.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
   }
   const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
   function feedbackList(list, editable) {
@@ -756,7 +861,7 @@
       <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj feedback z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
-  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(dowody: ${p.evidenceIds.length})</span>`;
+  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
   async function loadEmployeeExtras() {
     const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
     try {
@@ -767,7 +872,7 @@
     } catch (e) { put("fbMine", `<p class="muted">${esc(e.message)}</p>`); }
   }
 
-  // ---------- Przegląd miesiąca (przełożony): check-in, dowody według wskaźników, feedback ----------
+  // ---------- Przegląd miesiąca (przełożony): check-in, informacje według wskaźników, feedback ----------
   const quarterOf = m => `${m.slice(0, 4)}-Q${Math.floor((+m.slice(5, 7) - 1) / 3) + 1}`;
   function monthPage() {
     const m = S.month;
@@ -777,7 +882,8 @@
         <div><label class="f" for="mMonth">Miesiąc</label><input id="mMonth" name="month" type="month" value="${esc(m.month)}" max="${new Date().toISOString().slice(0, 7)}"></div>
         <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
-      <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+      <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
+      <div class="card" id="monthGoals" aria-live="polite"><p class="muted">Ładowanie celów…</p></div>`;
   }
   async function loadMonth() {
     const box = $("#monthBody"); if (!box) return;
@@ -790,7 +896,7 @@
       const c = d.checkin || { done: "", attention: "", goal: "", date: "", status: "planowany" };
       const ro = "";
       box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna (check-in)</h2>
-          <p class="muted">Do 20 minut. Trzy pola i dowody z miesiąca. Bez punktacji i bez oceny osoby.</p>
+          <p class="muted">Do 20 minut. Trzy pola i informacje z miesiąca. Bez punktacji i bez oceny osoby.</p>
           <form id="ciForm" aria-labelledby="ciH" novalidate>
             <label class="f" for="ciDone">Co zrobiono</label><textarea id="ciDone" maxlength="600" ${ro}>${esc(c.done)}</textarea>
             <label class="f" for="ciAtt">Co wymaga uwagi</label><textarea id="ciAtt" maxlength="600" ${ro}>${esc(c.attention)}</textarea>
@@ -799,18 +905,19 @@
               <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
             <div id="ciErr" role="alert" class="err"></div>
             <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
-              <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button></div>
+              <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button>
+              <button class="btn g" type="button" data-act="aiBrief" data-emp="${esc(m.employeeId)}">Przygotuj brief do rozmowy</button></div>
           </form><div id="aiCkOut" aria-live="polite"></div>
-          <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę dowodów. Nie zapisuje niczego i nie proponuje ocen.</p></div>
-        <div class="card"><div class="row"><h2>Dowody z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Dowód", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
-          <p class="muted">Pokazujemy tylko wskaźniki z nowymi dowodami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
+          <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę informacji. Nie zapisuje niczego i nie proponuje ocen.</p></div>
+        <div class="card"><div class="row"><h2>Informacje z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Informacja", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
+          <p class="muted">Pokazujemy tylko wskaźniki z nowymi informacjami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
             <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
-              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak dowodów w tym miesiącu.</p>`}</div>
+              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
         <div class="card"><div class="row"><h2>Feedback z miesiąca</h2>${actBtn("plus", "Feedback", `data-act="addFeedback"`, "")}</div>
           <p class="muted">Feedback dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
         <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
-          <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem dowodów.</p>
+          <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem informacji.</p>
           ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
       bindActs(box);
       $("#ciForm").addEventListener("submit", async e => {
@@ -826,7 +933,7 @@
   }
   function bindMonthPage() {
     const fm = $("#monthForm"); if (!fm) return;
-    fm.addEventListener("submit", e => { e.preventDefault(); S.month.employeeId = $("#mEmp").value; S.month.month = $("#mMonth").value || S.month.month; loadMonth(); });
+    fm.addEventListener("submit", e => { e.preventDefault(); S.month.employeeId = $("#mEmp").value; S.month.month = $("#mMonth").value || S.month.month; S.goalsCtx = { empId: +S.month.employeeId, where: "month" }; loadMonth(); loadMonthGoals(); });
   }
   const RELATIONS = { przelozony: "przełożony bezpośredni", wspolpracownik: "współpracownik (przekazane przełożonemu)", odbiorca: "odbiorca rezultatu (przekazane przełożonemu)" };
   function feedbackModal(fb) {
@@ -859,15 +966,15 @@
     const emp = pr ? pr.employeeId : S.month.employeeId;
     const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
     const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
-    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak dowodów z tego kryterium w kwartale. Najpierw dodaj dowód.</p>`; };
+    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
     openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
-      <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jeden dowód z kwartału.</p>
+      <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jedną informację z kwartału.</p>
       <form id="pqForm" novalidate>
         <label class="f" for="pqComp">Kryterium</label><select id="pqComp" required ${pr ? "disabled" : ""}><option value="">Wybierz…</option>${compOptions(v.competency)}</select>
         <fieldset class="plain"><legend class="f">Ocena cząstkowa</legend><div class="lv" role="radiogroup" aria-label="Ocena cząstkowa">
           ${PTS5.map((p, i) => `<label><input type="radio" name="pqPts" value="${p}" ${v.pts === p ? "checked" : ""}><span><b>${p} pkt</b> ${LEVELS5[i]}</span></label>`).join("")}</div></fieldset>
         <label class="f" for="pqJust">Uzasadnienie</label><textarea id="pqJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
-        <fieldset class="plain"><legend class="f">Dowody z kwartału</legend><div id="pqEvs">${v.competency ? evBoxes(v.competency) : `<p class="muted">Wybierz kryterium.</p>`}</div></fieldset>
+        <fieldset class="plain"><legend class="f">Informacje z kwartału</legend><div id="pqEvs">${v.competency ? evBoxes(v.competency) : `<p class="muted">Wybierz kryterium.</p>`}</div></fieldset>
         <div id="pqErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
@@ -896,11 +1003,11 @@
     $("#fComp")?.addEventListener("change", e => { $("#fInd").innerHTML = `<option value="">Wszystkie</option>${indOptions("", e.target.value)}`; });
   }
   const fieldErrors = ex => (ex.data && ex.data.fields ? Object.values(ex.data.fields).join(" ") : ex.message);
-  // Formularz dowodu (dodanie / edycja). preset: { employeeId, indicator, date }, after: wywołanie po zapisie
+  // Formularz informacji (dodanie / edycja). preset: { employeeId, indicator, date }, after: wywołanie po zapisie
   function evidenceModal(ev, preset = {}, after) {
     const v = ev || { employeeId: preset.employeeId || S.evFilter.employeeId || "", indicator: preset.indicator || "", date: preset.date || new Date().toISOString().slice(0, 10), situation: "", action: "", result: "", link: "", taskRef: "" };
     const fixedEmp = !!ev || !!preset.employeeId;
-    openModal(`<h2 id="mTitle">${ev ? "Edytuj dowód" : "Nowy dowód"}</h2>
+    openModal(`<h2 id="mTitle">${ev ? "Edytuj informację" : "Nowa informacja"}</h2>
       <p class="muted">Jedna obserwacja przy jednym wskaźniku: sytuacja, działanie, rezultat. Zmiana trafia do dziennika.</p>
       <form id="evForm" novalidate>
         ${fixedEmp ? `<p><b>Pracownik:</b> ${empName(v.employeeId) || esc(S.cur?.empName || "")}</p>` : `<label class="f" for="eEmp">Pracownik</label><select id="eEmp" required><option value="">Wybierz…</option>${empOptions(v.employeeId)}</select>`}
@@ -920,18 +1027,18 @@
         try {
           if (ev) await api("PUT", `/api/evidence/${ev.id}`, body);
           else await api("POST", "/api/evidence", { ...body, employeeId: +(fixedEmp ? v.employeeId : $("#eEmp").value) });
-          closeModal(); toast(ev ? "Zapisano zmiany dowodu." : "Dodano dowód.");
+          closeModal(); toast(ev ? "Zapisano zmiany informacji." : "Dodano informację.");
           if (after) await after(); else loadEvidence();
         } catch (ex) { $("#evErr").textContent = fieldErrors(ex); }
       });
     }, "mTitle");
   }
-  // Dowody przy wskaźniku w kreatorze oceny (okres oceny)
+  // Informacje przy wskaźniku w kreatorze oceny (okres oceny)
   function evidenceMini(indKey) {
     const c = S.cur, list = (c.evidence || []).filter(e => e.indicator === indKey);
-    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Dowód</button>` : "";
-    return `<div class="ev-mini"><div class="row"><span class="muted">Dowody z okresu oceny: <b>${list.length}</b></span>${add}</div>
-      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak dowodu. Przed złożeniem dodaj dowód albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
+    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Informacja</button>` : "";
+    return `<div class="ev-mini"><div class="row"><span class="muted">Informacje z okresu oceny: <b>${list.length}</b></span>${add}</div>
+      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
   }
   async function refreshWizardEvidence() {
     const c = S.cur; if (!c) return;
@@ -949,7 +1056,8 @@
         <div><label class="f" for="sTo">Do</label><input id="sTo" type="date" value="${esc(f.to)}"></div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
-      <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+      <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
+      <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
   }
   function bindSummaryPage() {
     const fm = $("#sumForm"); if (!fm) return;
@@ -959,18 +1067,19 @@
   async function loadSummary() {
     const box = $("#sumBody"); if (!box) return;
     const f = S.sum, q = new URLSearchParams({ employeeId: f.employeeId, ...(f.from ? { from: f.from } : {}), ...(f.to ? { to: f.to } : {}) });
+    loadCompare(f.employeeId);
     try {
       const s = await api("GET", "/api/summary?" + q);
       box.innerHTML = `<div class="kpis">
-          <div class="kpi"><b>${s.evidenceTotal}</b><span>Dowody w okresie</span></div>
+          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie</span></div>
           <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Check-iny odbyte / zapisane</span></div>
           <div class="kpi"><b>${s.feedbackTotal}</b><span>Feedback</span></div>
-          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez dowodów</span></div></div>
-        <div class="card"><h2>Wskaźniki z dowodami lub feedbackiem</h2>
+          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez informacji</span></div></div>
+        <div class="card"><h2>Wskaźniki z informacjami lub feedbackiem</h2>
           <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
-          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Dowody</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z dowodami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
+          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z informacjami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
             ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
-            </tbody></table></div>` : `<p class="muted">Brak dowodów i feedbacku w okresie.</p>`}</div>
+            </tbody></table></div>` : `<p class="muted">Brak informacji i feedbacku w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
             <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
@@ -981,7 +1090,7 @@
   function settingsPage() {
     const mods = S.moduleList || [];
     return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
-      <p class="muted">Dowody, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Dowody są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
+      <p class="muted">Informacje, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
       <form id="setForm">${mods.map(m => `<label class="choice"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span></label>`).join("")}
       <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
       <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B i C), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
@@ -1050,7 +1159,7 @@
     const done = comp.w.filter((_, wi) => c.ratings[comp.k + "|" + wi]).length;
     return `<div class="card"><div class="row"><h2 class="h-comp">${compIc(comp.k)}${esc(nameOf(comp.k))}</h2><span class="tag info">${done}/${comp.w.length} ocenione</span></div>
       <p class="muted">Wybierz poziom, który najlepiej opisuje to, co faktycznie obserwowałeś/aś. Dodaj jeden konkretny przykład: sytuacja, działanie, rezultat.</p>
-      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z dowodów (puste pola)</button></div>` : ""}</div>
+      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z informacji (puste pola)</button></div>` : ""}</div>
       ${comp.w.map((w, wi) => {
         const id = comp.k + "|" + wi, r = c.ratings[id] || {};
         const exId = "ex" + comp.k.length + "_" + wi;
@@ -1110,6 +1219,7 @@
       <div class="grid two"><div class="note"><b>Zacznij od</b><br>${esc(top)}</div><div class="note warn"><b>Omów</b><br>${esc(low)}</div></div>
       <div class="btns" style="justify-content:flex-start;margin-top:14px">
         ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiTalk">Pytania do rozmowy (AI ${aiWhere()})</button>
+            <button class="btn g" data-act="aiBrief" data-emp="${c.employeeId}">Przygotuj brief do rozmowy</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
       <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
@@ -1168,7 +1278,7 @@
   }
   function draftLinks(id) {
     const base = `/api/evals/${id}/document?variant=szkic`;
-    return `<div class="docs"><h3>Szkic z dowodów i check-inów</h3><p class="muted">Materiał roboczy: dowody i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
+    return `<div class="docs"><h3>Szkic z informacji i check-inów</h3><p class="muted">Materiał roboczy: informacje i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
       <div class="btns" style="justify-content:flex-start">
         <a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
         <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>
@@ -1186,7 +1296,7 @@
   function evalReadPage() {
     const e = S.readEval; if (!e) return `<p class="muted">Ładowanie…</p>`;
     const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ, data: e.data });
-    // Kompetencja = rozwijane „Szczegóły”: wskaźniki z punktami i przykładami oraz dowody z okresu oceny
+    // Kompetencja = rozwijane „Szczegóły”: wskaźniki z punktami i przykładami oraz informacje z okresu oceny
     const items = `<h2 style="margin:8px 0 12px">Kryteria – szczegóły</h2>` + MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => {
       const sc = scores[m.k]?.avg;
       return `
@@ -1194,7 +1304,7 @@
         <summary><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3><span class="muted">${sc === null || sc === undefined ? "brak oceny" : `${fmt(sc)} pkt`}</span><span class="more">Szczegóły</span></summary>
         <div class="comp-body">
           <h4>Wskaźniki</h4>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}
-          <h4>Dowody z okresu oceny</h4><div data-comp-ev="${esc(m.k)}"><p class="muted">Wczytywanie…</p></div>
+          <h4>Informacje z okresu oceny</h4><div data-comp-ev="${esc(m.k)}"><p class="muted">Wczytywanie…</p></div>
         </div>
       </details>`;
     }).join("");
@@ -1377,17 +1487,40 @@
       catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
-    toggleGoal: async b => { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshData(); render(); },
+    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(ex.message); } },
     addStep: async b => {
       const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
       if (!t || !t.trim()) return;
-      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshData(); render(); } catch (ex) { toast(ex.message); }
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(ex.message); }
     },
-    goalFromArea: b => act("addGoal", b),
+    goalReport: async b => {
+      try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, reported: b.dataset.val === "1" }); toast(b.dataset.val === "1" ? "Zgłoszono wykonanie kroku. Przełożony je potwierdzi." : "Cofnięto zgłoszenie."); await refreshGoals(); }
+      catch (ex) { toast(ex.message); }
+    },
+    goalConfirm: async b => {
+      try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, confirmed: b.dataset.val === "1" }); await refreshGoals(); }
+      catch (ex) { toast(ex.message); }
+    },
+    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
+    aiBrief: b => briefModal(+b.dataset.emp),
+    aiPrep: async b => {
+      const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
+      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+      b.disabled = false;
+    },
+    briefTab: b => { document.querySelectorAll("[data-brief-pane]").forEach(p => { p.hidden = p.dataset.briefPane !== b.dataset.tab; }); document.querySelectorAll('[data-act="briefTab"]').forEach(t => t.setAttribute("aria-selected", t === b ? "true" : "false")); },
+    briefDownload: () => {
+      if (!S.briefJson) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(S.briefJson, null, 2)], { type: "application/json" }));
+      a.download = `fakty-do-rozmowy-${S.briefJson.okres.od}_${S.briefJson.okres.do}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+    newGoalFor: b => act("addGoal", b),
     addGoal: b => openModal(`
       <h2>Nowy cel SMART</h2>
       <form id="goalForm" novalidate>
-        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required value="${esc(b?.dataset?.area ? "Rozwój: " + b.dataset.area : "")}">
+        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required>
         <label class="f" for="gM">Mierzalnie (Measurable)</label><input id="gM" maxlength="200" required>
         <label class="f" for="gA">Osiągalnie (Achievable)</label><input id="gA" maxlength="200" required>
         <label class="f" for="gR">Istotnie (Relevant)</label><input id="gR" maxlength="200" required>
@@ -1417,7 +1550,8 @@
         if (!t) { $("#gT").focus(); return; }
         const steps = [...document.querySelectorAll("[data-step-in]")].map(x => x.value.trim()).filter(Boolean);
         if (!steps.length) { $("#gErr").textContent = "Dodaj co najmniej jeden krok – po nim widać postęp."; document.querySelector("[data-step-in]").focus(); return; }
-        try { await api("POST", "/api/goals", { s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t, steps }); closeModal(); toast("Dodano cel."); await refreshData(); render(); }
+        const employeeId = +b.dataset.emp;
+        try { await api("POST", "/api/goals", { employeeId, s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t, steps }); closeModal(); toast("Dodano cel. Pracownik zobaczy go w swoich celach."); if (S.goalsCtx?.where === "modal" && S.view !== "month") goalsModal(employeeId); else await refreshGoals(); }
         catch (ex) { $("#gErr").textContent = ex.message; }
       });
     }),
@@ -1454,7 +1588,7 @@
       return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
     },
     addFeedback: () => feedbackModal(null),
-    // Uzupełnia puste pola „Przykład z okresu” treścią dowodów – nie ustawia poziomów (decyduje oceniający)
+    // Uzupełnia puste pola „Przykład z okresu” treścią informacji – nie ustawia poziomów (decyduje oceniający)
     fillFromEvidence: b => {
       const c = S.cur, k = b.dataset.comp, comp = MODEL.find(m => m.k === k); let n = 0;
       comp.w.forEach((_, wi) => {
@@ -1462,7 +1596,7 @@
         if (!list.length || (c.ratings[id] && (c.ratings[id].ex || "").trim())) return;
         c.ratings[id] = { ...(c.ratings[id] || {}), ex: list.slice(0, 2).map(e => `${e.date}: ${e.situation} – ${e.action} → ${e.result}`).join("\n") }; n++;
       });
-      c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z dowodami.");
+      c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z informacjami.");
     },
     earlyException: async () => {
       const reason = prompt("Uzasadnienie wyjątku od reguły 6 miesięcy (min. 10 znaków). Wpis trafi do dziennika:");
@@ -1574,11 +1708,7 @@
     if (t.dataset.field && S.cur) {
       S.cur.data[t.dataset.field] = t.value; queueSave(); return;
     }
-    if (t.dataset.goalStep) {
-      const [gid, si] = t.dataset.goalStep.split(":");
-      try { await api("PATCH", `/api/goals/${gid}`, { step: +si, done: t.checked }); await refreshData(); render(); }
-      catch (ex) { t.checked = !t.checked; toast(ex.message); }
-    }
+
   });
   document.addEventListener("input", e => {
     const t = e.target;

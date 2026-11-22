@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NO
   role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
 CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
   model TEXT, input_sha256 TEXT, output_text TEXT, source TEXT, at TEXT NOT NULL);
--- Dowody: obserwacja zachowania przy konkretnym wskaźniku (sytuacja – działanie – rezultat)
+-- Informacje: obserwacja zachowania przy konkretnym wskaźniku (sytuacja – działanie – rezultat)
 CREATE TABLE IF NOT EXISTS evidence(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL,
   date TEXT NOT NULL, indicator TEXT NOT NULL, situation TEXT NOT NULL, action TEXT NOT NULL, result TEXT NOT NULL,
   link TEXT, task_ref TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS checkins(id INTEGER PRIMARY KEY, employee_id INTEGER 
 CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, author_id INTEGER NOT NULL, indicator TEXT NOT NULL,
   source TEXT NOT NULL, level INTEGER CHECK(level IS NULL OR level IN (1,3,5,7,9)), justification TEXT NOT NULL, relation TEXT NOT NULL,
   date TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL);
--- Oceny cząstkowe kwartalne: przyznaje oceniający, z uzasadnieniem i wskazaniem dowodów z kwartału
+-- Oceny cząstkowe kwartalne: przyznaje oceniający, z uzasadnieniem i wskazaniem informacji z kwartału
 CREATE TABLE IF NOT EXISTS partial_ratings(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL, quarter TEXT NOT NULL,
   competency TEXT NOT NULL, pts INTEGER NOT NULL CHECK(pts IN (1,3,5,7,9)), justification TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
   created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(employee_id, quarter, competency));
@@ -123,6 +123,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS prep_survey(id INTEGER PRIMARY KEY, rating I
 try { db.exec('ALTER TABLE evals ADD COLUMN survey_done INTEGER NOT NULL DEFAULT 0'); } catch (_) { /* już istnieje */ }
 // Cele SMART: postęp z kroków (sprawdzalnych), a nie z suwaka – [{ t, done }]; progress = odsetek wykonanych kroków
 try { db.exec("ALTER TABLE goals ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* już istnieje */ }
+// Plan rozwoju i komunikat do pracownika pisze przełożony (etap 4); każda zmiana = nowy wiersz (historia wersji)
+db.exec(`CREATE TABLE IF NOT EXISTS dev_plans(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, author_id INTEGER NOT NULL,
+  plan TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)`);
+// Cele wyznacza przełożony (created_by); NULL = cel sprzed zmiany, założony przez pracownika
+try { db.exec('ALTER TABLE goals ADD COLUMN created_by INTEGER'); } catch (_) { /* już istnieje */ }
+// Migracja kroków { t, done } → { t, reported_at, confirmed_at, confirmed_by } (wykonane = potwierdzone przy migracji)
+for (const g of db.prepare("SELECT id, steps, created FROM goals WHERE steps LIKE '%\"done\"%'").all()) {
+  const steps = JSON.parse(g.steps || '[]').map(x => ('done' in x ? { t: x.t, reported_at: x.done ? g.created : null, confirmed_at: x.done ? g.created : null, confirmed_by: null } : x));
+  db.prepare('UPDATE goals SET steps=? WHERE id=?').run(JSON.stringify(steps), g.id);
+}
 
 // Dziennik: pieczęć HMAC każdego wpisu (klucz spoza bazy) i blokada UPDATE/DELETE na poziomie bazy
 try { db.exec('ALTER TABLE audit ADD COLUMN mac TEXT'); } catch (_) { /* już istnieje */ }
@@ -161,12 +171,12 @@ const MAX_EXTRA = 3;
 const now = () => new Date().toISOString();
 // Moduły spoza rozporządzenia: można je wyłączyć. Ocena okresowa, zapoznanie i sprzeciw są zawsze włączone.
 const MODULES = {
-  mod_evidence: { label: 'Dowody przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
+  mod_evidence: { label: 'Informacje przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
   mod_checkins: { label: 'Rozmowy miesięczne (check-in) i przegląd miesiąca', prefixes: ['/api/checkins', '/api/month'], default: '1' },
   mod_feedback: { label: 'Feedback między przełożonym a pracownikiem', prefixes: ['/api/feedback'], default: '1' },
   mod_partials: { label: 'Oceny cząstkowe kwartalne', prefixes: ['/api/partials'], default: '1' },
   mod_ai: { label: 'Asystent AI (podpowiedzi, nie decyzje)', prefixes: ['/api/ai/'], default: '1' },
-  mod_employee_evidence: { label: 'Pracownik widzi swoje dowody (opcjonalne)', prefixes: [], default: '1' },
+  mod_employee_evidence: { label: 'Pracownik widzi swoje informacje (opcjonalne)', prefixes: [], default: '1' },
 };
 const settingVal = key => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key); return r ? r.value : MODULES[key].default; };
 const modOn = key => settingVal(key) === '1';
@@ -184,7 +194,7 @@ const checkPass = (pw, stored) => {
   return usable && a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 // Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje).
-// Zmiany ocen, dowodów i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
+// Zmiany ocen, informacji i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
 // Wpisy bez wartości liczą skrót jak dotąd, więc starsze dzienniki weryfikują się bez zmian.
 const auditHash = (prev, uid, action, target, at, pv = null, nv = null) => crypto.createHash('sha256')
   .update([prev || '', uid ?? '', action, target, at, ...(pv !== null || nv !== null ? [pv ?? '', nv ?? ''] : [])].join('|')).digest('hex');
@@ -254,15 +264,18 @@ function seed() {
   });
   seedEvidence(mgr, emps, rnd);
   seedRhythm(mgr, emps);
-  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
   emps.forEach((eid, i) => {
     const doneN = i % 3 === 0 ? STEPS.length : i % STEPS.length;
-    const steps = STEPS.map((t, si) => ({ t, done: si < doneN }));
-    insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), now());
+    // Kroki demo: potwierdzone, jeden zgłoszony (czeka na potwierdzenie), reszta otwarta
+    const at = now();
+    const steps = STEPS.map((t, si) => ({ t, reported_at: si <= doneN ? at : null, confirmed_at: si < doneN ? at : null, confirmed_by: si < doneN ? mgr : null }));
+    if (doneN === STEPS.length) steps.forEach(x => { x.reported_at = at; });
+    insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), mgr, at);
   });
 }
-// Dowody demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
+// Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
   const SIT = ['Przygotowanie raportu kwartalnego dla kierownictwa', 'Odpowiedź na pismo innej komórki organizacyjnej', 'Wdrożenie nowej procedury obiegu dokumentów',
     'Spotkanie projektowe z zespołem wykonawcy', 'Obsługa wniosku o udostępnienie informacji publicznej', 'Aktualizacja rejestru umów'];
@@ -273,13 +286,13 @@ function seedEvidence(mgr, emps, rnd) {
   const pick = a => a[Math.floor(rnd() * a.length)];
   const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const add = (eid, date, ind) => ins.run(eid, mgr, date, ind, pick(SIT), pick(ACT), pick(RES), null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
-  // Szkic oceny (ostatni pracownik): dowody do prawie wszystkich wskaźników – dwa celowo bez dowodu (demo walidacji)
+  // Szkic oceny (ostatni pracownik): informacje do prawie wszystkich wskaźników – dwa celowo bez informacji (demo walidacji)
   const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
   if (draft) {
     const inds = Object.keys(JSON.parse(draft.data).ratings || {});
     inds.slice(0, -2).forEach((ind, i) => add(draft.employee_id, `2026-0${1 + (i % 6)}-${String(5 + (i % 20)).padStart(2, '0')}`, ind));
   }
-  // Ostatnie miesiące: kilka dowodów na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
+  // Ostatnie miesiące: kilka informacji na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
   const pool = [...INDICATORS.keys()].filter(k => MAND_C.some(m => k.startsWith(m)));
   const months = [-2, -1, 0].map(d => { const t = new Date(); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() + d); return t.toISOString().slice(0, 7); });
   emps.slice(0, 4).forEach(eid => months.forEach(m => {
@@ -393,7 +406,7 @@ function sanitizeData(input, typ) {
   }
   return out;
 }
-// Liczba dowodów per wskaźnik w okresie (puste daty = bez ograniczenia)
+// Liczba informacji per wskaźnik w okresie (puste daty = bez ograniczenia)
 function evidenceCounts(empId, from, to) {
   const rows = db.prepare(`SELECT indicator, COUNT(*) n FROM evidence WHERE employee_id=? ${isDate(from) ? 'AND date>=?' : ''} ${isDate(to) ? 'AND date<=?' : ''} GROUP BY indicator`)
     .all(empId, ...[from, to].filter(isDate));
@@ -412,7 +425,7 @@ function missingForSubmit(ev) {
     });
     if (isSchema2(ev.typ, data) && !PTS5.includes(Number(data.partials?.[k]?.pts))) miss.push(`${comp.k}: brak oceny cząstkowej (1/3/5/7/9 pkt)`);
   }
-  // Ocena okresowa: każdy oceniany wskaźnik ma co najmniej jeden dowód z okresu oceny
+  // Ocena okresowa: każdy oceniany wskaźnik ma co najmniej jedną informację z okresu oceny
   // albo jawną adnotację „brak podstaw do oceny” (lvl = 'none')
   if (ev.typ !== 'pierwsza') {
     const counts = evidenceCounts(ev.employee_id, ev.period_from, ev.period_to);
@@ -420,7 +433,7 @@ function missingForSubmit(ev) {
       const comp = MODEL.find(c => c.k === k);
       comp.w.forEach((w, wi) => {
         const r = data.ratings?.[`${k}|${wi}`];
-        if (r && r.lvl !== 'none' && !counts[`${k}|${wi}`]) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez dowodu z okresu oceny (dodaj dowód albo zaznacz „brak podstaw do oceny”)`);
+        if (r && r.lvl !== 'none' && !counts[`${k}|${wi}`]) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez informacji z okresu oceny (dodaj informację albo zaznacz „brak podstaw do oceny”)`);
       });
     }
   }
@@ -536,13 +549,13 @@ function seedRhythm(mgr, emps) {
   insF.run(emps[0], mgr, 'RZETELNOŚĆ|0', 'ZAD-214: zestawienie danych do sprawozdania', 7, 'Zestawienie przekazane z opisem metody i kontrolą sum; odbiorca nie zgłosił poprawek.', 'odbiorca', fbDate, at, at);
   insF.run(emps[0], mgr, 'KOMUNIKACJA|0', 'Spotkanie z wykonawcą – protokół ustaleń', null, 'Protokół rozesłany tego samego dnia, ustalenia jednoznaczne, bez pytań zwrotnych.', 'przelozony', fbDate, at, at);
   insF.run(emps[1], mgr, 'WSPÓŁPRACA|0', 'ZAD-331: wspólne opracowanie procedury', 5, 'Uwagi do procedury przekazane w terminie i uwzględnione w wersji końcowej.', 'wspolpracownik', fbDate, at, at);
-  // Ocena cząstkowa kwartalna: wskazuje dowody tej osoby z bieżącego kwartału
+  // Ocena cząstkowa kwartalna: wskazuje informacje tej osoby z bieżącego kwartału
   const q = quarterOf(today()), [qf, qt] = quarterRange(q);
   const evs = db.prepare('SELECT id,indicator FROM evidence WHERE employee_id=? AND date>=? AND date<=?').all(emps[0], qf, qt);
   const byComp = {};
   for (const e of evs) (byComp[INDICATORS.get(e.indicator).k] ||= []).push(e.id);
   const insP = db.prepare('INSERT INTO partial_ratings(employee_id,evaluator_id,quarter,competency,pts,justification,evidence_ids,created,updated) VALUES(?,?,?,?,?,?,?,?,?)');
-  Object.entries(byComp).slice(0, 2).forEach(([k, ids], i) => insP.run(emps[0], mgr, q, k, [5, 7][i], 'Rezultaty zadań w kwartale zgodne z wymaganiami; opis w dowodach.', JSON.stringify(ids.slice(0, 3)), at, at));
+  Object.entries(byComp).slice(0, 2).forEach(([k, ids], i) => insP.run(emps[0], mgr, q, k, [5, 7][i], 'Rezultaty zadań w kwartale zgodne z wymaganiami; opis w informacjach.', JSON.stringify(ids.slice(0, 3)), at, at));
 }
 
 // Dane demo i migracje (po definicji funkcji pomocniczych)
@@ -786,6 +799,7 @@ route('GET', '/api/dashboard', async (req, res, u) => {
       role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue, dueReason: tc.dueReason, kickoff: kickoffRow(latestKickoff(u.id)),
       evals: evals.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, updated: e.updated })),
       latestScores: latest ? scoreEval(latest) : null,
+      devPlan: devPlansOf(u.id)[0] || null,
       latestDev: devEval?.data?.dev || '',
       latestDevEval: devEval ? { id: devEval.id, typ: devEval.typ, status: devEval.status, periodFrom: devEval.period_from, periodTo: devEval.period_to } : null,
       latestEvalId: latest?.id ?? null,
@@ -837,6 +851,11 @@ route('GET', '/api/dashboard', async (req, res, u) => {
   }).sort((a, b) => (a.days ?? 1e9) - (b.days ?? 1e9));
   const dueById = Object.fromEntries(deadlines.map(d => [d.id, d.due]));
   teamRows.forEach(r => { r.nextDue = dueById[r.id] || null; });
+  // Cele: kroki zgłoszone przez pracownika, czekające na potwierdzenie przełożonego
+  for (const r of teamRows) {
+    r.goalsToConfirm = goalsOf(r.id).reduce((n, g) => n + g.stepsReported, 0);
+    if (r.goalsToConfirm) alerts.push({ kind: 'goals', employeeId: r.id, name: r.name, text: `Kroki celów do potwierdzenia: ${r.goalsToConfirm}` });
+  }
   // Rozmowa rozpoczynająca: po każdej ocenie okresowej, w ciągu 30 dni; potem zapoznanie pracownika (część I)
   for (const r of teamRows) {
     const last = lastPeriodic(evals.filter(e => e.employee_id === r.id));
@@ -964,9 +983,9 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(pdfBytes));
 });
-// Szkic dokumentu z dowodów i check-inów okresu: bez poziomów, ocen cząstkowych i wyniku (uzupełnia oceniający)
+// Szkic dokumentu z informacji i check-inów okresu: bez poziomów, ocen cząstkowych i wyniku (uzupełnia oceniający)
 async function draftDocument(req, res, u, ev) {
-  if (u.role !== 'przelozony' || ev.evaluator_id !== u.id) return fail(res, 403, 'Szkic z dowodów jest dla oceniającego.');
+  if (u.role !== 'przelozony' || ev.evaluator_id !== u.id) return fail(res, 403, 'Szkic z informacji jest dla oceniającego.');
   const q = qs(req), format = q.get('format') === 'xml' ? 'xml' : 'pdf', inline = q.get('inline') === '1';
   const from = isDate(ev.period_from) ? ev.period_from : '0000-01-01', to = isDate(ev.period_to) ? ev.period_to : '9999-12-31';
   const ctx = { ev: { ...ev, data: JSON.parse(ev.data || '{}') }, model: MODEL,
@@ -985,6 +1004,25 @@ async function draftDocument(req, res, u, ev) {
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(bytes));
 }
+// Trend na przestrzeni dwóch lat (etap 5): zmiana ocen cząstkowych między dwiema ostatnimi złożonymi ocenami okresowymi B/C.
+// Tylko formalne oceny sporządzone przez człowieka; bez średniej, bez wyniku łącznego, bez prognozy; oceny kwartalne nie wchodzą.
+route('GET', '/api/evals/compare', async (req, res, u) => {
+  let evs;
+  if (u.role === 'pracownik') evs = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status!='draft' AND typ IN ('B','C')").all(u.id);
+  else {
+    const emp = teamMember(u, qs(req).get('employeeId'));
+    if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+    evs = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status!='draft' AND typ IN ('B','C')").all(emp.id, u.id);
+  }
+  const [cur, prev] = evs.filter(e => refDate(e)).sort((a, b) => (refDate(a) < refDate(b) ? 1 : -1));
+  if (!cur || !prev) return send(res, 200, { available: false, count: evs.length });
+  const pts = ev => Object.fromEntries(computeResults({ ...ev, data: JSON.parse(ev.data || '{}') }, MODEL).crit.filter(c => c.partial !== null).map(c => [c.key, c.partial]));
+  const a = pts(prev), b = pts(cur);
+  const competencies = Object.keys(b).filter(k => k in a).map(k => ({ k, name: MODEL.find(c => c.k === k)?.n || k, previous: a[k], current: b[k],
+    direction: b[k] > a[k] ? 'wzrost' : b[k] < a[k] ? 'spadek' : 'bez zmian' }));
+  const ref = e => ({ id: e.id, typ: e.typ, date: refDate(e), periodFrom: e.period_from, periodTo: e.period_to });
+  send(res, 200, { available: true, previousEval: ref(prev), currentEval: ref(cur), competencies });
+});
 route('GET', '/api/evals/:id', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev) return fail(res, 404, 'Nie znaleziono.');
@@ -1048,57 +1086,146 @@ route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
 });
 
 // Cele SMART (pracownik)
-// Cel SMART z krokami: każdy krok jest sprawdzalny (wykonany albo nie), postęp liczy się sam – nie trzeba go „dostrajać”.
-// Cel bez kroków (sprzed tej zmiany) ma tylko stan zrealizowany / w toku.
-const GOAL_STEPS_MAX = 8, GOAL_YEARS_MAX = 5;
-const goalRow = g => { const steps = JSON.parse(g.steps || '[]'); return { ...g, steps, done: !!g.done, stepsDone: steps.filter(x => x.done).length }; };
-const goalProgress = steps => (steps.length ? Math.round(steps.filter(x => x.done).length / steps.length * 100) : null);
-const goalsOf = uid => db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(uid).map(goalRow);
-const stepText = t => str(t, 150);
-route('GET', '/api/goals', async (req, res, u) => send(res, 200, { goals: goalsOf(u.id) }));
-route('POST', '/api/goals', async (req, res, u) => {
+// ---------- Plan rozwoju i komunikat (pisze przełożony, pracownik czyta) ----------
+const devPlanRow = r => r && ({ id: r.id, plan: r.plan, message: r.message, created: r.created, author: 'przełożony' });
+const devPlansOf = empId => db.prepare('SELECT * FROM dev_plans WHERE employee_id=? ORDER BY id DESC').all(empId).map(devPlanRow);
+route('GET', '/api/devplan', async (req, res, u) => {
+  const empId = u.role === 'pracownik' ? u.id : teamMember(u, qs(req).get('employeeId'))?.id;
+  if (!empId) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const list = devPlansOf(empId);
+  send(res, 200, { current: list[0] || null, history: list.slice(1, 20) });
+});
+route('PUT', '/api/devplan', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Plan rozwoju pisze przełożony.');
   const b = await readJson(req);
-  const errors = {};
-  const g = {};
-  for (const [k, label] of [['s', 'Konkretnie'], ['m', 'Mierzalnie'], ['a', 'Osiągalnie'], ['r', 'Istotnie']]) { g[k] = str(b[k], 200); if (!g[k]) errors[k] = `Uzupełnij pole „${label}”.`; }
-  const t = typeof b.t === 'string' ? b.t : '';
-  const maxT = `${+today().slice(0, 4) + GOAL_YEARS_MAX}${today().slice(4)}`;
-  if (!isDate(t)) errors.t = 'Podaj prawdziwą datę (DD.MM.RRRR).';
-  else if (t < today()) errors.t = 'Termin nie może być w przeszłości.';
-  else if (t > maxT) errors.t = `Termin najpóźniej za ${GOAL_YEARS_MAX} lat.`;
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const plan = str(b.plan, 3000), message = str(b.message, 1000);
+  if (plan.length < 10) return invalid(res, { plan: 'Opisz plan rozwoju (min. 10 znaków).' }, 'Opisz plan rozwoju (min. 10 znaków).');
+  const prev = devPlansOf(emp.id)[0] || null;
+  if (prev && prev.plan === plan && prev.message === message) return send(res, 200, { current: prev, changed: false });
+  const id = db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emp.id, u.id, plan, message, now()).lastInsertRowid;
+  audit(u.id, 'update_devplan', `devplan:${emp.id}`, prev ? { plan: prev.plan, message: prev.message } : null, { plan, message });
+  send(res, 200, { current: devPlanRow(db.prepare('SELECT * FROM dev_plans WHERE id=?').get(id)), changed: true });
+});
+
+// Cele SMART wyznacza przełożony (moduł przełożonego, etap 3). Każdy krok jest sprawdzalny:
+// pracownik ZGŁASZA wykonanie, przełożony POTWIERDZA. Postęp = potwierdzone kroki / wszystkie (deterministycznie).
+// Krok: { t, reported_at, confirmed_at, confirmed_by }. Cel bez kroków (sprzed zmian) ma tylko stan zrealizowany / w toku.
+const GOAL_STEPS_MAX = 8, GOAL_YEARS_MAX = 5;
+const newStep = t => ({ t, reported_at: null, confirmed_at: null, confirmed_by: null });
+const goalProgress = steps => (steps.length ? Math.round(steps.filter(x => x.confirmed_at).length / steps.length * 100) : null);
+const goalRow = g => {
+  const steps = JSON.parse(g.steps || '[]');
+  return { ...g, steps, done: !!g.done, legacy: !g.created_by, stepsConfirmed: steps.filter(x => x.confirmed_at).length,
+    stepsReported: steps.filter(x => x.reported_at && !x.confirmed_at).length };
+};
+const goalsOf = uid => db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY done, t, id').all(uid).map(goalRow);
+const stepText = t => str(t, 150);
+const goalAuditView = g => ({ s: g.s, m: g.m, a: g.a, r: g.r, t: g.t, done: !!g.done, steps: typeof g.steps === 'string' ? JSON.parse(g.steps) : g.steps });
+function validateGoal(b, partial = false) {
+  const errors = {}, v = {};
+  for (const [k, label] of [['s', 'Konkretnie'], ['m', 'Mierzalnie'], ['a', 'Osiągalnie'], ['r', 'Istotnie']]) {
+    if (partial && b[k] === undefined) continue;
+    v[k] = str(b[k], 200); if (!v[k]) errors[k] = `Uzupełnij pole „${label}”.`;
+  }
+  if (!partial || b.t !== undefined) {
+    const t = typeof b.t === 'string' ? b.t : '';
+    const maxT = `${+today().slice(0, 4) + GOAL_YEARS_MAX}${today().slice(4)}`;
+    if (!isDate(t)) errors.t = 'Podaj prawdziwą datę (DD.MM.RRRR).';
+    else if (t < today()) errors.t = 'Termin nie może być w przeszłości.';
+    else if (t > maxT) errors.t = `Termin najpóźniej za ${GOAL_YEARS_MAX} lat.`;
+    else v.t = t;
+  }
+  return { v, errors };
+}
+route('GET', '/api/goals', async (req, res, u) => {
+  if (u.role === 'pracownik') return send(res, 200, { goals: goalsOf(u.id) });
+  const q = qs(req);
+  const ids = q.get('employeeId') ? [teamMember(u, q.get('employeeId'))?.id].filter(Boolean)
+    : db.prepare("SELECT id FROM users WHERE manager_id=? AND role='pracownik'").all(u.id).map(r => r.id);
+  send(res, 200, { goals: ids.flatMap(goalsOf) });
+});
+route('POST', '/api/goals', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Cele wyznacza przełożony. Swoje propozycje zgłoś na rozmowie miesięcznej.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { v, errors } = validateGoal(b);
   const steps = Array.isArray(b.steps) ? b.steps.map(stepText).filter(Boolean) : [];
   if (!steps.length) errors.steps = 'Dodaj co najmniej jeden krok – po nim widać postęp.';
   else if (steps.length > GOAL_STEPS_MAX) errors.steps = `Najwyżej ${GOAL_STEPS_MAX} kroków.`;
   if (Object.keys(errors).length) return invalid(res, errors, Object.values(errors)[0]);
-  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,0,0,?,?)')
-    .run(u.id, g.s, g.m, g.a, g.r, t, JSON.stringify(steps.map(x => ({ t: x, done: false }))), now()).lastInsertRowid;
-  send(res, 201, { id, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(id)) });
+  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,0,0,?,?,?)')
+    .run(emp.id, v.s, v.m, v.a, v.r, v.t, JSON.stringify(steps.map(newStep)), u.id, now()).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM goals WHERE id=?').get(id);
+  audit(u.id, 'create_goal', `goal:${id}`, null, { employeeId: emp.id, ...goalAuditView(row) });
+  send(res, 201, { id, goal: goalRow(row) });
 });
-// { step: i, done } – oznacza krok; { addStep: "…" } – dopisuje krok; { done } – tylko dla celu bez kroków
+// Trend między spotkaniami (etap 5): potwierdzone kroki narastająco na koniec każdego miesiąca + miesiące z odbytą rozmową
+route('GET', '/api/goals/trend', async (req, res, u) => {
+  const empId = u.role === 'pracownik' ? u.id : teamMember(u, qs(req).get('employeeId'))?.id;
+  if (!empId) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const nowM = today().slice(0, 7);
+  const checkins = db.prepare("SELECT month, date FROM checkins WHERE employee_id=? AND status='odbyty' ORDER BY month").all(empId);
+  const lastTalk = checkins.length ? (checkins[checkins.length - 1].date || `${checkins[checkins.length - 1].month}-01`) : null;
+  const goals = goalsOf(empId).filter(g => g.steps.length).map(g => {
+    const months = monthsBetween(g.created.slice(0, 10), `${nowM}-01`).slice(-24);
+    const series = months.map(m => ({ month: m, confirmed: g.steps.filter(x => x.confirmed_at && x.confirmed_at.slice(0, 7) <= m).length }));
+    const sinceLastTalk = lastTalk ? g.steps.filter(x => x.confirmed_at && x.confirmed_at.slice(0, 10) > lastTalk).length : null;
+    return { id: g.id, total: g.steps.length, series, talks: checkins.map(c => c.month).filter(m => months.includes(m)), sinceLastTalk };
+  });
+  send(res, 200, { lastTalk, goals });
+});
+// Pracownik (właściciel): { step, reported } – zgłasza / cofa zgłoszenie (nie cofa kroku potwierdzonego).
+// Przełożony (cel osoby z zespołu): { step, confirmed }, { addStep }, zmiana s/m/a/r/t.
+// Cel bez kroków: { done } – właściciel albo przełożony.
 route('PATCH', '/api/goals/:id', async (req, res, u, p) => {
-  const g = db.prepare('SELECT * FROM goals WHERE id=? AND user_id=?').get(p.id, u.id);
-  if (!g) return fail(res, 404, 'Nie znaleziono celu.');
+  const g = db.prepare('SELECT * FROM goals WHERE id=?').get(p.id);
+  const isOwner = g && u.role === 'pracownik' && g.user_id === u.id;
+  const isMgr = g && u.role === 'przelozony' && !!teamMember(u, g.user_id);
+  if (!isOwner && !isMgr) return fail(res, 404, 'Nie znaleziono celu.');
   const b = await readJson(req);
   const steps = JSON.parse(g.steps || '[]');
-  if (b.step !== undefined) {
-    const i = Number(b.step);
-    if (!Number.isInteger(i) || !steps[i]) return invalid(res, { step: 'Nie ma takiego kroku.' });
-    steps[i].done = !!b.done;
+  const next = { ...g };
+  let action;
+  const stepAt = () => { const i = Number(b.step); return Number.isInteger(i) && steps[i] ? steps[i] : null; };
+  if (b.reported !== undefined) {
+    if (!isOwner) return fail(res, 403, 'Wykonanie kroku zgłasza pracownik.');
+    const st = stepAt(); if (!st) return invalid(res, { step: 'Nie ma takiego kroku.' });
+    if (st.confirmed_at) return fail(res, 409, 'Krok jest już potwierdzony przez przełożonego.');
+    st.reported_at = b.reported ? now() : null; action = 'goal_step_report';
+  } else if (b.confirmed !== undefined) {
+    if (!isMgr) return fail(res, 403, 'Krok potwierdza przełożony.');
+    const st = stepAt(); if (!st) return invalid(res, { step: 'Nie ma takiego kroku.' });
+    if (b.confirmed) { st.confirmed_at = now(); st.confirmed_by = u.id; } else { st.confirmed_at = null; st.confirmed_by = null; }
+    action = 'goal_step_confirm';
   } else if (b.addStep !== undefined) {
+    if (!isMgr) return fail(res, 403, 'Kroki dodaje przełożony.');
     const t = stepText(b.addStep);
     if (!t) return invalid(res, { addStep: 'Opisz krok.' });
     if (steps.length >= GOAL_STEPS_MAX) return invalid(res, { addStep: `Najwyżej ${GOAL_STEPS_MAX} kroków.` });
-    steps.push({ t, done: false });
+    steps.push(newStep(t)); action = 'update_goal';
+  } else if (['s', 'm', 'a', 'r', 't'].some(k => b[k] !== undefined)) {
+    if (!isMgr) return fail(res, 403, 'Cel zmienia przełożony.');
+    const { v, errors } = validateGoal(b, true);
+    if (Object.keys(errors).length) return invalid(res, errors, Object.values(errors)[0]);
+    Object.assign(next, v); action = 'update_goal';
   } else if (b.done !== undefined) {
-    if (steps.length) return invalid(res, { done: 'Cel z krokami jest zrealizowany, gdy wszystkie kroki są wykonane.' });
+    if (steps.length) return invalid(res, { done: 'Cel z krokami jest zrealizowany, gdy przełożony potwierdzi wszystkie kroki.' });
+    next.done = b.done ? 1 : 0; action = 'update_goal';
   } else return invalid(res, { step: 'Brak zmiany.' });
   const progress = goalProgress(steps);
-  const done = steps.length ? progress === 100 : !!b.done;
-  db.prepare('UPDATE goals SET steps=?, done=?, progress=? WHERE id=?').run(JSON.stringify(steps), done ? 1 : 0, progress ?? (done ? 100 : 0), g.id);
+  next.steps = JSON.stringify(steps);
+  if (steps.length) next.done = progress === 100 ? 1 : 0;
+  next.progress = progress ?? (next.done ? 100 : 0);
+  db.prepare('UPDATE goals SET s=?,m=?,a=?,r=?,t=?,steps=?,done=?,progress=? WHERE id=?').run(next.s, next.m, next.a, next.r, next.t, next.steps, next.done, next.progress, g.id);
+  const ch = diffObj(goalAuditView(g), goalAuditView(next));
+  if (ch) audit(u.id, action, `goal:${g.id}`, ch.prev, ch.next);
   send(res, 200, { ok: true, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(g.id)) });
 });
 
-// ---------- Dowody (wskaźniki z app/kompetencje.js) ----------
+// ---------- Informacje (wskaźniki z app/kompetencje.js) ----------
 const EVIDENCE_FIELDS = ['employeeId', 'date', 'indicator', 'situation', 'action', 'result', 'link', 'taskRef'];
 function sanitizeEvidence(b, partial = false) {
   const errors = {}, v = {};
@@ -1145,7 +1272,7 @@ route('GET', '/api/evidence', async (req, res, u) => {
   send(res, 200, { evidence: evidenceQuery(u, q).map(evidenceRow) });
 });
 route('POST', '/api/evidence', async (req, res, u) => {
-  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody dodaje przełożony.');
+  if (u.role !== 'przelozony') return fail(res, 403, 'Informacje dodaje przełożony.');
   const b = await readJson(req);
   const emp = teamMember(u, b.employeeId);
   if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
@@ -1159,11 +1286,11 @@ route('POST', '/api/evidence', async (req, res, u) => {
   send(res, 201, { evidence: evidenceRow(row) });
 });
 route('PUT', '/api/evidence/:id', async (req, res, u, p) => {
-  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody edytuje przełożony.');
+  if (u.role !== 'przelozony') return fail(res, 403, 'Informacje edytuje przełożony.');
   const cur = db.prepare('SELECT * FROM evidence WHERE id=?').get(p.id);
-  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono dowodu.');
+  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono informacji.');
   const b = await readJson(req);
-  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść dowodu na inną osobę.' });
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść informacji na inną osobę.' });
   const { value: v, errors } = sanitizeEvidence(b, true);
   if (Object.keys(errors).length) return invalid(res, errors);
   const next = { ...cur, ...v };
@@ -1322,7 +1449,7 @@ route('PUT', '/api/feedback/:id', async (req, res, u, p) => {
   send(res, 200, { feedback: feedbackRow(db.prepare('SELECT * FROM feedback WHERE id=?').get(cur.id)), changed: true });
 });
 
-// ---------- Oceny cząstkowe kwartalne (przyznaje oceniający, z uzasadnieniem i dowodami) ----------
+// ---------- Oceny cząstkowe kwartalne (przyznaje oceniający, z uzasadnieniem i informacjami) ----------
 const PARTIAL_FIELDS = ['employeeId', 'quarter', 'competency', 'pts', 'justification', 'evidenceIds'];
 function sanitizePartial(b, empId, partial = false, cur = null) {
   const errors = {}, v = {};
@@ -1336,14 +1463,14 @@ function sanitizePartial(b, empId, partial = false, cur = null) {
   if (need('pts', PTS5.includes(Number(b.pts)), 'Ocena cząstkowa: 1, 3, 5, 7 lub 9 pkt.')) v.pts = Number(b.pts);
   const just = str(b.justification, 2000);
   if (need('justification', just.length >= 10, 'Uzasadnienie jest wymagane (min. 10 znaków).')) v.justification = just;
-  if (need('evidenceIds', Array.isArray(b.evidenceIds) && b.evidenceIds.length > 0 && b.evidenceIds.length <= 50, 'Wskaż co najmniej jeden dowód.')) v.evidenceIds = [...new Set(b.evidenceIds.map(Number))];
-  // Dowody: tej samej osoby, z tego kryterium i z tego kwartału
+  if (need('evidenceIds', Array.isArray(b.evidenceIds) && b.evidenceIds.length > 0 && b.evidenceIds.length <= 50, 'Wskaż co najmniej jedną informację.')) v.evidenceIds = [...new Set(b.evidenceIds.map(Number))];
+  // Informacje: tej samej osoby, z tego kryterium i z tego kwartału
   const quarter = v.quarter || cur?.quarter, comp = v.competency || cur?.competency;
   const ids = v.evidenceIds || (cur ? JSON.parse(cur.evidence_ids) : null);
   if (ids && quarter && comp && !errors.evidenceIds) {
     const [from, to] = quarterRange(quarter);
     const bad = ids.filter(id => { const e = db.prepare('SELECT employee_id,indicator,date FROM evidence WHERE id=?').get(id); return !e || e.employee_id !== empId || INDICATORS.get(e.indicator)?.k !== comp || e.date < from || e.date > to; });
-    if (bad.length) errors.evidenceIds = `Dowody spoza tej osoby, kryterium lub kwartału: ${bad.join(', ')}.`;
+    if (bad.length) errors.evidenceIds = `Informacje spoza tej osoby, kryterium lub kwartału: ${bad.join(', ')}.`;
   }
   return { value: v, errors };
 }
@@ -1390,8 +1517,8 @@ route('PUT', '/api/partials/:id', async (req, res, u, p) => {
   send(res, 200, { partial: partialRow(db.prepare('SELECT * FROM partial_ratings WHERE id=?').get(cur.id)), changed: true });
 });
 
-// ---------- Przegląd miesiąca (przełożony): dowody według wskaźników, bez punktacji ----------
-// Wskaźniki bez nowych dowodów w miesiącu są pomijane, żeby nie generować pustych ocen.
+// ---------- Przegląd miesiąca (przełożony): informacje według wskaźników, bez punktacji ----------
+// Wskaźniki bez nowych informacji w miesiącu są pomijane, żeby nie generować pustych ocen.
 route('GET', '/api/month', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Przegląd miesiąca jest dla przełożonego.');
   const q = qs(req);
@@ -1448,6 +1575,127 @@ route('GET', '/api/summary', async (req, res, u) => {
 });
 
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)
+// ---------- Przygotowanie pracownika do rozmowy (etap 7): o co może zapytać przełożony ----------
+// Wejście: kryteria bieżącej oceny lub rozmowy rozpoczynającej, pytania z bazy asystenta, własne cele i kroki.
+// Informacje z okresu tylko jako liczby na kryterium i tylko przy włączonym module wglądu pracownika. Bez poziomów i oceniania.
+function prepInput(u) {
+  const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(u.id);
+  const k = latestKickoff(u.id);
+  const criteria = draft ? JSON.parse(draft.data || '{}').criteria || [] : k ? [...mandKeysFor(k.typ), ...JSON.parse(k.extra_criteria || '[]')] : [];
+  const qs2 = criteria.map(c => { const e = ASSISTANT.kompetencje.find(x => c.startsWith(x.match)); return { k: c, name: MODEL.find(m => m.k === c)?.n || c, pytania: e ? [...e.niski.slice(0, 2), ...e.wysoki.slice(0, 2)] : [] }; });
+  const goals = goalsOf(u.id).map(g => ({ cel: g.s, termin: g.t, kroki: g.steps.map(x => `${x.t} (${x.confirmed_at ? 'potwierdzony' : x.reported_at ? 'zgłoszony' : 'do zrobienia'})`) }));
+  const from = isDate(draft?.period_from) ? draft.period_from : k?.ack_at ? k.ack_at.slice(0, 10) : `${+today().slice(0, 4) - 1}${today().slice(4)}`;
+  const counts = modOn('mod_employee_evidence') ? Object.fromEntries(criteria.map(c => [c, db.prepare("SELECT COUNT(*) n FROM evidence WHERE employee_id=? AND date>=? AND substr(indicator,1,length(?)+1)=?||'|'").get(u.id, from, c, c).n])) : null;
+  return { criteria: qs2, ogolne: ASSISTANT.ogolne || [], goals, counts };
+}
+function rulesPrep(inp) {
+  const qs2 = inp.criteria.length ? inp.criteria.flatMap(c => c.pytania.slice(0, 2).map(q => `- (${c.name.toLowerCase()}) ${q}`)) : (Array.isArray(inp.ogolne) ? inp.ogolne : []).slice(0, 5).map(q => `- ${typeof q === 'string' ? q : q.q || ''}`);
+  return ['O co może zapytać przełożony:', ...qs2.slice(0, 10),
+    '', 'Co warto przygotować:', '- 1–2 konkretne sytuacje do każdego kryterium: sytuacja, Twoje działanie, rezultat.',
+    ...inp.goals.slice(0, 3).map(g => `- Postęp celu „${g.cel}”: co zrobiłeś, co blokuje, czego potrzebujesz.`),
+    '', 'O co Ty możesz zapytać:', '- Jakie są oczekiwania na kolejny okres i jak poznam, że je spełniam?', '- Jakiego wsparcia mogę oczekiwać (szkolenia, mentoring)?', '- Które moje działania warto powtarzać?'].join('\n');
+}
+route('POST', '/api/ai/prep', async (req, res, u) => {
+  if (u.role !== 'pracownik') return fail(res, 403, 'Przygotowanie do rozmowy jest dla pracownika.');
+  const inp = prepInput(u);
+  const input = redactNames(JSON.stringify(inp));
+  try {
+    const text = await llm(`Jesteś asystentem pracownika urzędu przed rozmową z przełożonym (rozmowa miesięczna lub oceniająca). Pomagasz się przygotować. ${RULES}
+Sekcje (nagłówki dokładnie tak): „O co może zapytać przełożony:” (wybierz i dopasuj pytania z bazy do kryteriów), „Co warto przygotować:” (konkretne przykłady sytuacji, postęp celów), „O co Ty możesz zapytać:”.
+Nie podawaj poziomów, punktów ani przewidywanej oceny. Nie oceniaj osoby. Opieraj się tylko na danych poniżej.`, `DANE (JSON):\n${input}`);
+    aiLog(null, u.id, 'prep', input, { text, source: 'ai' });
+    send(res, 200, { text, source: 'ai', model: AI_MODEL });
+  } catch {
+    const text = rulesPrep(inp);
+    aiLog(null, u.id, 'prep', input, { text, source: 'rules' });
+    send(res, 200, { text: text + '\n\n' + AI_RULE_NOTE, source: 'rules' });
+  }
+});
+
+// ---------- Brief do rozmowy (etap 6): wyszukiwanie faktów (serwer) + brief od modelu z odnośnikami do faktów ----------
+// JSON „kto co robił” buduje serwer z wpisów zrobionych przez ludzi (informacje, feedback, rozmowy miesięczne, kroki celów).
+// „Kto” to wyłącznie rola. Bez poziomów i punktów (także z feedbacku), bez wyniku. Model dostaje JSON po redactNames().
+const FACT_ROLE = { informacja: 'przełożony', rozmowa: 'przełożony (rozmowa miesięczna)' };
+function briefFacts(empId, from, to) {
+  const facts = [];
+  for (const e of db.prepare('SELECT * FROM evidence WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(empId, from, to)) {
+    const ind = INDICATORS.get(e.indicator);
+    facts.push({ id: `I${e.id}`, rodzaj: 'informacja', data: e.date, kryterium: ind?.k || null, wskaznik: ind?.text?.replace(/\s+/g, ' ') || null,
+      kto_zapisal: FACT_ROLE.informacja, sytuacja: e.situation, dzialanie: e.action, rezultat: e.result });
+  }
+  for (const f of db.prepare('SELECT * FROM feedback WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(empId, from, to)) {
+    const ind = INDICATORS.get(f.indicator);
+    facts.push({ id: `F${f.id}`, rodzaj: 'feedback', data: f.date, kryterium: ind?.k || null, wskaznik: ind?.text?.replace(/\s+/g, ' ') || null,
+      kto_zapisal: 'przełożony', zrodlo: RELATIONS[f.relation] || f.relation, zadanie: f.source, opis: f.justification });
+  }
+  for (const c of db.prepare("SELECT * FROM checkins WHERE employee_id=? AND month>=? AND month<=? AND status='odbyty' ORDER BY month").all(empId, from.slice(0, 7), to.slice(0, 7))) {
+    facts.push({ id: `C${c.id}`, rodzaj: 'rozmowa miesięczna', data: c.date || `${c.month}-01`, kryterium: null, kto_zapisal: FACT_ROLE.rozmowa,
+      co_zrobiono: c.done_text, co_wymaga_uwagi: c.attention_text, cel: c.goal_text });
+  }
+  for (const g of goalsOf(empId)) g.steps.forEach((x, i) => {
+    const d = (x.confirmed_at || x.reported_at || '').slice(0, 10);
+    if (!d || d < from || d > to) return;
+    facts.push({ id: `G${g.id}.${i + 1}`, rodzaj: 'krok celu', data: d, kryterium: null, cel: g.s, krok: x.t,
+      kto: x.confirmed_at ? 'pracownik (zgłoszenie), przełożony (potwierdzenie)' : 'pracownik (zgłoszenie, bez potwierdzenia)' });
+  });
+  return facts.sort((a, b) => (a.data < b.data ? -1 : 1));
+}
+function briefContext(u, empId, b) {
+  const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(empId, u.id);
+  const k = latestKickoff(empId);
+  const to = isDate(b.to) ? b.to : today();
+  const from = isDate(b.from) ? b.from : (isDate(draft?.period_from) ? draft.period_from : k?.ack_at ? k.ack_at.slice(0, 10) : `${+to.slice(0, 4) - 1}${to.slice(4)}`);
+  const criteria = draft ? JSON.parse(draft.data || '{}').criteria || [] : k ? [...mandKeysFor(k.typ), ...JSON.parse(k.extra_criteria || '[]')] : [];
+  return { from, to, criteria };
+}
+function buildBriefJson(empId, ctx) {
+  const facts = briefFacts(empId, ctx.from, ctx.to);
+  const crits = ctx.criteria.length ? ctx.criteria : [...new Set(facts.map(f => f.kryterium).filter(Boolean))];
+  const pokrycie = crits.map(k => { const fs = facts.filter(f => f.kryterium === k); return { kryterium: k, fakty: fs.length, miesiace: new Set(fs.map(f => f.data.slice(0, 7))).size }; });
+  return { okres: { od: ctx.from, do: ctx.to }, fakty: facts, pokrycie, braki: pokrycie.filter(p => !p.fakty).map(p => p.kryterium) };
+}
+// Po modelu: usuń odnośniki do nieistniejących faktów; w „Przykładach” zdanie bez odnośnika oznacz „(bez źródła)”
+function checkBriefRefs(text, ids) {
+  let section = '';
+  return String(text).split('\n').map(line => {
+    if (/^\s*(#+|\*\*|[A-ZĄĆĘŁŃÓŚŹŻ][^.:]{2,40}:?\s*$)/.test(line)) section = line;
+    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : ''));
+    if (/przykład/i.test(section) && /^\s*([-*•]|\d+[.)])\s+\S/.test(l) && !/\[[IFCG][0-9.]+\]/.test(l)) l += ' (bez źródła)';
+    return l;
+  }).join('\n');
+}
+function rulesBrief(json) {
+  const by = json.pokrycie.filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty);
+  const ex = by.slice(0, 3).map(p => { const f = json.fakty.find(x => x.kryterium === p.kryterium); return `- ${p.kryterium.toLowerCase()}: ${f.sytuacja || f.opis || ''} [${f.id}]`; });
+  return ['Tematy do omówienia:', ...by.slice(0, 3).map(p => `- ${p.kryterium.toLowerCase()} (${p.fakty} wpisów w ${p.miesiace} mies.)`),
+    '', 'Przykłady z okresu:', ...(ex.length ? ex : ['- brak wpisów w okresie']),
+    '', 'Pytania otwarte:', '- Która z tych sytuacji była dla Ciebie najważniejsza i dlaczego?', '- Co pomogło, a co przeszkadzało w osiągnięciu rezultatu?', '- Czego potrzebujesz w kolejnym okresie?',
+    '', 'Kryteria bez informacji:', ...(json.braki.length ? json.braki.map(k => `- ${k.toLowerCase()}`) : ['- brak'])].join('\n');
+}
+route('POST', '/api/ai/brief', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Brief do rozmowy jest dla przełożonego.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  if ((b.from && !isDate(b.from)) || (b.to && !isDate(b.to)) || (b.from && b.to && b.from > b.to)) return invalid(res, { from: 'Podaj poprawny okres (RRRR-MM-DD).' });
+  const json = buildBriefJson(emp.id, briefContext(u, emp.id, b));
+  const ids = new Set(json.fakty.map(f => f.id));
+  const input = redactNames(JSON.stringify(json));
+  try {
+    if (!json.fakty.length) throw new Error('no_facts');
+    const raw = await llm(`Jesteś asystentem przełożonego w urzędzie. Przygotowujesz brief do rozmowy z pracownikiem WYŁĄCZNIE na podstawie faktów z JSON. ${RULES}
+Sekcje (nagłówki dokładnie tak): „Tematy do omówienia:”, „Przykłady z okresu:”, „Pytania otwarte:”, „Kryteria bez informacji:”.
+W „Przykładach” każde zdanie kończ odnośnikiem do faktu w nawiasie kwadratowym, np. [I12]. Używaj tylko identyfikatorów z pola "id".
+Nie podawaj poziomów, punktów ani wyniku. Nie oceniaj osoby. Nie dodawaj niczego spoza faktów.`, `FAKTY (JSON):\n${input}`);
+    const brief = checkBriefRefs(raw, ids);
+    aiLog(null, u.id, 'brief', input, { text: brief, source: 'ai' });
+    send(res, 200, { brief, json, source: 'ai', model: AI_MODEL });
+  } catch {
+    const brief = rulesBrief(json);
+    aiLog(null, u.id, 'brief', input, { text: brief, source: 'rules' });
+    send(res, 200, { brief: brief + (json.fakty.length ? '\n\n' + AI_RULE_NOTE : ''), json, source: 'rules' });
+  }
+});
 route('POST', '/api/ai/talk', async (req, res, u) => {
   const b = await readJson(req);
   const ev = ownEval(u, Number(b.evalId));
@@ -1505,8 +1753,8 @@ route('POST', '/api/ai/development', async (req, res, u) => {
 // Asystent ogólny (czat): tylko system Kompas Kompetencji i procedury oceniania. Brak limitu zapytań.
 // Odpowiada wyłącznie na podstawie FAKTS (zweryfikowane zasady z aplikacji), bez danych ocen i osób.
 const CHAT_FACTS = `FAKTY O SYSTEMIE (jedyne źródło odpowiedzi):
-- System ma moduły: Start, Oceny (kreator oceny krok po kroku), Miesiąc (rozmowa miesięczna bez punktacji), Dowody (obserwacje przy wskaźnikach), Zestawienie, Wyniki zespołu, Dziennik (kto i kiedy działał), Ustawienia modułów. Nie ma sekcji „zadania”.
-- Role: przełożony (ocenia, widzi zespół) i pracownik (widzi swój profil, cele, dowody i swoje oceny po ich złożeniu).
+- System ma moduły: Start, Oceny (kreator oceny krok po kroku), Miesiąc (rozmowa miesięczna bez punktacji), Informacje (obserwacje przy wskaźnikach), Zestawienie, Wyniki zespołu, Dziennik (kto i kiedy działał), Ustawienia modułów. Nie ma sekcji „zadania”.
+- Role: przełożony (ocenia, widzi zespół) i pracownik (widzi swój profil, cele, informacje i swoje oceny po ich złożeniu).
 - Rodzaje ocen: pierwsza ocena (arkusz pierwszej oceny) oraz okresowa ocena kierownicza (Arkusz B) lub pozostałych (Arkusz C).
 - Kompetencje: 14 kompetencji, każda ma wskaźniki. Kryteria obowiązkowe są zawsze zaznaczone: dla B: zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja; dla C: wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja. Pozostałe kryteria wybiera się dodatkowo, do 3.
 - Punktacja wskaźnika: 1, 3, 5, 7 lub 9 punktów (B i C); przy pierwszej ocenie 3, 5 lub 7. Poziom ogólny z kryteriów: znacznie poniżej, poniżej, na poziomie, powyżej, znacznie powyżej oczekiwań.
@@ -1573,8 +1821,8 @@ route('POST', '/api/ai/chat', async (req, res, u) => {
   }
 });
 
-// Pytania do rozmowy miesięcznej: tylko nazwy wskaźników i liczby dowodów (bez treści dowodów i bez danych osoby).
-// Asystent niczego nie zapisuje w ocenach, dowodach ani check-inach.
+// Pytania do rozmowy miesięcznej: tylko nazwy wskaźników i liczby informacji (bez treści informacji i bez danych osoby).
+// Asystent niczego nie zapisuje w ocenach, informacjach ani check-inach.
 route('POST', '/api/ai/checkin', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
   const b = await readJson(req);
@@ -1585,10 +1833,10 @@ route('POST', '/api/ai/checkin', async (req, res, u) => {
   const lines = rows.map(r => `- ${INDICATORS.get(r.indicator)?.k.toLowerCase()} / ${INDICATORS.get(r.indicator)?.text.replace(/\n/g, ' ')}: ${r.n} dow.`).join('\n');
   const fallback = rows.length
     ? `Pytania do rozmowy (do 20 minut):\n- Co w ostatnim miesiącu poszło zgodnie z planem przy: ${rows.slice(0, 2).map(r => INDICATORS.get(r.indicator)?.k.toLowerCase()).join(', ')}?\n- Co utrudniało realizację zadań i czego potrzebujesz?\n- Jaki jeden cel ustalamy na kolejny miesiąc?`
-    : 'Brak dowodów w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
+    : 'Brak informacji w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
   try {
     const text = await llm(`Jesteś asystentem przełożonego w urzędzie przed krótką (do 20 minut) rozmową miesięczną. ${RULES} Zaproponuj 3 pytania otwarte o rezultaty zadań i potrzebne wsparcie. Nie pytaj o czas pracy, obecność, stan zdrowia ani cechy osobowości. Nie proponuj ocen ani punktów.`,
-      `Wskaźniki z dowodami w miesiącu (liczba dowodów):\n${lines || 'brak'}`);
+      `Wskaźniki z informacjami w miesiącu (liczba informacji):\n${lines || 'brak'}`);
     audit(u.id, 'ai_checkin', `${emp.id}:${month}`); aiLog(null, u.id, 'checkin', lines, { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
@@ -1614,7 +1862,7 @@ function supportMetrics() {
   const base = { kMin: K_MIN, managers, suppressed: managers < K_MIN };
   if (base.suppressed) return base;
   const submitAt = new Map(db.prepare("SELECT target, MIN(at) at FROM audit WHERE action='submit_eval' GROUP BY target").all().map(r => [r.target, r.at]));
-  // 3. Ocenianie: w ilu miesiącach okresu jest co najmniej jeden dowód (nie liczba dowodów – nie zachęcamy do nadzoru)
+  // 3. Ocenianie: w ilu miesiącach okresu jest co najmniej jedną informację (nie liczba informacji – nie zachęcamy do nadzoru)
   const coverage = [];
   for (const e of evals) {
     if (!isDate(e.period_from) || !isDate(e.period_to) || e.period_from > e.period_to) continue;

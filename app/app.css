@@ -379,3 +379,25 @@ details.comp>.comp-body{padding:0 16px 16px;border-top:1px solid var(--ln)}
 .ev-list{list-style:none;padding:0;margin:0}
 .ev-list li{padding:8px 0;border-top:1px solid var(--ln);font-size:14px}
 .ev-list li:first-child{border-top:0}
+/* Cele jako kafelki (moduł przełożonego) */
+.goal-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));margin-bottom:16px}
+.goal-tile{border:1px solid var(--ln);background:var(--card);padding:16px;display:flex;flex-direction:column;gap:6px}
+.goal-tile:hover{border-color:var(--navy)}
+.goal-tile.is-done{background:var(--ok-bg)}
+.goal-tile .row{align-items:flex-start;gap:8px}
+.goal-t{font-family:var(--font-head);font-size:16px;line-height:1.3}
+.seg i.rep{background:repeating-linear-gradient(45deg,var(--navy) 0 3px,var(--sky) 3px 6px)}
+details.goal-steps{margin-top:6px}
+details.goal-steps>summary{cursor:pointer;color:var(--navy);font-weight:700;font-size:14px}
+.goal-steps .steps li{justify-content:space-between;align-items:center}
+.goal-steps .st-t{flex:1;min-width:0}
+.goal-steps .st-confirmed .st-t b{color:var(--mu)}
+/* Trendy (etap 5): schody potwierdzonych kroków, kropki = rozmowy miesięczne */
+.trend-svg{width:100%;max-width:240px;height:46px;display:block;margin:4px 0}
+.trend-svg path{fill:none;stroke:var(--navy);stroke-width:2}
+.trend-svg circle{fill:var(--mu)}
+/* Brief do rozmowy (etap 6) */
+.tabs{display:flex;gap:8px;margin:8px 0 12px}
+.brief-text{white-space:pre-line}
+.brief-text a{font-weight:700}
+.json-out{max-height:50vh;overflow:auto;background:var(--sky);padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word}

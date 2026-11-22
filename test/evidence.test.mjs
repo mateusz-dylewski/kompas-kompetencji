@@ -75,7 +75,7 @@ test('złożenie oceny okresowej wymaga dowodu albo „brak podstaw do oceny” 
   assert.ok(draft, 'brak szkicu w danych demo');
   const r1 = await mgr.post(`/api/evals/${draft.id}/submit`);
   assert.equal(r1.status, 422);
-  const noEv = r1.body.missing.filter(m => /bez dowodu/.test(m));
+  const noEv = r1.body.missing.filter(m => /bez informacji/.test(m));
   assert.equal(noEv.length, 2, JSON.stringify(r1.body.missing));
   // Jeden wskaźnik: jawna adnotacja „brak podstaw”, drugi: nowy dowód z okresu oceny
   const ratings = draft.data.ratings;
