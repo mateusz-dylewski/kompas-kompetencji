@@ -616,3 +616,7 @@ details.comp>summary .muted{white-space:nowrap}
 .chat-ex .btn{white-space:normal;text-align:left}
 .chat-txt h3,.chat-txt h4{font-size:15px;margin:8px 0 4px}.chat-txt ul{margin:4px 0;padding-left:20px}.chat-txt p{margin:4px 0}
 .chat-txt{white-space:normal}
+.evals-head{align-items:center;gap:12px;margin-bottom:8px}
+.evals-head p{margin:0;flex:1 1 260px}
+/* Status asystenta w panelu bocznym: dłuższy napis (tryb bez modelu) zawija się zamiast wychodzić poza panel */
+.side .foot .pill{white-space:normal;max-width:100%;line-height:1.3}

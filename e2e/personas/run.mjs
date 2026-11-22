@@ -173,8 +173,9 @@ const submitStep = async p => {
   if (!(await p.locator('[data-act="submitEval"]').count())) return { submitOk: null, missing: [], note: 'brak przycisku „Złóż ocenę” (ocena już złożona lub brak szkicu)' };
   const dis = await p.locator('[data-act="submitEval"]').first().isDisabled();
   if (dis) { const miss = await p.evaluate(() => [...document.querySelectorAll('#view .note, #view .warn, #view li')].map(x => x.innerText.replace(/\s+/g, ' ').slice(0, 120)).filter(t => /brak|uzupełnij|wymagan/i.test(t)).slice(0, 15)); return { submitOk: false, submitDisabled: true, missing: miss }; }
-  p.once('dialog', d => d.accept());
   await p.locator('[data-act="submitEval"]').first().click();
+  // Potwierdzenie w oknie systemu („Złożyć ocenę?” → „Złóż ocenę”)
+  await p.locator('#acYes').click({ timeout: 4000 }).catch(() => {});
   await p.waitForTimeout(1200);
   const left = await p.locator('[data-act="submitEval"]').count();
   const toast = await p.evaluate(() => (document.querySelector('.toast, [role=status], [role=alert]')?.innerText || '').slice(0, 200));

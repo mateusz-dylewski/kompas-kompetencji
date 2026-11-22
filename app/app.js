@@ -157,6 +157,118 @@
       });
     }, "kTitle");
   }
+  // Potwierdzenie w oknie systemu (zamiast okienka przeglądarki „localhost mówi…”); true po „Potwierdź”
+  function askConfirm({ title, text, ok = "Potwierdź", cancel = "Anuluj" }) {
+    return new Promise(resolve => {
+      openModal(`<h2 id="acTitle">${esc(title)}</h2><p>${esc(text)}</p>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">${esc(cancel)}</button><button type="button" class="btn" id="acYes">${esc(ok)}</button></div>`, () => {
+        $("#acYes").focus();
+        $("#acYes").addEventListener("click", () => { closeModal(); resolve(true); });
+      }, "acTitle");
+    });
+  }
+  // Krótkie pole tekstowe w oknie systemu (zamiast okienka przeglądarki); zwraca tekst albo nic po „Anuluj”
+  function askText({ title, label, hint = "", min = 1, max = 1000, ok = "Zapisz", multiline = false }) {
+    return new Promise(resolve => {
+      const field = multiline ? `<textarea id="atIn" minlength="${min}" maxlength="${max}" aria-describedby="atHint atErr"></textarea>` : `<input id="atIn" type="text" minlength="${min}" maxlength="${max}" autocomplete="off" aria-describedby="atHint atErr">`;
+      openModal(`<h2 id="atTitle">${esc(title)}</h2><form id="atForm" novalidate>
+        <label class="f" for="atIn">${esc(label)}</label>${field}<p class="muted" id="atHint">${esc(hint)}</p><div class="err" id="atErr" role="alert"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">${esc(ok)}</button></div></form>`, () => {
+        $("#atIn").focus();
+        $("#atForm").addEventListener("submit", e => {
+          e.preventDefault(); const v = $("#atIn").value.trim();
+          if (v.length < min) { $("#atErr").textContent = min > 1 ? `Wpisz co najmniej ${min} znaków.` : "Uzupełnij pole."; $("#atIn").focus(); return; }
+          closeModal(); resolve(v);
+        });
+      }, "atTitle");
+    });
+  }
+  // Nowa ocena: okno w stylu systemu (zamiast okienek przeglądarki). Podpowiedzi z rozmowy rozpoczynającej,
+  // okres DD.MM.RRRR, reguła 6 miesięcy z wyjątkiem i uzasadnieniem (trafia do dziennika).
+  function newEvalModal(empId) {
+    const team = S.dash.team || [];
+    const addMonths = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const suggest = t => {
+      const k = t && t.kickoff && t.kickoff.ackAt && !t.kickoff.evalId ? t.kickoff : null;
+      const from = k ? k.ackAt.slice(0, 10) : todayIso;
+      const to = t && t.nextDue && t.nextDue > from ? t.nextDue : addMonths(from, 12);
+      return { typ: k ? k.typ : "", from, to, k };
+    };
+    const emp0 = team.find(t => t.id === empId) || null;
+    const sg = suggest(emp0);
+    const info = t => {
+      if (!t) return `<p class="muted">Wybierz pracownika.</p>`;
+      if (t.status === "draft") return `<div class="note warn">${first(t.name)} ma już szkic oceny. Dokończ go zamiast tworzyć nowy. <button type="button" class="btn sm" data-ne-open="${t.evalId}">Dokończ szkic</button></div>`;
+      const k = suggest(t).k;
+      return k ? `<p class="muted">Rozmowa rozpoczynająca z ${esc(isoToPl(k.date))}, zapoznanie ${esc(isoToPl(k.ackAt.slice(0, 10)))}: arkusz ${esc(k.typ)} i kryteria dodatkowe przejdą do oceny, okres liczy się od dnia zapoznania.</p>`
+        : `<p class="muted">Brak zapoznanej rozmowy rozpoczynającej – kryteria dodatkowe możesz dodać w kreatorze.</p>`;
+    };
+    openModal(`
+      <h2 id="neTitle">Nowa ocena</h2>
+      <p>Utworzymy szkic oceny i otworzymy kreator. Szkic możesz zapisać i wrócić do niego później.</p>
+      <form id="neForm" novalidate>
+        <label class="f" for="neEmp">Pracownik</label>
+        <select id="neEmp" required><option value="">Wybierz pracownika</option>${team.map(t => `<option value="${t.id}"${emp0 && t.id === emp0.id ? " selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
+        <div id="neInfo" aria-live="polite">${info(emp0)}</div>
+        <fieldset class="plain"><legend class="f">Rodzaj oceny</legend>
+          <label class="choice"><input type="radio" name="neTyp" value="pierwsza"${sg.typ === "pierwsza" ? " checked" : ""}><span>Pierwsza ocena (nowy pracownik)</span></label>
+          <label class="choice"><input type="radio" name="neTyp" value="B"${sg.typ === "B" ? " checked" : ""}><span>Ocena okresowa – arkusz B (osoby kierujące zespołem)</span></label>
+          <label class="choice"><input type="radio" name="neTyp" value="C"${sg.typ === "C" ? " checked" : ""}><span>Ocena okresowa – arkusz C (pozostałe stanowiska)</span></label></fieldset>
+        <div class="grid two">
+          <div><label class="f" for="neFrom">Okres oceny od</label>${dateFieldHtml("neFrom", sg.from, "required")}</div>
+          <div><label class="f" for="neTo">Okres oceny do</label>${dateFieldHtml("neTo", sg.to, "required")}</div>
+        </div>
+        <div id="neExc" hidden>
+          <div class="note warn" id="neExcMsg"></div>
+          <label class="f" for="neReason">Uzasadnienie wyjątku (min. 10 znaków, trafi do dziennika)</label>
+          <textarea id="neReason" minlength="10" maxlength="1000"></textarea>
+        </div>
+        <div class="err" id="neErr" role="alert"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit" id="neSubmit">Utwórz szkic i otwórz kreator</button></div>
+      </form>`, () => {
+      const hF = bindDate("neFrom"), hT = bindDate("neTo");
+      const bindOpen = () => document.querySelectorAll("[data-ne-open]").forEach(b => b.addEventListener("click", async () => { closeModal(); await openWizard(+b.dataset.neOpen); }));
+      bindOpen();
+      $("#neEmp").addEventListener("change", e => {
+        const t = team.find(x => x.id === +e.target.value) || null, g = suggest(t);
+        $("#neInfo").innerHTML = info(t); bindOpen();
+        document.querySelectorAll('[name="neTyp"]').forEach(r => { r.checked = r.value === g.typ; });
+        $("#neFrom").value = isoToPl(g.from); $("#neTo").value = isoToPl(g.to);
+        $("#neExc").hidden = true; $("#neErr").textContent = "";
+      });
+      $("#neForm").addEventListener("submit", async e => {
+        e.preventDefault(); $("#neErr").textContent = "";
+        const t = team.find(x => x.id === +$("#neEmp").value);
+        if (!t) { $("#neErr").textContent = "Wybierz pracownika."; $("#neEmp").focus(); return; }
+        if (t.status === "draft") { $("#neErr").textContent = "Ta osoba ma już szkic oceny – użyj przycisku „Dokończ szkic”."; return; }
+        const typ = document.querySelector('[name="neTyp"]:checked')?.value;
+        if (!typ) { $("#neErr").textContent = "Wybierz rodzaj oceny."; document.querySelector('[name="neTyp"]').focus(); return; }
+        const from = hF.iso(); if (!from) { $("#neFrom").focus(); return; }
+        const to = hT.iso(); if (!to) { $("#neTo").focus(); return; }
+        if (from > to) { $("#neErr").textContent = "Koniec okresu nie może być przed początkiem."; $("#neTo").focus(); return; }
+        const body = { employeeId: t.id, typ, periodFrom: from, periodTo: to };
+        if (!$("#neExc").hidden) {
+          const reason = $("#neReason").value.trim();
+          if (reason.length < 10) { $("#neErr").textContent = "Uzasadnij wyjątek (min. 10 znaków)."; $("#neReason").focus(); return; }
+          body.exception = { reason };
+        }
+        $("#neSubmit").disabled = true;
+        try {
+          const r = await api("POST", "/api/evals", body);
+          closeModal(); await refreshData();
+          toast(r.earlyException ? "Utworzono szkic oceny (wyjątek od reguły 6 miesięcy zapisany w dzienniku)." : "Utworzono szkic oceny.");
+          await openWizard(r.id);
+        } catch (ex) {
+          if (ex.data?.code === "too_early") {
+            $("#neExc").hidden = false;
+            $("#neExcMsg").textContent = `Od poprzedniej oceny okresowej (${isoToPl(ex.data.prevDate || "")}) musi upłynąć 6 miesięcy – najwcześniej ${isoToPl(ex.data.earliest || "")}. Zmień okres albo zapisz wyjątek z uzasadnieniem.`;
+            $("#neReason").focus();
+          } else $("#neErr").textContent = ex.data?.fields ? Object.values(ex.data.fields).join(" ") : errMsg(ex);
+        } finally { const b = $("#neSubmit"); if (b) b.disabled = false; }
+      });
+    }, "neTitle");
+  }
   // Dobrowolna ankieta po złożeniu oceny: zapisywana anonimowo (tylko wartość i miesiąc), do metryk zbiorczych
   const surveyModal = evalId => openModal(`
       <p class="ok-banner" role="status">${KK_ICON("check")}<span>Ocena złożona. Pracownik zobaczy ją w swoim panelu.</span></p>
@@ -888,7 +1000,8 @@
   }
   function evalsList(isMgr) {
     const names = Object.fromEntries((S.dash.team || []).map(t => [t.id, t.name]));
-    if (!S.evals.length) return `<div class="card"><p class="muted">Brak ocen do wyświetlenia.</p></div>`;
+    const newBtn = isMgr ? `<div class="row evals-head"><p class="muted">Szkic możesz zapisać i wrócić do niego później. Złożoną ocenę pracownik zobaczy w swoim panelu.</p><button class="btn" data-act="newEval">${KK_ICON("plus")}<span>Nowa ocena</span></button></div>` : "";
+    if (!S.evals.length) return `<div class="card">${newBtn}<p class="muted">Brak ocen do wyświetlenia.</p></div>`;
     const rows = S.evals.map(e => {
       const edit = isMgr && e.status === "draft";
       return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
@@ -896,7 +1009,7 @@
         ${isMgr ? `<td>${e.status === "draft" ? "—" : e.ackAt ? `zapoznano ${esc(plDT(e.ackAt).slice(0, 10))}` : "pracownik jeszcze nie potwierdził"}</td>` : ""}
         <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}" aria-label="Podgląd oceny – ${first(isMgr ? names[e.employeeId] : S.user.name)}"`)}</td></tr>`;
     }).join("");
-    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th>${isMgr ? "<th>Zapoznanie</th>" : ""}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    return `<div class="card">${newBtn}<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th>${isMgr ? "<th>Zapoznanie</th>" : ""}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   // ---------- Przełożony ----------
@@ -1665,29 +1778,11 @@
   }
   const actions = {
     logout: async () => { await api("POST", "/api/logout").catch(() => {}); S.user = null; S.view = "home"; renderLogin(); },
-    newEval: async (b) => {
-      const emp = (S.dash.team || []).find(t => t.id === +b.dataset.emp);
-      // Po rozmowie rozpoczynającej: arkusz z rozmowy i okres od dnia zapoznania z kryteriami
-      const k = emp.kickoff && emp.kickoff.ackAt && !emp.kickoff.evalId ? emp.kickoff : null;
-      const typ = prompt("Rodzaj oceny: pierwsza, B lub C", k ? k.typ : "B");
-      if (!typ || !["pierwsza", "B", "C"].includes(typ.trim())) return toast("Nieprawidłowy rodzaj oceny.");
-      const from = prompt(k ? "Okres od (RRRR-MM-DD) – dzień zapoznania z kryteriami" : "Okres od (RRRR-MM-DD)", k ? k.ackAt.slice(0, 10) : "2026-01-01"), to = prompt("Okres do (RRRR-MM-DD)", "2026-06-30");
-      const body = { employeeId: emp.id, typ: typ.trim(), periodFrom: from, periodTo: to };
-      let r;
-      try { r = await api("POST", "/api/evals", body); }
-      catch (e) {
-        if (e.data?.code !== "too_early") throw e;
-        // Reguła 6 miesięcy: wyjątek tylko z uzasadnieniem (trafia do dziennika)
-        const reason = prompt(`${e.message}\n\nUzasadnienie wyjątku (min. 10 znaków) albo Anuluj:`);
-        if (!reason) return toast("Nie utworzono oceny.");
-        r = await api("POST", "/api/evals", { ...body, exception: { reason } });
-      }
-      toast(r.earlyException ? "Utworzono szkic oceny (wyjątek od reguły 6 miesięcy zapisany w dzienniku)." : "Utworzono szkic oceny."); await openWizard(r.id);
-    },
+    newEval: b => newEvalModal(b.dataset.emp ? +b.dataset.emp : null),
     openEval: b => openWizard(+b.dataset.id),
     readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.readFocus = b.dataset.comp || null; S.view = "evalView"; render(); window.scrollTo(0, 0); },
     submitEval: async () => {
-      if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
+      if (!(await askConfirm({ title: "Złożyć ocenę?", text: "Po złożeniu oceny nie można już edytować. Pracownik zobaczy ją w swoim panelu i potwierdzi zapoznanie.", ok: "Złóż ocenę" }))) return;
       try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; render(); surveyModal(S.cur.id); }
       catch (e) { toast(errMsg(e)); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
     },
@@ -1722,9 +1817,9 @@
     },
     toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); } },
     addStep: async b => {
-      const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
-      if (!t || !t.trim()) return;
-      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); }
+      const t = await askText({ title: "Nowy krok celu", label: "Krok", hint: "Coś, co da się sprawdzić, np. „Wysłany raport do akceptacji”.", min: 3, max: 200, ok: "Dodaj krok" });
+      if (!t) return;
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t }); await refreshGoals(); toast("Dodano krok."); } catch (ex) { toast(errMsg(ex)); }
     },
     goalReport: async b => {
       try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, reported: b.dataset.val === "1" }); toast(b.dataset.val === "1" ? "Zgłoszono wykonanie kroku. Przełożony je potwierdzi." : "Cofnięto zgłoszenie."); await refreshGoals(); }
@@ -1810,7 +1905,7 @@
     },
     kickoff: b => kickoffModal(+b.dataset.emp),
     ackKickoff: async b => {
-      if (!confirm("Potwierdzasz zapoznanie z obowiązkami, kryteriami i celami na ten okres oceny?")) return;
+      if (!(await askConfirm({ title: "Potwierdzić zapoznanie?", text: "Potwierdzasz, że znasz obowiązki, kryteria i cele ustalone na ten okres oceny. Od dziś liczy się okres oceny.", ok: "Potwierdzam zapoznanie" }))) return;
       try { await api("POST", `/api/kickoffs/${b.dataset.id}/acknowledge`); toast("Zapisano zapoznanie."); await refreshData(); render(); }
       catch (ex) { toast(errMsg(ex)); }
     },
@@ -1827,14 +1922,14 @@
       comp.w.forEach((_, wi) => {
         const id = k + "|" + wi, list = (c.evidence || []).filter(e => e.indicator === id);
         if (!list.length || (c.ratings[id] && (c.ratings[id].ex || "").trim())) return;
-        c.ratings[id] = { ...(c.ratings[id] || {}), ex: list.slice(0, 2).map(e => `${e.date}: ${e.situation} – ${e.action} → ${e.result}`).join("\n") }; n++;
+        c.ratings[id] = { ...(c.ratings[id] || {}), ex: list.slice(0, 2).map(e => `${isoToPl(e.date)}: ${e.situation} – ${e.action} → ${e.result}`).join("\n") }; n++;
       });
       c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z informacjami.");
     },
     earlyException: async () => {
-      const reason = prompt("Uzasadnienie wyjątku od reguły 6 miesięcy (min. 10 znaków). Wpis trafi do dziennika:");
+      const reason = await askText({ title: "Wyjątek od reguły 6 miesięcy", label: "Uzasadnienie wyjątku", hint: "Minimum 10 znaków. Wpis trafi do dziennika zdarzeń.", min: 10, ok: "Zapisz wyjątek", multiline: true });
       if (!reason) return;
-      await api("POST", `/api/evals/${S.cur.id}/early-exception`, { reason }); await refreshMissing(); toast("Zapisano wyjątek."); render();
+      try { await api("POST", `/api/evals/${S.cur.id}/early-exception`, { reason }); await refreshMissing(); toast("Zapisano wyjątek."); render(); } catch (ex) { toast(errMsg(ex)); }
     },
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
@@ -1848,7 +1943,7 @@
     editEvidence: b => { const ev = (S.evidence || []).find(x => x.id === +b.dataset.id); if (ev) evidenceModal(ev, {}, b.dataset.after === "month" ? () => loadMonth() : undefined); },
     decideObjection: async b => {
       const result = b.dataset.result;
-      if (!confirm(result === "uwzglednione" ? "Uwzględnić sprzeciw? Ocena wróci do poprawy, a poprzednia wersja zostanie zapisana." : "Nie uwzględniać sprzeciwu? Pracownik zobaczy decyzję.")) return;
+      if (!(await askConfirm(result === "uwzglednione" ? { title: "Uwzględnić sprzeciw?", text: "Ocena wróci do poprawy, a poprzednia wersja zostanie zapisana.", ok: "Uwzględnij sprzeciw" } : { title: "Nie uwzględniać sprzeciwu?", text: "Pracownik zobaczy decyzję w swoim panelu.", ok: "Nie uwzględniaj" }))) return;
       try {
         const r = await api("POST", `/api/evals/${b.dataset.id}/objection-decision`, { result });
         toast(r.reopened ? "Ocena wróciła do poprawy." : "Zapisano decyzję.");

@@ -60,7 +60,7 @@ const layoutCheck = p => p.evaluate(() => {
 });
 
 const report = [];
-async function run(role, vpName, vp, plan) {
+async function run(role, vpName, vp, plan, base = srv.base) {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: vp, isMobile: vp.width < 600, hasTouch: vp.width < 600, locale: 'pl-PL' });
   const p = await ctx.newPage();
@@ -69,7 +69,7 @@ async function run(role, vpName, vp, plan) {
   const errors = [];
   p.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)); });
   p.on('pageerror', e => errors.push(String(e).slice(0, 200)));
-  await p.goto(srv.base, { waitUntil: 'networkidle' });
+  await p.goto(base, { waitUntil: 'networkidle' });
   for (const [name, fn] of plan) {
     let err = null;
     try { await fn(p, vpName); await p.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {}); await p.waitForTimeout(450); }
@@ -106,6 +106,8 @@ const MGR = [
   ['okno-nowy-pracownik', act('addEmp')],
   ['zamknij-3', close],
   ['oceny', nav('evals')],
+  ['okno-nowa-ocena', act('newEval')],
+  ['zamknij-nowa-ocena', close],
   ['kreator-krok-1', act('openEval')],
   ...[2, 3, 4, 5, 6, 7, 8].map(n => [`kreator-krok-${n}`, async p => { const b = p.locator('[data-wiz="next"]:visible'); if (await b.count()) await b.first().click(); }]),
   ['oceny-po-zlozeniu', nav('evals')],
@@ -141,6 +143,13 @@ for (const [vpName, vp] of [['desktop', { width: 1440, height: 900 }], ['mobile'
   await run('pracownik', vpName, vp, EMP);
 }
 await srv.stop(); mock.close();
+// Bez modelu AI (tryb podpowiedzi z reguł): napisy statusu i komunikaty nie mogą wychodzić poza układ
+const srvOff = await startServer({ KK_AI_URL: 'http://127.0.0.1:9' });
+for (const [vpName, vp] of [['desktop', { width: 1440, height: 900 }], ['mobile', { width: 390, height: 844 }]]) {
+  await run('bez-AI-przelozony', vpName, vp, [['start', login('przelozony@demo.kk')], ['oceny', nav('evals')], ['asystent-ai', nav('ai')], ['asystent-ai-pytanie', async p => { await act('aiAsk')(p); await p.waitForTimeout(1200); }]], srvOff.base);
+  await run('bez-AI-pracownik', vpName, vp, [['start', login('pracownik1@demo.kk')], ['przygotuj-sie', act('aiPrep')], ['profil', nav('profile')]], srvOff.base);
+}
+await srvOff.stop();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const bad = report.filter(r => r.error || r.issues.length);
 console.log(`ekrany: ${report.filter(r => r.screen !== '(konsola)').length}, z problemami: ${bad.length}`);
