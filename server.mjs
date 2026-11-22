@@ -123,6 +123,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS prep_survey(id INTEGER PRIMARY KEY, rating I
 try { db.exec('ALTER TABLE evals ADD COLUMN survey_done INTEGER NOT NULL DEFAULT 0'); } catch (_) { /* już istnieje */ }
 // Cele SMART: postęp z kroków (sprawdzalnych), a nie z suwaka – [{ t, done }]; progress = odsetek wykonanych kroków
 try { db.exec("ALTER TABLE goals ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* już istnieje */ }
+// Plan rozwoju i komunikat do pracownika pisze przełożony (etap 4); każda zmiana = nowy wiersz (historia wersji)
+db.exec(`CREATE TABLE IF NOT EXISTS dev_plans(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, author_id INTEGER NOT NULL,
+  plan TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)`);
 // Cele wyznacza przełożony (created_by); NULL = cel sprzed zmiany, założony przez pracownika
 try { db.exec('ALTER TABLE goals ADD COLUMN created_by INTEGER'); } catch (_) { /* już istnieje */ }
 // Migracja kroków { t, done } → { t, reported_at, confirmed_at, confirmed_by } (wykonane = potwierdzone przy migracji)
@@ -796,6 +799,7 @@ route('GET', '/api/dashboard', async (req, res, u) => {
       role: u.role, manager: manager?.name || null, upcoming, nextDue: tc.nextDue, dueReason: tc.dueReason, kickoff: kickoffRow(latestKickoff(u.id)),
       evals: evals.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, updated: e.updated })),
       latestScores: latest ? scoreEval(latest) : null,
+      devPlan: devPlansOf(u.id)[0] || null,
       latestDev: devEval?.data?.dev || '',
       latestDevEval: devEval ? { id: devEval.id, typ: devEval.typ, status: devEval.status, periodFrom: devEval.period_from, periodTo: devEval.period_to } : null,
       latestEvalId: latest?.id ?? null,
@@ -1063,6 +1067,29 @@ route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
 });
 
 // Cele SMART (pracownik)
+// ---------- Plan rozwoju i komunikat (pisze przełożony, pracownik czyta) ----------
+const devPlanRow = r => r && ({ id: r.id, plan: r.plan, message: r.message, created: r.created, author: 'przełożony' });
+const devPlansOf = empId => db.prepare('SELECT * FROM dev_plans WHERE employee_id=? ORDER BY id DESC').all(empId).map(devPlanRow);
+route('GET', '/api/devplan', async (req, res, u) => {
+  const empId = u.role === 'pracownik' ? u.id : teamMember(u, qs(req).get('employeeId'))?.id;
+  if (!empId) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const list = devPlansOf(empId);
+  send(res, 200, { current: list[0] || null, history: list.slice(1, 20) });
+});
+route('PUT', '/api/devplan', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Plan rozwoju pisze przełożony.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const plan = str(b.plan, 3000), message = str(b.message, 1000);
+  if (plan.length < 10) return invalid(res, { plan: 'Opisz plan rozwoju (min. 10 znaków).' }, 'Opisz plan rozwoju (min. 10 znaków).');
+  const prev = devPlansOf(emp.id)[0] || null;
+  if (prev && prev.plan === plan && prev.message === message) return send(res, 200, { current: prev, changed: false });
+  const id = db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emp.id, u.id, plan, message, now()).lastInsertRowid;
+  audit(u.id, 'update_devplan', `devplan:${emp.id}`, prev ? { plan: prev.plan, message: prev.message } : null, { plan, message });
+  send(res, 200, { current: devPlanRow(db.prepare('SELECT * FROM dev_plans WHERE id=?').get(id)), changed: true });
+});
+
 // Cele SMART wyznacza przełożony (moduł przełożonego, etap 3). Każdy krok jest sprawdzalny:
 // pracownik ZGŁASZA wykonanie, przełożony POTWIERDZA. Postęp = potwierdzone kroki / wszystkie (deterministycznie).
 // Krok: { t, reported_at, confirmed_at, confirmed_by }. Cel bez kroków (sprzed zmian) ma tylko stan zrealizowany / w toku.

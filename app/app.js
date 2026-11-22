@@ -224,13 +224,26 @@
   // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
   async function goalsModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
-    const goals = (await api("GET", `/api/goals?employeeId=${empId}`)).goals;
+    const [goals, dp] = await Promise.all([api("GET", `/api/goals?employeeId=${empId}`).then(r => r.goals), api("GET", `/api/devplan?employeeId=${empId}`)]);
     S.goalsCtx = { empId, where: "modal" };
-    openModal(`<h2 id="gmTitle">Cele – ${first(emp ? emp.name : "")}</h2>
+    openModal(`<h2 id="gmTitle">Cele i plan rozwoju – ${first(emp ? emp.name : "")}</h2>
       <p class="muted">Pracownik zgłasza wykonanie kroku, Ty potwierdzasz. Postęp liczy tylko potwierdzone kroki.</p>
       <div class="btns" style="justify-content:flex-start;margin-top:0;border:0;padding-top:0"><button class="btn" data-act="newGoalFor" data-emp="${empId}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
       ${goalTiles(goals, "mgr")}
-      <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`, null, "gmTitle");
+      <h3>Plan rozwoju i komunikat</h3>
+      <p class="muted">Pracownik zobaczy to w swoim profilu („Plan rozwoju”). Każda zmiana zostaje w historii i w dzienniku.${dp.current ? ` Ostatnia zmiana: ${esc(isoToPl(dp.current.created.slice(0, 10)))}.` : ""}</p>
+      <form id="dpForm" novalidate>
+        <label class="f" for="dpPlan">Plan rozwoju (działania, szkolenia, terminy)</label><textarea id="dpPlan" required minlength="10" maxlength="3000">${esc(dp.current?.plan || "")}</textarea>
+        <label class="f" for="dpMsg">Komunikat do pracownika (opcjonalnie)</label><textarea id="dpMsg" maxlength="1000">${esc(dp.current?.message || "")}</textarea>
+        <div class="field-err" id="dpErr" role="alert"></div>
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button><button class="btn" type="submit">Zapisz plan</button></div>
+      </form>`, () => {
+      $("#dpForm").addEventListener("submit", async e => {
+        e.preventDefault();
+        try { const r = await api("PUT", "/api/devplan", { employeeId: empId, plan: $("#dpPlan").value, message: $("#dpMsg").value }); $("#dpErr").textContent = ""; toast(r.changed ? "Zapisano plan rozwoju." : "Bez zmian."); }
+        catch (ex) { $("#dpErr").textContent = ex.message; }
+      });
+    }, "gmTitle");
   }
   async function loadMonthGoals() {
     const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
@@ -246,6 +259,10 @@
   }
   // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
   function devPlan(d, items) {
+    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<p style="margin:6px 0 0;white-space:pre-line">${esc(d.devPlan.plan)}</p>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
+    return mp + devPlanFromEval(d, items, !!d.devPlan);
+  }
+  function devPlanFromEval(d, items, hasPlan) {
     const weak = items.slice(0, 3).map(([k]) => k);
     const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
     if (d.latestDev) {
@@ -254,6 +271,7 @@
         <p>${esc(d.latestDev)}</p>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
+    if (hasPlan) return areas;
     const last = d.evals[0];
     const why = !last ? "Nie masz jeszcze złożonej oceny." : last.status === "submitted" ? "Ocena jest złożona – wnioski przełożony zapisze po rozmowie oceniającej." : "Przełożony nie zapisał wniosków rozwojowych w ostatniej ocenie.";
     return `<p class="muted">${why} Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej.</p>${areas}
