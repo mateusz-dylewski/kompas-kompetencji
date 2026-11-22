@@ -521,15 +521,6 @@
     lastPageKey = ""; window.scrollTo(0, 0);
     $("#root").innerHTML = `
       <div class="login"><div class="login-main"><div class="login-grid">
-      <section class="login-val" aria-labelledby="valH">
-        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
-        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
-        <ol class="val-list">
-          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
-          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
-          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
-        </ol>
-      </section>
       <div class="login-card">
         <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">System wspierający ocenę okresową w służbie cywilnej</div></div></div>
         <div class="demo-row" role="group" aria-label="Szybkie logowanie na konto prezentacyjne">
@@ -571,15 +562,6 @@
   const PASS_HINT = "Co najmniej 12 znaków, bez nazwy konta i popularnych haseł.";
   const authCard = (title, sub, body) => `
       <div class="login"><div class="login-main"><div class="login-grid">
-      <section class="login-val" aria-labelledby="valH">
-        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
-        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
-        <ol class="val-list">
-          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
-          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
-          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
-        </ol>
-      </section>
       <div class="login-card">
         <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>${esc(title)}</h1><div class="muted">${esc(sub)}</div></div></div>
         ${body}
