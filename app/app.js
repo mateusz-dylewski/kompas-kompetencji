@@ -1471,13 +1471,27 @@
           ${evidenceMini(id)}</div>`;
       }).join("")}${isS2(c.typ, c.data) ? partialCard(comp) : ""}`;
   }
-  // Ocena cząstkowa za kryterium – przyznaje oceniający (skala 1/3/5/7/9), system jej nie podpowiada
+  // Sugerowany poziom kryterium: średnia poziomów wybranych zachowań (wskaźników) zaokrąglona do skali 1/3/5/7/9.
+  // Tylko podpowiedź – ocenę cząstkową zawsze wybiera przełożony (przycisk „Przyjmij” albo inny poziom).
+  const suggestLevel = dist => { const v = (dist || []).filter(x => typeof x === "number"); if (!v.length) return null;
+    const avg = v.reduce((a, x) => a + x, 0) / v.length; const pts = PTS5.reduce((b, p) => (Math.abs(p - avg) < Math.abs(b - avg) ? p : b), PTS5[0]); return { avg, pts }; };
+  function suggestBox(k, dist, cur, ro) {
+    const sg = suggestLevel(dist);
+    if (!sg) return `<div class="suggest"><b>Sugerowany poziom</b><span>Oceń zachowania przy wskaźnikach powyżej – wtedy pokażemy sugerowany poziom.</span></div>`;
+    const lab = LEVELS5[PTS5.indexOf(sg.pts)].toLowerCase();
+    const st = !cur ? "" : cur === sg.pts ? `<span class="suggest-st ok">Przyjęto sugerowany poziom.</span>` : `<span class="suggest-st">Wybrano ${cur} pkt – inaczej niż sugestia. To Twoja decyzja; uzasadnij ją przykładami.</span>`;
+    return `<div class="suggest" role="note"><b>Sugerowany poziom: ${sg.pts} pkt – ${esc(lab)} oczekiwań</b>
+      <span>Wyliczony z wybranych zachowań (średnio ${fmt(sg.avg)} pkt, zaokrąglone do skali 1–9). To podpowiedź – ostateczny poziom wybierasz Ty.</span>
+      ${!ro && cur !== sg.pts ? `<button type="button" class="btn sm" data-act="acceptSuggest" data-k="${esc(k)}" data-pts="${sg.pts}">${KK_ICON("check")}<span>Przyjmij sugerowany poziom</span></button>` : ""}${st}</div>`;
+  }
+  // Ocena cząstkowa za kryterium – przyznaje oceniający (skala 1/3/5/7/9); system pokazuje tylko sugestię
   function partialCard(comp) {
     const c = S.cur, sc = scoreLocal(c)[comp.k] || { dist: [] };
     const cur = Number(c.data.partials && c.data.partials[comp.k] && c.data.partials[comp.k].pts);
     const ro = c.status !== "draft" ? "disabled" : "";
     return `<div class="card ind-card"><h3 id="pc-${esc(comp.k.length)}">Ocena cząstkowa: ${esc(nameOf(comp.k))}</h3>
-      <p class="muted">Ocenę cząstkową za kryterium przyznajesz Ty. Dla orientacji: poziomy wskaźników – ${esc(distText(sc.dist))}.</p>
+      ${suggestBox(comp.k, sc.dist, cur, ro)}
+      <p class="muted">Poziomy wybranych zachowań: ${esc(distText(sc.dist))}.</p>
       <div class="lv" role="radiogroup" aria-label="Ocena cząstkowa: ${esc(nameOf(comp.k))}">
       ${LEVELS5.map((lab, i) => `<label><input type="radio" name="partial-${esc(comp.k)}" value="${PTS5[i]}" data-partial="${esc(comp.k)}" ${cur === PTS5[i] ? "checked" : ""} ${ro}><span><b>${PTS5[i]} pkt</b> ${lab}</span></label>`).join("")}
       </div>${quarterlyHistory(comp.k)}</div>`;
@@ -1791,6 +1805,7 @@
       try { await api("POST", `/api/evals/${S.cur.id}/discuss`, { dev }); S.cur.status = "discussed"; S.cur.data.dev = dev; toast("Oznaczono jako omówioną."); render(); }
       catch (e) { toast(errMsg(e)); }
     },
+    acceptSuggest: b => { const r = document.querySelector(`input[data-partial="${CSS.escape(b.dataset.k)}"][value="${b.dataset.pts}"]`); if (r) { r.checked = true; r.dispatchEvent(new Event("change", { bubbles: true })); toast(`Przyjęto sugerowany poziom: ${b.dataset.pts} pkt.`); } },
     aiAsk: b => { const inp = $("#aiQ"); if (!inp) return; inp.value = b.dataset.q || ""; document.querySelector('[data-act="aiChat"]')?.click(); },
     aiChat: async b => {
       const inp = $("#aiQ"); const q = (inp?.value || "").trim();
