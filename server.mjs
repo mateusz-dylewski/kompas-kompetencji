@@ -1993,10 +1993,10 @@ ZASADY ODPOWIEDZI:
 5. Odpowiadaj po polsku, krótko (do 5 zdań), zwykłym tekstem bez nagłówków.
 ${CHAT_FACTS}`;
 const CHAT_FALLBACK = [
-  [/sprzeciw|odwo/i, 'Sprzeciw: pracownik ma 7 dni od zapoznania z oceną. Przełożony rozpatruje go w ciągu 14 dni. Uwzględnienie oznacza, że ocena wraca do poprawy.'],
-  [/cykl|termin|kiedy.*ocen|24/i, 'Okresowa ocena jest co 24 miesiące od ostatniej oceny okresowej. Najkrótszy odstęp to 6 miesięcy.'],
-  [/poziom|punkt|skal|wskaźnik/i, 'Wskaźniki są punktowane 1, 3, 5, 7 lub 9 (przy pierwszej ocenie 3, 5 lub 7). Poziom ogólny wynika z średniej kryteriów.'],
-  [/obowiązk|obowiazk|kryteri/i, 'Kryteria obowiązkowe są zawsze zaznaczone. Dla kierowniczych (B): zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja. Dla pozostałych (C): wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja.'],
+  [/sprzeciw|odwo/i, 'Sprzeciw: pracownik ma 7 dni od zapoznania z oceną. Przełożony rozpatruje go w ciągu 14 dni. Uwzględnienie oznacza, że ocena wraca do poprawy.\nŹródło: ustawa o służbie cywilnej, art. 83.'],
+  [/cykl|termin|kiedy.*ocen|24/i, 'Okresowa ocena jest co 24 miesiące od ostatniej oceny okresowej. Najkrótszy odstęp to 6 miesięcy.\nŹródło: ustawa o służbie cywilnej, art. 81.'],
+  [/poziom|punkt|skal|wskaźnik/i, 'Wskaźniki są punktowane 1, 3, 5, 7 lub 9 (przy pierwszej ocenie 3, 5 lub 7). Poziom ogólny wynika ze średniej kryteriów.\nŹródło: rozporządzenie Prezesa Rady Ministrów z 4 kwietnia 2016 r. (arkusze oceny).'],
+  [/obowiązk|obowiazk|kryteri/i, 'Kryteria obowiązkowe są zawsze zaznaczone. Dla kierowniczych (B): zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja. Dla pozostałych (C): wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja.\nŹródło: rozporządzenie Prezesa Rady Ministrów z 4 kwietnia 2016 r. (załącznik – arkusze B i C).'],
   [/podpis|zapozn/i, 'Podpis oceniającego i zapoznanie pracownika są zapisane z sumą kontrolną. Weryfikacja pokazuje, czy treść oceny się nie zmieniła.'],
 ];
 route('POST', '/api/ai/chat', async (req, res, u) => {
@@ -2014,7 +2014,7 @@ route('POST', '/api/ai/chat', async (req, res, u) => {
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
     const hit = /ile|liczb|ocen.*(zrobi|do|przygot)|sprzeciw.*(ile|ma)/i.test(q) ? [null, data + ' Szczegóły w module Oceny.'] : CHAT_FALLBACK.find(([re]) => re.test(q));
-    const text = (hit ? hit[1] : 'Asystent AI jest teraz niedostępny. Pytaj o sprzeciw, cykl oceny, wskaźniki, kryteria obowiązkowe lub podpisy.') + '\n\n' + AI_RULE_NOTE;
+    const text = (hit ? hit[1] : 'Nie mam tej informacji w bazie wiedzy, więc nie odpowiem, żeby nie podać niezweryfikowanej treści. Zapytaj dział kadr albo zadaj pytanie o sprzeciw, cykl oceny, skalę wskaźników, kryteria obowiązkowe lub podpisy.') + '\n\n' + AI_RULE_NOTE;
     aiLog(null, u.id, 'chat', q, { text, source: 'rules' });
     send(res, 200, { text, source: 'rules' });
   }
