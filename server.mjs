@@ -262,9 +262,6 @@ function seed() {
     }
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
-  seedEvidence(mgr, emps, rnd);
-  seedExamples();
-  seedRhythm(mgr, emps);
   const at0 = now(), addD = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
@@ -303,7 +300,9 @@ function seed() {
   const cId = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(emps[1], mgr, 'C', kd(-150), kd(-1), 'draft', JSON.stringify(cData), at0, '2026-01-02T08:00:00.000Z').lastInsertRowid;
   db.prepare('UPDATE kickoffs SET eval_id=? WHERE id=?').run(cId, kC);
+  seedEvidence(mgr, emps, rnd);
   seedExamples();
+  seedRhythm(mgr, emps);
   // Plan rozwoju i komunikat przełożonego dla pracownika1
   db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emps[0], mgr,
     `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${addD(today(), 14)}, udział do ${addD(today(), 45)}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${addD(today(), 60)}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${addD(today(), 90)}.`,
@@ -340,11 +339,22 @@ function seedEvidence(mgr, emps, rnd) {
     used.add(key);
     return ins.run(eid, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
   };
-  // Szkic oceny (ostatni pracownik): informacje do prawie wszystkich wskaźników – dwa celowo bez informacji (demo walidacji)
-  const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
-  if (draft) {
-    const inds = Object.keys(JSON.parse(draft.data).ratings || {});
-    inds.slice(0, -2).forEach((ind, i) => add(draft.employee_id, `2026-0${1 + (i % 6)}-${String(5 + (i % 20)).padStart(2, '0')}`, ind));
+  // Każdy szkic oceny (B i C): do każdego wskaźnika co najmniej jedna informacja z okresu oceny, bez duplikatów treści u osoby
+  const dd = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  for (const dr of db.prepare("SELECT employee_id, period_from, period_to, data FROM evals WHERE status='draft' ORDER BY id").all()) {
+    const inds = Object.keys(JSON.parse(dr.data).ratings || {});
+    const span = Math.max(1, Math.round((Date.parse(dr.period_to) - Date.parse(dr.period_from)) / 86400000));
+    let n = 0;
+    inds.forEach((ind, i) => {
+      const date = dd(dr.period_from, Math.floor((i + 0.5) * span / inds.length));
+      for (;;) { // następna wolna kombinacja treści u tej osoby
+        const sit = SIT[n % SIT.length], act = ACT[Math.floor(n / SIT.length) % ACT.length], res = RES[(n + Math.floor(n / 24)) % RES.length]; n++;
+        if (n > 500) return;
+        if (db.prepare('SELECT 1 FROM evidence WHERE employee_id=? AND situation=? AND action=? AND result=?').get(dr.employee_id, sit, act, res)) continue;
+        ins.run(dr.employee_id, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+        return;
+      }
+    });
   }
   // Ostatnie miesiące: kilka informacji na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
   const pool = [...INDICATORS.keys()].filter(k => MAND_C.some(m => k.startsWith(m)));

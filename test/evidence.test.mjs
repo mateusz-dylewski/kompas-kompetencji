@@ -1,6 +1,8 @@
 // Faza 2: dowody (tabela evidence), walidacja przed złożeniem oceny, dziennik zmian
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { startServer, asManager, asEmployee, todayStr } from './helpers.mjs';
 
 let srv, mgr, emp1;
@@ -73,20 +75,19 @@ test('lista z filtrem po wskaźniku i okresie; pracownik widzi tylko swoje dowod
 test('złożenie oceny okresowej wymaga dowodu albo „brak podstaw do oceny” przy każdym ocenianym wskaźniku', async () => {
   const draft = (await mgr.get('/api/evals')).body.evals.find(e => e.status === 'draft' && e.typ !== 'pierwsza');
   assert.ok(draft, 'brak szkicu w danych demo');
+  // Demo ma informacje do każdego wskaźnika szkicu; przesuwamy okres oceny na taki, w którym ich nie ma
+  assert.equal((await mgr.put(`/api/evals/${draft.id}`, { data: draft.data, periodFrom: '2025-01-01', periodTo: '2025-06-30' })).status, 200);
   const r1 = await mgr.post(`/api/evals/${draft.id}/submit`);
   assert.equal(r1.status, 422);
-  const noEv = r1.body.missing.filter(m => /bez informacji/.test(m));
-  assert.equal(noEv.length, 2, JSON.stringify(r1.body.missing));
-  // Jeden wskaźnik: jawna adnotacja „brak podstaw”, drugi: nowy dowód z okresu oceny
   const ratings = draft.data.ratings;
-  const counts = {};
-  for (const e of (await mgr.get(`/api/evidence?employeeId=${draft.employee_id}&from=${draft.period_from}&to=${draft.period_to}`)).body.evidence) counts[e.indicator] = 1;
-  const lacking = Object.keys(ratings).filter(k => !counts[k]);
-  assert.equal(lacking.length, 2);
-  ratings[lacking[0]] = { lvl: 'none', ex: '' };
-  ratings[lacking[1]].ex = 'Przykład wpisany przez oceniającego.'; // seed zostawia puste ex tam, gdzie brak informacji
-  assert.equal((await mgr.put(`/api/evals/${draft.id}`, { data: draft.data })).status, 200);
-  assert.equal((await mgr.post('/api/evidence', { ...validEvidence(draft.employee_id), indicator: lacking[1], date: '2026-03-03' })).status, 201);
+  const lacking = Object.keys(ratings);
+  assert.equal(r1.body.missing.filter(m => /bez informacji/.test(m)).length, lacking.length, JSON.stringify(r1.body.missing));
+  // Jeden wskaźnik: nowy dowód z okresu oceny, pozostałe: jawna adnotacja „brak podstaw”
+  lacking.slice(0, -1).forEach(k => { ratings[k] = { lvl: 'none', ex: '' }; });
+  const withEv = lacking.at(-1);
+  ratings[withEv].ex = 'Przykład wpisany przez oceniającego.';
+  assert.equal((await mgr.put(`/api/evals/${draft.id}`, { data: draft.data, periodFrom: '2025-01-01', periodTo: '2025-06-30' })).status, 200);
+  assert.equal((await mgr.post('/api/evidence', { ...validEvidence(draft.employee_id), indicator: withEv, date: '2025-03-03' })).status, 201);
   // Dowód spoza okresu oceny się nie liczy – tu jest w okresie, więc ocena przechodzi
   const r2 = await mgr.post(`/api/evals/${draft.id}/submit`);
   assert.equal(r2.status, 200, JSON.stringify(r2.body));
@@ -94,7 +95,10 @@ test('złożenie oceny okresowej wymaga dowodu albo „brak podstaw do oceny” 
   assert.equal(ev.data.wynikSource, 'wyliczony');
   assert.ok(['pozytywna', 'negatywna'].includes(ev.data.wynik));
   // Zmiana oceny przed złożeniem trafiła do dziennika (poprzednia i nowa wartość wskaźnika)
-  const upd = (await mgr.get('/api/audit')).body.audit.find(a => a.action === 'update_eval' && a.target === String(draft.id));
+  // API skraca wartości w podglądzie do 300 znaków – pełną nową wartość czytamy z bazy testowej
+  const db = new DatabaseSync(path.join(srv.dir, 'kompas.db'));
+  const upd = db.prepare("SELECT new_value FROM audit WHERE action='update_eval' AND target=? ORDER BY id DESC LIMIT 1").get(String(draft.id));
+  db.close();
   assert.ok(upd && JSON.parse(upd.new_value)[`ratings.${lacking[0]}`].lvl === 'none');
 });
 
