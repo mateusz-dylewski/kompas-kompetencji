@@ -54,6 +54,7 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 | 3 | 07:05 | 7 | 8 | 9 | 9 | 7 | 7 | 8 | 6 | 7,6 | juror 5, Michał 6, Ewa 6, Krystyna 6, klawiatura 6 |
 | 4 | 07:15 | 8 | 9 | 9 | 9 | 8 | 7 | 8 | 6 | 8,0 | juror 6, Michał 6, Ewa 6 |
 | 5 | 07:27 | 9 | 9 | 9 | 9 | 8 | 7 | 8 | 7 | 8,3 | juror 7, Krystyna 6, klawiatura 7 |
+| 6 | 07:38 | 9 | 9 | 9 | 9 | 8 | 8 | 8 | 7 | 8,4 | juror 6, Michał 7, Ewa 6 |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -108,4 +109,10 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 - Uwaga orkiestratora: backend osłabił asercję dziennika w test/evidence.test.mjs – przywrócona pełna (odczyt pełnej wartości z bazy testowej).
 - Persony: juror 7 (pola dat mm/dd/yyyy – natywne pole zależy od języka systemu; powtarzające się zdania w faktach demo; brak wyróżnienia spraw po terminie; radar drobny), Krystyna 6 (żargon prawny w oknie kryteriów; szkic demo z losowymi poziomami, np. „1 pkt” – wygląda jak zaniżona ocena; „Złóż ocenę” niewidoczne w stopce; XML w podsumowaniu; ankieta zasłania komunikat o złożeniu), klawiatura 7 (dużo Tabów do celu; etykieta „Ustal kryteria – …” bez nazwiska po zamknięciu okna; przewijanie w oknach bez wskazówki; ta sama ikona Asystenta i Ustawień).
 - Następne (cykl 6): front-end – maska daty DD.MM.RRRR w oknach, wyróżnienie spraw po terminie, podstawa prawna w zwijanej sekcji, „Złóż ocenę” w stopce ostatniego kroku, XML do „Dla zaawansowanych”, komunikat sukcesu w oknie ankiety, ikona Ustawień, wskazówka przewijania w oknach, etykieta bez nazwiska; backend – szkice demo z realistycznymi poziomami wokół 5 pkt, różnorodne treści informacji.
+
+### Cykl 6 (07:25–07:38)
+- Zmiany: „Złóż ocenę” w stopce ostatniego kroku, XML w zwijanej sekcji, komunikat sukcesu w oknie ankiety, prosty język w oknie rozmowy rozpoczynającej (podstawa prawna w details), daty z maską DD.MM.RRRR w oknach i kreatorze, tag „po terminie”, ikona koła zębatego, wskazówka przewijania w oknach, toast w rogu; dane demo – szkice z poziomami wokół 5 pkt (bez 1 pkt), 10 wariantów działań i rezultatów.
+- Dowody: `npm test` 137/137; persony – komplet kroków desktop/mobile (submitOk, pdfOk, ackOk), konsola 0, kontrast 0, powtórzone nazwy 0, pułapki 0.
+- Persony: juror 6 (brief: kody faktów bez objaśnienia, małe linki „źródło”, cienka treść – częściowo efekt sztywnej atrapy AI w skrypcie; radar – nakładanie podpisów), Michał 7 (wie, co dalej; na telefonie radar w podglądzie oceny, plan rozwoju nisko, różne rozmiary czcionki w krokach celu, metadane w wąskiej kolumnie), Ewa 6 (daty ISO w liście ocen i podglądzie; dziennik – nieprzetłumaczone zdarzenia `download_doc` i surowe cele „5:pdf”; „§ 11” bez nazwy aktu; wyłączony moduł nieodróżnialny).
+- Retro: oceny haiku wahają się ±1 między przebiegami przy tej samej wersji (juror 7 → 6 przy lepszej wersji) – do rubryki liczyć dowody automatyczne (kroki, konsola, kontrast, czasy, testy), oceny person jako sygnał jakościowy.
 
