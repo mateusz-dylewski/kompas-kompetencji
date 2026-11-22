@@ -560,3 +560,7 @@ details.adv[open]>summary{margin-bottom:6px}
 .goal-steps .st-t b{font-weight:600}
 .src-link{display:inline-block;padding:2px 4px}
 @media(max-width:759px){.prof-grid .prof-asst{order:5}}
+/* Kroki celu: reguła .steps span (pasek kroków kreatora) nie może stylować listy kroków celu – inaczej status nachodził na tytuł */
+.goal-steps .steps span{font-size:inherit;font-weight:inherit;padding:0;border:0;border-radius:0;color:inherit;transition:none}
+.goal-steps .steps .st-meta{font-size:13px;font-weight:400;color:var(--mu)}
+.goal-steps .steps li{gap:12px}
