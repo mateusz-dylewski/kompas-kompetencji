@@ -84,7 +84,7 @@ test('tworzenie i odczyt dla pracownika zespołu 1 → 404', async () => {
     ['POST', '/api/feedback', { employeeId: id, indicator: ind, source: 'test', justification: 'uzasadnienie testowe', relation: 'przelozony', date: todayStr() }],
     ['POST', '/api/partials', { employeeId: id, quarter: '2026-Q1', competency: 'KOMUNIKACJA', pts: 5, justification: 'uzasadnienie testowe', evidenceIds: [own.evidence] }],
     ['POST', '/api/kickoffs', { employeeId: id, typ: 'C', date: todayStr(), extraCriteria: [], duties: 'x'.repeat(12), expectations: 'x'.repeat(12), goals: 'x'.repeat(12) }],
-    ['GET', `/api/summary?employeeId=${id}`], ['GET', `/api/month?employeeId=${id}`], ['GET', `/api/devplan?employeeId=${id}`],
+    ['GET', `/api/summary?employeeId=${id}`], ['GET', `/api/month?employeeId=${id}`], ['GET', `/api/devplan?employeeId=${id}`], ['GET', `/api/goals/trend?employeeId=${id}`], ['GET', `/api/evals/compare?employeeId=${id}`],
     ['PUT', '/api/devplan', { employeeId: id, plan: 'Plan od obcego przełożonego.' }],
     ['POST', '/api/goals', { employeeId: id, s: 'a', m: 'b', a: 'c', r: 'd', t: '2027-06-30', steps: ['krok'] }],
     ['POST', '/api/ai/checkin', { employeeId: id }],

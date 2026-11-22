@@ -392,3 +392,7 @@ details.goal-steps>summary{cursor:pointer;color:var(--navy);font-weight:700;font
 .goal-steps .steps li{justify-content:space-between;align-items:center}
 .goal-steps .st-t{flex:1;min-width:0}
 .goal-steps .st-confirmed .st-t b{color:var(--mu)}
+/* Trendy (etap 5): schody potwierdzonych kroków, kropki = rozmowy miesięczne */
+.trend-svg{width:100%;max-width:240px;height:46px;display:block;margin:4px 0}
+.trend-svg path{fill:none;stroke:var(--navy);stroke-width:2}
+.trend-svg circle{fill:var(--mu)}

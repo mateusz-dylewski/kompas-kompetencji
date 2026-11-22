@@ -1004,6 +1004,25 @@ async function draftDocument(req, res, u, ev) {
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(bytes));
 }
+// Trend na przestrzeni dwóch lat (etap 5): zmiana ocen cząstkowych między dwiema ostatnimi złożonymi ocenami okresowymi B/C.
+// Tylko formalne oceny sporządzone przez człowieka; bez średniej, bez wyniku łącznego, bez prognozy; oceny kwartalne nie wchodzą.
+route('GET', '/api/evals/compare', async (req, res, u) => {
+  let evs;
+  if (u.role === 'pracownik') evs = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status!='draft' AND typ IN ('B','C')").all(u.id);
+  else {
+    const emp = teamMember(u, qs(req).get('employeeId'));
+    if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+    evs = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status!='draft' AND typ IN ('B','C')").all(emp.id, u.id);
+  }
+  const [cur, prev] = evs.filter(e => refDate(e)).sort((a, b) => (refDate(a) < refDate(b) ? 1 : -1));
+  if (!cur || !prev) return send(res, 200, { available: false, count: evs.length });
+  const pts = ev => Object.fromEntries(computeResults({ ...ev, data: JSON.parse(ev.data || '{}') }, MODEL).crit.filter(c => c.partial !== null).map(c => [c.key, c.partial]));
+  const a = pts(prev), b = pts(cur);
+  const competencies = Object.keys(b).filter(k => k in a).map(k => ({ k, name: MODEL.find(c => c.k === k)?.n || k, previous: a[k], current: b[k],
+    direction: b[k] > a[k] ? 'wzrost' : b[k] < a[k] ? 'spadek' : 'bez zmian' }));
+  const ref = e => ({ id: e.id, typ: e.typ, date: refDate(e), periodFrom: e.period_from, periodTo: e.period_to });
+  send(res, 200, { available: true, previousEval: ref(prev), currentEval: ref(cur), competencies });
+});
 route('GET', '/api/evals/:id', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev) return fail(res, 404, 'Nie znaleziono.');
@@ -1142,6 +1161,21 @@ route('POST', '/api/goals', async (req, res, u) => {
   const row = db.prepare('SELECT * FROM goals WHERE id=?').get(id);
   audit(u.id, 'create_goal', `goal:${id}`, null, { employeeId: emp.id, ...goalAuditView(row) });
   send(res, 201, { id, goal: goalRow(row) });
+});
+// Trend między spotkaniami (etap 5): potwierdzone kroki narastająco na koniec każdego miesiąca + miesiące z odbytą rozmową
+route('GET', '/api/goals/trend', async (req, res, u) => {
+  const empId = u.role === 'pracownik' ? u.id : teamMember(u, qs(req).get('employeeId'))?.id;
+  if (!empId) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const nowM = today().slice(0, 7);
+  const checkins = db.prepare("SELECT month, date FROM checkins WHERE employee_id=? AND status='odbyty' ORDER BY month").all(empId);
+  const lastTalk = checkins.length ? (checkins[checkins.length - 1].date || `${checkins[checkins.length - 1].month}-01`) : null;
+  const goals = goalsOf(empId).filter(g => g.steps.length).map(g => {
+    const months = monthsBetween(g.created.slice(0, 10), `${nowM}-01`).slice(-24);
+    const series = months.map(m => ({ month: m, confirmed: g.steps.filter(x => x.confirmed_at && x.confirmed_at.slice(0, 7) <= m).length }));
+    const sinceLastTalk = lastTalk ? g.steps.filter(x => x.confirmed_at && x.confirmed_at.slice(0, 10) > lastTalk).length : null;
+    return { id: g.id, total: g.steps.length, series, talks: checkins.map(c => c.month).filter(m => months.includes(m)), sinceLastTalk };
+  });
+  send(res, 200, { lastTalk, goals });
 });
 // Pracownik (właściciel): { step, reported } – zgłasza / cofa zgłoszenie (nie cofa kroku potwierdzonego).
 // Przełożony (cel osoby z zespołu): { step, confirmed }, { addStep }, zmiana s/m/a/r/t.

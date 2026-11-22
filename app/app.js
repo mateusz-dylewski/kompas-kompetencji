@@ -209,6 +209,7 @@
     const body = n ? `
         <div class="seg" role="img" aria-label="Potwierdzone kroki: ${k} z ${n}${rep ? `, zgłoszone: ${rep}` : ""}">${g.steps.map(x => `<i class="${{ confirmed: "on", reported: "rep", open: "" }[goalStepState(x)]}"></i>`).join("")}</div>
         <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
+        <div class="trend" data-trend-goal="${g.id}"></div>
         <details class="goal-steps"><summary>Kroki</summary>
           <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
           ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
@@ -221,6 +222,35 @@
   }
   const goalTiles = (goals, mode) => goals.length ? `<div class="goal-tiles">${goals.map(g => goalTile(g, mode)).join("")}</div>`
     : `<p class="muted">${mode === "emp" ? "Nie masz jeszcze celów. Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej." : "Brak celów. Dodaj pierwszy cel z krokami."}</p>`;
+  // Trend celu między spotkaniami: schody potwierdzonych kroków w kolejnych miesiącach, kropki = odbyte rozmowy miesięczne
+  function trendSvg(t) {
+    const W = 240, H = 46, n = t.series.length, x = i => (n < 2 ? W / 2 : 4 + i * (W - 8) / (n - 1)), y = v => H - 12 - (t.total ? v / t.total : 0) * (H - 18);
+    let d = "";
+    t.series.forEach((p, i) => { d += i ? ` H${x(i).toFixed(1)} V${y(p.confirmed).toFixed(1)}` : `M${x(0).toFixed(1)} ${y(p.confirmed).toFixed(1)}`; });
+    const dots = t.series.map((p, i) => (t.talks.includes(p.month) ? `<circle cx="${x(i).toFixed(1)}" cy="${H - 4}" r="3"/>` : "")).join("");
+    const label = `Potwierdzone kroki w kolejnych miesiącach: ${t.series.map(p => `${p.month} – ${p.confirmed}`).join(", ")}. Kropki: rozmowy miesięczne.`;
+    return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><path d="${d}"/>${dots}</svg>`;
+  }
+  async function fillTrends(empId) {
+    const boxes = document.querySelectorAll("[data-trend-goal]"); if (!boxes.length) return;
+    let r; try { r = await api("GET", "/api/goals/trend" + (empId ? `?employeeId=${empId}` : "")); } catch (_) { return; }
+    const byId = Object.fromEntries(r.goals.map(g => [g.id, g]));
+    boxes.forEach(b => {
+      const t = byId[b.dataset.trendGoal]; if (!t || t.series.length < 2) return;
+      b.innerHTML = trendSvg(t) + (t.sinceLastTalk !== null ? `<small class="muted">${t.sinceLastTalk > 0 ? `+${t.sinceLastTalk} ${t.sinceLastTalk === 1 ? "krok" : t.sinceLastTalk < 5 ? "kroki" : "kroków"} od ostatniej rozmowy` : "Bez nowych potwierdzeń od ostatniej rozmowy"}</small>` : "");
+    });
+  }
+  // Zmiana między dwiema ostatnimi ocenami okresowymi (bez średniej i prognozy)
+  async function loadCompare(empId) {
+    const box = $("#cmpBox"); if (!box) return;
+    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(ex.message)}</p>`; return; }
+    const arrow = { wzrost: "▲ wzrost", spadek: "▼ spadek", "bez zmian": "= bez zmian" };
+    box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2>` + (!r.available
+      ? `<p class="muted">Porównanie pojawi się, gdy będą dwie złożone oceny okresowe (B lub C).</p>`
+      : `<p class="muted">Ocena z ${esc(isoToPl(r.previousEval.date))} i z ${esc(isoToPl(r.currentEval.date))}. Tylko oceny cząstkowe z formalnych ocen okresowych – bez średniej i bez prognozy.</p>
+        <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Kryterium</th><th scope="col">Poprzednio</th><th scope="col">Teraz</th><th scope="col">Zmiana</th></tr></thead><tbody>
+        ${r.competencies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.previous} pkt</td><td>${c.current} pkt</td><td><span class="tag ${c.direction === "wzrost" ? "ok" : c.direction === "spadek" ? "wr" : ""}">${arrow[c.direction]}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">Brak wspólnych kryteriów w obu ocenach.</td></tr>`}</tbody></table></div>`);
+  }
   // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
   async function goalsModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
@@ -244,10 +274,11 @@
         catch (ex) { $("#dpErr").textContent = ex.message; }
       });
     }, "gmTitle");
+    fillTrends(empId);
   }
   async function loadMonthGoals() {
     const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
-    try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; }
+    try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; fillTrends(S.month.employeeId); }
     catch (ex) { box.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
   }
   // Po zmianie celu odśwież miejsce, w którym pracuje użytkownik
@@ -623,6 +654,8 @@
     if (S.view === "month") { bindMonthPage(); loadMonth(); S.goalsCtx = { empId: +S.month.employeeId, where: "month" }; loadMonthGoals(); }
     if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
     if (S.view === "results") loadMetrics();
+    if (S.view === "goals" && u.role === "pracownik") fillTrends(null);
+    if (S.view === "profile" && u.role === "pracownik") loadCompare(null);
     if (S.view === "evalView" && S.readEval) { loadSigs(S.readEval.id, S.readEval.status); loadEvalEvidence(S.readEval); }
     if (S.view === "wizard" && S.cur && S.cur.status !== "draft") loadSigs(S.cur.id, S.cur.status);
     if (S.view === "wizard") bindWizard();
@@ -683,12 +716,13 @@
             + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
         </div>
         <div class="grid two">
-          <div class="card"><h2>Plan rozwoju z oceny</h2>${devPlan(d, items)}</div>
+          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
           <div class="card"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
             <div id="aiDevOut"></div></div>
-        </div>`;
+        </div>
+        <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
     }
     if (v === "goals") {
       return `<p class="muted" style="margin:0 0 12px">Cele ustala przełożony. Gdy wykonasz krok, zgłoś to – przełożony potwierdzi. Postęp liczy tylko potwierdzone kroki.</p>
@@ -999,7 +1033,8 @@
         <div><label class="f" for="sTo">Do</label><input id="sTo" type="date" value="${esc(f.to)}"></div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
-      <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+      <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
+      <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
   }
   function bindSummaryPage() {
     const fm = $("#sumForm"); if (!fm) return;
@@ -1009,6 +1044,7 @@
   async function loadSummary() {
     const box = $("#sumBody"); if (!box) return;
     const f = S.sum, q = new URLSearchParams({ employeeId: f.employeeId, ...(f.from ? { from: f.from } : {}), ...(f.to ? { to: f.to } : {}) });
+    loadCompare(f.employeeId);
     try {
       const s = await api("GET", "/api/summary?" + q);
       box.innerHTML = `<div class="kpis">
