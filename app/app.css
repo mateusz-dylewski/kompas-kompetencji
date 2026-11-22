@@ -168,8 +168,8 @@ ul.c li{margin:4px 0}
 .radar{width:100%;max-width:520px;margin:0 auto;display:block}
 .radar .poly{transform-box:view-box;transform-origin:center;transform:scale(0);transition:transform 1s var(--ease)}
 .radar .poly.on{transform:scale(1)}
-.toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:var(--r);font-size:14px;z-index:30;animation:rise .15s var(--ease) both;box-shadow:var(--shadow)}
-@media(min-width:960px){.toast{bottom:24px}}
+.toast{position:fixed;right:16px;top:72px;left:auto;bottom:auto;max-width:min(380px,calc(100vw - 32px));background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:var(--r);font-size:14px;z-index:30;animation:rise .15s var(--ease) both;box-shadow:var(--shadow)}
+@media(min-width:960px){.toast{top:20px;right:24px}}
 
 /* ---------- Animacje ---------- */
 @keyframes rise{from{transform:translateY(4px)}to{transform:none}}
@@ -530,3 +530,20 @@ ul.todo{list-style:none;margin:8px 0 0;padding:0}
 .chg{font-size:13px;overflow-wrap:anywhere}
 .chg-more summary{cursor:pointer;color:var(--navy);font-size:13px;font-weight:700}
 .chg-full{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;margin:4px 0 0;background:var(--bg);padding:8px;border-radius:var(--r)}
+
+/* Cykl 6 */
+.wiz-nav .btn.submit{min-width:160px;font-weight:700}
+.wiz-nav .btn.submit .ic-svg{width:18px;height:18px}
+details.adv{margin-top:10px}
+details.adv>summary{cursor:pointer;color:var(--navy);font-weight:700;font-size:14px;padding:6px 0}
+details.adv[open]>summary{margin-bottom:6px}
+.ok-banner{display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:12px 14px;background:var(--ok-bg);color:#14532d;border:1px solid var(--ok);border-left-width:6px;border-radius:var(--r);font-weight:700}
+.ok-banner .ic-svg{width:22px;height:22px;flex:none;color:var(--ok)}
+.todo-t .overdue{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tag.bad .ic-svg{width:14px;height:14px;vertical-align:-2px;margin-right:4px}
+.tag.bad:has(.ic-svg){display:inline-flex;align-items:center}
+/* Wskazówka przewijania w oknach modalnych: cień nad paskiem akcji, gdy poniżej jest więcej treści */
+.modal .card.more-below .btns{box-shadow:0 -12px 12px -10px rgba(0,0,0,.32)}
+.modal .card.more-below:not(:has(.btns))::after{content:"";position:sticky;display:block;bottom:-18px;height:18px;margin-top:-18px;background:linear-gradient(transparent,rgba(0,0,0,.18));pointer-events:none}
+.err:empty{display:none}
+@media(max-width:639px){.toast{top:64px;right:12px}}
