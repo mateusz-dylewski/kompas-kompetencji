@@ -620,3 +620,9 @@ details.comp>summary .muted{white-space:nowrap}
 .evals-head p{margin:0;flex:1 1 260px}
 /* Status asystenta w panelu bocznym: dłuższy napis (tryb bez modelu) zawija się zamiast wychodzić poza panel */
 .side .foot .pill{white-space:normal;max-width:100%;line-height:1.3}
+/* Sugerowany poziom kryterium (podpowiedź z wybranych zachowań; decyzja przełożonego) */
+.suggest{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:var(--sky);border-left:4px solid var(--navy);border-radius:var(--r-btn);padding:12px 14px;margin:8px 0 12px}
+.suggest b{color:var(--navy);font-size:16px}
+.suggest>span{color:var(--tx);font-size:14px}
+.suggest>.suggest-st{color:var(--mu)}
+.suggest>.suggest-st.ok{color:var(--ok);font-weight:600}
