@@ -264,6 +264,7 @@ function seed() {
   });
   seedEvidence(mgr, emps, rnd);
   seedRhythm(mgr, emps);
+  const at0 = now(), addD = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
   emps.forEach((eid, i) => {
@@ -274,6 +275,37 @@ function seed() {
     if (doneN === STEPS.length) steps.forEach(x => { x.reported_at = at; });
     insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), mgr, at);
   });
+  // Drugi cel pracownika1: kroki w różnych stanach (potwierdzony, zgłoszony, do zrobienia)
+  const st2 = [['Lista wymagań dostępności zebrana od zespołów', 1, 1], ['Audyt trzech serwisów przeprowadzony', 1, 0], ['Raport z zaleceniami przekazany kierownictwu', 0, 0], ['Poprawki wdrożone i sprawdzone ponownie', 0, 0]]
+    .map(([t, rep, conf]) => ({ t, reported_at: rep ? at0 : null, confirmed_at: conf ? at0 : null, confirmed_by: conf ? mgr : null }));
+  insG.run(emps[0], 'Poprawa dostępności serwisów departamentu', 'Audyt 3 serwisów i raport z zaleceniami', 'Udział w szkoleniu z dostępności cyfrowej', 'Zgodność serwisów z wymaganiami ustawy o dostępności cyfrowej', addD(today(), 60), 0, 25, JSON.stringify(st2), mgr, at0);
+  // Rozmowy rozpoczynające (fikcyjne): dwie zapoznane przez pracownika, jedna czeka na zapoznanie; pracownik3 (emps[2]) zostaje „po terminie”
+  const insK = db.prepare('INSERT INTO kickoffs(employee_id,evaluator_id,typ,date,prev_eval_id,due,extra_criteria,duties,expectations,goals,ack_at,eval_id,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const evOf = eid => db.prepare('SELECT id FROM evals WHERE employee_id=? ORDER BY id LIMIT 1').get(eid)?.id ?? null;
+  const kd = d => addD(today(), d);
+  insK.run(emps[3], mgr, 'B', kd(-20), evOf(emps[3]), '2026-07-30', JSON.stringify(['MYŚLENIE ANALITYCZNE', 'NEGOCJOWANIE']),
+    'Prowadzenie rejestru incydentów bezpieczeństwa informacji i przegląd uprawnień w systemach.', 'Zgłoszenia incydentów rejestrowane w ciągu jednego dnia roboczego; kwartalny przegląd uprawnień.',
+    'Skrócenie czasu obsługi incydentu oraz aktualizacja procedury do końca okresu.', `${kd(-18)}T09:00:00.000Z`, null, at0, at0);
+  insK.run(emps[4], mgr, 'B', kd(-12), evOf(emps[4]), '2026-07-30', JSON.stringify(['KREATYWNOŚĆ']),
+    'Przygotowanie komunikatów wewnętrznych i obsługa kanałów informacyjnych departamentu.', 'Komunikaty publikowane zgodnie z kalendarzem, bez uwag redakcyjnych w kolejnej rundzie.',
+    'Uruchomienie cyklicznego biuletynu departamentu i ocena jego czytelności wśród odbiorców.', `${kd(-10)}T09:00:00.000Z`, null, at0, at0);
+  // Zapisana, czeka na zapoznanie pracownika (ocena typu C jest szkicem poniżej)
+  const kC = insK.run(emps[1], mgr, 'C', kd(-2), null, null, JSON.stringify(['ORIENTACJA NA KLIENTA']),
+    'Wsparcie wdrożeń dostępności cyfrowej w serwisach departamentu.', 'Terminowe przekazywanie wyników kontroli oraz jasne opisy zaleceń.',
+    'Przeprowadzenie kontroli dostępności dwóch serwisów i przygotowanie zaleceń.', null, null, at0, at0).lastInsertRowid;
+  // Ocena typu C (szkic) dla pracownika2 – oceny cząstkowe zgodne ze schematem 2
+  const cCrit = MODEL.filter(c => MAND_C.some(m => c.k.startsWith(m))).map(c => c.k);
+  const cRatings = {}; let ci = 0;
+  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: 2 + (ci++ % 3), ex: 'Przykład z okresu oceny (dane demonstracyjne).' }; }));
+  const cData = { criteria: cCrit, ratings: cRatings, dev: 'Szkolenie z zasad redagowania dokumentów urzędowych.', schema: EVAL_SCHEMA, partials: {} };
+  cCrit.forEach((k, i) => { cData.partials[k] = { pts: PTS5[2 + (i % 3)] }; });
+  const cId = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(emps[1], mgr, 'C', kd(-150), kd(-1), 'draft', JSON.stringify(cData), at0, '2026-01-02T08:00:00.000Z').lastInsertRowid;
+  db.prepare('UPDATE kickoffs SET eval_id=? WHERE id=?').run(cId, kC);
+  // Plan rozwoju i komunikat przełożonego dla pracownika1
+  db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emps[0], mgr,
+    `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${addD(today(), 14)}, udział do ${addD(today(), 45)}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${addD(today(), 60)}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${addD(today(), 90)}.`,
+    'Dziękuję za rzetelne raporty w ostatnim kwartale. Proponuję rozwój w kierunku dostępności cyfrowej – porozmawiamy o tym na najbliższym spotkaniu miesięcznym.', at0);
 }
 // Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
