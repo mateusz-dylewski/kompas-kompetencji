@@ -158,6 +158,12 @@ Każde utworzenie i każda zmiana trafiają do dziennika z poprzednią i nową w
 - **Migracja:** automatyczna przy starcie – tabele `kickoffs` i `prep_survey`, kolumna `evals.survey_done`. Istniejące dane bez zmian.
 - **Jeszcze nieobsługiwane:** arkusz A (wyższe stanowiska), przekazanie oceny pośredniemu przełożonemu lub zastępcy, osobny dokument IPRZ.
 
+## Moduł przełożonego
+
+Projekt i etapy: `docs/projekt-modul-przelozonego.md`.
+
+- **Widoczność:** przełożony widzi tylko swoich podopiecznych (`users.manager_id`). Test `test/visibility.test.mjs` sprawdza każdą trasę z drugim przełożonym i jego zespołem: listy nie zawierają cudzych rekordów, a trasy z identyfikatorem cudzego obiektu zwracają 403/404. Świadome zachowanie: ocenę widzi jej **autor** (`evaluator_id`) – po zmianie przełożonego dotychczasowe oceny widzi poprzedni oceniający, a nowy przełożony ich nie widzi (przekazanie ocen to osobny temat).
+
 ## Panel pracownika: cele z krokami, plan rozwoju, szczegóły oceny
 
 - **Cele SMART z krokami.** Postęp nie jest ustawiany suwakiem: cel ma 1–8 sprawdzalnych kroków (wykonany albo nie), a postęp to odsetek wykonanych kroków. Cel jest zrealizowany, gdy wszystkie kroki są wykonane. API: `POST /api/goals` wymaga `steps` (lista tekstów); `PATCH /api/goals/:id` przyjmuje `{ step, done }` albo `{ addStep }`; `{ done }` działa tylko dla celów bez kroków (sprzed zmiany). Ręczne `progress` nie jest już przyjmowane.
