@@ -251,6 +251,24 @@
         <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Kryterium</th><th scope="col">Poprzednio</th><th scope="col">Teraz</th><th scope="col">Zmiana</th></tr></thead><tbody>
         ${r.competencies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.previous} pkt</td><td>${c.current} pkt</td><td><span class="tag ${c.direction === "wzrost" ? "ok" : c.direction === "spadek" ? "wr" : ""}">${arrow[c.direction]}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">Brak wspólnych kryteriów w obu ocenach.</td></tr>`}</tbody></table></div>`);
   }
+  // Brief do rozmowy: tekst z odnośnikami do faktów + fakty (JSON „kto co robił”) zbudowane przez serwer
+  const factLine = f => `<li id="fact-${esc(f.id.replace(/\./g, "-"))}"><b>[${esc(f.id)}]</b> <span class="muted">${esc(isoToPl(f.data))} · ${esc(f.rodzaj)}${f.kryterium ? " · " + esc(nameOf(f.kryterium)) : ""} · ${esc(f.kto_zapisal || f.kto || "")}${f.zrodlo ? " · źródło: " + esc(f.zrodlo) : ""}</span><br>${esc([f.sytuacja, f.dzialanie, f.rezultat, f.opis, f.co_zrobiono, f.co_wymaga_uwagi, f.krok ? `${f.cel}: ${f.krok}` : ""].filter(Boolean).join(" · "))}</li>`;
+  const briefHtml = text => esc(text).replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => `<a href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}">[${id}]</a>`);
+  async function briefModal(empId) {
+    const emp = (S.dash.team || []).find(t => t.id === empId);
+    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
+    const stop = startThinking($("#brBody"));
+    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); $("#brBody").innerHTML = `<p class="muted">${esc(ex.message)}</p>`; return; }
+    stop(); S.briefJson = r.json;
+    const j = r.json;
+    $("#brBody").innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
+      <div class="tabs" role="tablist"><button class="btn sm" role="tab" aria-selected="true" data-act="briefTab" data-tab="brief">Brief</button><button class="btn sm g" role="tab" aria-selected="false" data-act="briefTab" data-tab="json">Fakty (JSON)</button></div>
+      <div data-brief-pane="brief"><div class="ai-out brief-text">${briefHtml(r.brief)}</div>
+        <h3>Fakty</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}</div>
+      <div data-brief-pane="json" hidden><pre class="json-out">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></div>
+      <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
+    bindActs($("#brBody"));
+  }
   // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
   async function goalsModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
@@ -883,7 +901,8 @@
               <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
             <div id="ciErr" role="alert" class="err"></div>
             <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
-              <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button></div>
+              <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button>
+              <button class="btn g" type="button" data-act="aiBrief" data-emp="${esc(m.employeeId)}">Przygotuj brief do rozmowy</button></div>
           </form><div id="aiCkOut" aria-live="polite"></div>
           <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę informacji. Nie zapisuje niczego i nie proponuje ocen.</p></div>
         <div class="card"><div class="row"><h2>Informacje z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Informacja", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
@@ -1196,6 +1215,7 @@
       <div class="grid two"><div class="note"><b>Zacznij od</b><br>${esc(top)}</div><div class="note warn"><b>Omów</b><br>${esc(low)}</div></div>
       <div class="btns" style="justify-content:flex-start;margin-top:14px">
         ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiTalk">Pytania do rozmowy (AI ${aiWhere()})</button>
+            <button class="btn g" data-act="aiBrief" data-emp="${c.employeeId}">Przygotuj brief do rozmowy</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
       <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
@@ -1478,6 +1498,14 @@
       catch (ex) { toast(ex.message); }
     },
     mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
+    aiBrief: b => briefModal(+b.dataset.emp),
+    briefTab: b => { document.querySelectorAll("[data-brief-pane]").forEach(p => { p.hidden = p.dataset.briefPane !== b.dataset.tab; }); document.querySelectorAll('[data-act="briefTab"]').forEach(t => t.setAttribute("aria-selected", t === b ? "true" : "false")); },
+    briefDownload: () => {
+      if (!S.briefJson) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(S.briefJson, null, 2)], { type: "application/json" }));
+      a.download = `fakty-do-rozmowy-${S.briefJson.okres.od}_${S.briefJson.okres.do}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
     newGoalFor: b => act("addGoal", b),
     addGoal: b => openModal(`
       <h2>Nowy cel SMART</h2>

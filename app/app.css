@@ -396,3 +396,8 @@ details.goal-steps>summary{cursor:pointer;color:var(--navy);font-weight:700;font
 .trend-svg{width:100%;max-width:240px;height:46px;display:block;margin:4px 0}
 .trend-svg path{fill:none;stroke:var(--navy);stroke-width:2}
 .trend-svg circle{fill:var(--mu)}
+/* Brief do rozmowy (etap 6) */
+.tabs{display:flex;gap:8px;margin:8px 0 12px}
+.brief-text{white-space:pre-line}
+.brief-text a{font-weight:700}
+.json-out{max-height:50vh;overflow:auto;background:var(--sky);padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word}

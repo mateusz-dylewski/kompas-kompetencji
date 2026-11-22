@@ -87,7 +87,7 @@ test('tworzenie i odczyt dla pracownika zespołu 1 → 404', async () => {
     ['GET', `/api/summary?employeeId=${id}`], ['GET', `/api/month?employeeId=${id}`], ['GET', `/api/devplan?employeeId=${id}`], ['GET', `/api/goals/trend?employeeId=${id}`], ['GET', `/api/evals/compare?employeeId=${id}`],
     ['PUT', '/api/devplan', { employeeId: id, plan: 'Plan od obcego przełożonego.' }],
     ['POST', '/api/goals', { employeeId: id, s: 'a', m: 'b', a: 'c', r: 'd', t: '2027-06-30', steps: ['krok'] }],
-    ['POST', '/api/ai/checkin', { employeeId: id }],
+    ['POST', '/api/ai/checkin', { employeeId: id }], ['POST', '/api/ai/brief', { employeeId: id }],
   ];
   for (const [m, url, body] of calls) {
     const r = await mgr2.req(m, url, m === 'GET' ? undefined : body);

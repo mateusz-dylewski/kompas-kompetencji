@@ -1575,6 +1575,90 @@ route('GET', '/api/summary', async (req, res, u) => {
 });
 
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)
+// ---------- Brief do rozmowy (etap 6): wyszukiwanie faktów (serwer) + brief od modelu z odnośnikami do faktów ----------
+// JSON „kto co robił” buduje serwer z wpisów zrobionych przez ludzi (informacje, feedback, rozmowy miesięczne, kroki celów).
+// „Kto” to wyłącznie rola. Bez poziomów i punktów (także z feedbacku), bez wyniku. Model dostaje JSON po redactNames().
+const FACT_ROLE = { informacja: 'przełożony', rozmowa: 'przełożony (rozmowa miesięczna)' };
+function briefFacts(empId, from, to) {
+  const facts = [];
+  for (const e of db.prepare('SELECT * FROM evidence WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(empId, from, to)) {
+    const ind = INDICATORS.get(e.indicator);
+    facts.push({ id: `I${e.id}`, rodzaj: 'informacja', data: e.date, kryterium: ind?.k || null, wskaznik: ind?.text?.replace(/\s+/g, ' ') || null,
+      kto_zapisal: FACT_ROLE.informacja, sytuacja: e.situation, dzialanie: e.action, rezultat: e.result });
+  }
+  for (const f of db.prepare('SELECT * FROM feedback WHERE employee_id=? AND date>=? AND date<=? ORDER BY date').all(empId, from, to)) {
+    const ind = INDICATORS.get(f.indicator);
+    facts.push({ id: `F${f.id}`, rodzaj: 'feedback', data: f.date, kryterium: ind?.k || null, wskaznik: ind?.text?.replace(/\s+/g, ' ') || null,
+      kto_zapisal: 'przełożony', zrodlo: RELATIONS[f.relation] || f.relation, zadanie: f.source, opis: f.justification });
+  }
+  for (const c of db.prepare("SELECT * FROM checkins WHERE employee_id=? AND month>=? AND month<=? AND status='odbyty' ORDER BY month").all(empId, from.slice(0, 7), to.slice(0, 7))) {
+    facts.push({ id: `C${c.id}`, rodzaj: 'rozmowa miesięczna', data: c.date || `${c.month}-01`, kryterium: null, kto_zapisal: FACT_ROLE.rozmowa,
+      co_zrobiono: c.done_text, co_wymaga_uwagi: c.attention_text, cel: c.goal_text });
+  }
+  for (const g of goalsOf(empId)) g.steps.forEach((x, i) => {
+    const d = (x.confirmed_at || x.reported_at || '').slice(0, 10);
+    if (!d || d < from || d > to) return;
+    facts.push({ id: `G${g.id}.${i + 1}`, rodzaj: 'krok celu', data: d, kryterium: null, cel: g.s, krok: x.t,
+      kto: x.confirmed_at ? 'pracownik (zgłoszenie), przełożony (potwierdzenie)' : 'pracownik (zgłoszenie, bez potwierdzenia)' });
+  });
+  return facts.sort((a, b) => (a.data < b.data ? -1 : 1));
+}
+function briefContext(u, empId, b) {
+  const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(empId, u.id);
+  const k = latestKickoff(empId);
+  const to = isDate(b.to) ? b.to : today();
+  const from = isDate(b.from) ? b.from : (isDate(draft?.period_from) ? draft.period_from : k?.ack_at ? k.ack_at.slice(0, 10) : `${+to.slice(0, 4) - 1}${to.slice(4)}`);
+  const criteria = draft ? JSON.parse(draft.data || '{}').criteria || [] : k ? [...mandKeysFor(k.typ), ...JSON.parse(k.extra_criteria || '[]')] : [];
+  return { from, to, criteria };
+}
+function buildBriefJson(empId, ctx) {
+  const facts = briefFacts(empId, ctx.from, ctx.to);
+  const crits = ctx.criteria.length ? ctx.criteria : [...new Set(facts.map(f => f.kryterium).filter(Boolean))];
+  const pokrycie = crits.map(k => { const fs = facts.filter(f => f.kryterium === k); return { kryterium: k, fakty: fs.length, miesiace: new Set(fs.map(f => f.data.slice(0, 7))).size }; });
+  return { okres: { od: ctx.from, do: ctx.to }, fakty: facts, pokrycie, braki: pokrycie.filter(p => !p.fakty).map(p => p.kryterium) };
+}
+// Po modelu: usuń odnośniki do nieistniejących faktów; w „Przykładach” zdanie bez odnośnika oznacz „(bez źródła)”
+function checkBriefRefs(text, ids) {
+  let section = '';
+  return String(text).split('\n').map(line => {
+    if (/^\s*(#+|\*\*|[A-ZĄĆĘŁŃÓŚŹŻ][^.:]{2,40}:?\s*$)/.test(line)) section = line;
+    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : ''));
+    if (/przykład/i.test(section) && /^\s*([-*•]|\d+[.)])\s+\S/.test(l) && !/\[[IFCG][0-9.]+\]/.test(l)) l += ' (bez źródła)';
+    return l;
+  }).join('\n');
+}
+function rulesBrief(json) {
+  const by = json.pokrycie.filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty);
+  const ex = by.slice(0, 3).map(p => { const f = json.fakty.find(x => x.kryterium === p.kryterium); return `- ${p.kryterium.toLowerCase()}: ${f.sytuacja || f.opis || ''} [${f.id}]`; });
+  return ['Tematy do omówienia:', ...by.slice(0, 3).map(p => `- ${p.kryterium.toLowerCase()} (${p.fakty} wpisów w ${p.miesiace} mies.)`),
+    '', 'Przykłady z okresu:', ...(ex.length ? ex : ['- brak wpisów w okresie']),
+    '', 'Pytania otwarte:', '- Która z tych sytuacji była dla Ciebie najważniejsza i dlaczego?', '- Co pomogło, a co przeszkadzało w osiągnięciu rezultatu?', '- Czego potrzebujesz w kolejnym okresie?',
+    '', 'Kryteria bez informacji:', ...(json.braki.length ? json.braki.map(k => `- ${k.toLowerCase()}`) : ['- brak'])].join('\n');
+}
+route('POST', '/api/ai/brief', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Brief do rozmowy jest dla przełożonego.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  if ((b.from && !isDate(b.from)) || (b.to && !isDate(b.to)) || (b.from && b.to && b.from > b.to)) return invalid(res, { from: 'Podaj poprawny okres (RRRR-MM-DD).' });
+  const json = buildBriefJson(emp.id, briefContext(u, emp.id, b));
+  const ids = new Set(json.fakty.map(f => f.id));
+  const input = redactNames(JSON.stringify(json));
+  try {
+    if (!json.fakty.length) throw new Error('no_facts');
+    const raw = await llm(`Jesteś asystentem przełożonego w służbie cywilnej. Przygotowujesz brief do rozmowy z pracownikiem WYŁĄCZNIE na podstawie faktów z JSON. ${RULES}
+Sekcje (nagłówki dokładnie tak): „Tematy do omówienia:”, „Przykłady z okresu:”, „Pytania otwarte:”, „Kryteria bez informacji:”.
+W „Przykładach” każde zdanie kończ odnośnikiem do faktu w nawiasie kwadratowym, np. [I12]. Używaj tylko identyfikatorów z pola "id".
+Nie podawaj poziomów, punktów ani wyniku. Nie oceniaj osoby. Nie dodawaj niczego spoza faktów.`, `FAKTY (JSON):\n${input}`);
+    const brief = checkBriefRefs(raw, ids);
+    aiLog(null, u.id, 'brief', input, { text: brief, source: 'ai' });
+    send(res, 200, { brief, json, source: 'ai', model: AI_MODEL });
+  } catch {
+    const brief = rulesBrief(json);
+    aiLog(null, u.id, 'brief', input, { text: brief, source: 'rules' });
+    send(res, 200, { brief: brief + (json.fakty.length ? '\n\n' + AI_RULE_NOTE : ''), json, source: 'rules' });
+  }
+});
 route('POST', '/api/ai/talk', async (req, res, u) => {
   const b = await readJson(req);
   const ev = ownEval(u, Number(b.evalId));
