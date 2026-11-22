@@ -684,6 +684,8 @@ route('GET', '/api/demo', async (req, res) => send(res, 200, DEMO.seed && !PROD
   ? { enabled: true, manager: DEMO_MANAGER, employee: DEMO_EMPLOYEE(1), password: DEMO.hintPassword }
   : { enabled: false }));
 route('GET', '/api/me', async (req, res, u) => send(res, 200, { user: publicUser(u), ai: await ollamaStatus() }));
+// Start aplikacji: zawsze 200 (niezalogowany: user=null), także przy wymuszonej zmianie hasła
+route('GET', '/api/session', async (req, res, u) => send(res, 200, u ? { user: publicUser(u), ai: await ollamaStatus() } : { user: null }));
 route('GET', '/api/settings', async (req, res) => send(res, 200, { modules: Object.entries(MODULES).map(([key, m]) => ({ key, label: m.label, on: modOn(key), regulation: false })), required: ['Ocena okresowa (Arkusz B/C)', 'Pierwsza ocena', 'Zapoznanie i sprzeciw (art. 83)', 'Dziennik zdarzeń'] }));
 route('PUT', '/api/settings', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Tylko przełożony zmienia ustawienia.');
@@ -1696,6 +1698,78 @@ Nie podawaj poziomów, punktów ani wyniku. Nie oceniaj osoby. Nie dodawaj nicze
     send(res, 200, { brief: brief + (json.fakty.length ? '\n\n' + AI_RULE_NOTE : ''), json, source: 'rules' });
   }
 });
+// Dobór kryteriów dodatkowych do rozmowy rozpoczynającej: dane deterministyczne z serwera, model tylko wybiera z listy dozwolonych.
+const CRIT_HINTS = [
+  ['ORIENTACJA NA KLIENTA', /klient|interesant|obsług|petent|zewnętrzn/i, 'obsługę klientów lub interesantów'],
+  ['MYŚLENIE ANALITYCZNE', /analiz|dane|danych|raport|statyst|sprawozdaw|budżet|finans/i, 'pracę z danymi, analizami lub raportami'],
+  ['NEGOCJOWANIE', /negocj|umow|kontrahent|przetarg|zamówień/i, 'negocjacje lub uzgadnianie warunków'],
+  ['WYSTĄPIENIA PUBLICZNE', /wystąpi|prezentac|szkole|konferenc|publiczn|rzecznik/i, 'wystąpienia, prezentacje lub szkolenia'],
+  ['RADZENIE SOBIE W SYTUACJIACH KR', /kryzys|awari|reagowan|interwenc|pilne/i, 'działanie w sytuacjach kryzysowych lub pilnych'],
+  ['ZARZĄDZANIE STRATEGICZNE', /strateg|planowan|programow|rozwój organizac/i, 'planowanie i prace o charakterze strategicznym'],
+  ['KREATYWNOŚĆ', /innow|nowych rozwiąz|usprawnien|pomysł|projektow/i, 'wymyślanie usprawnień i nowych rozwiązań'],
+  ['WYKORZYSTYWANIE WIEDZY', /specjalist|ekspert|doradz|prawn|legislac/i, 'wiedzę specjalistyczną'],
+];
+const critStem = w => w.toLowerCase().slice(0, 5);
+const critWords = s => [...new Set(String(s || '').toLowerCase().match(/\p{L}{5,}/gu) || [])].map(critStem);
+
+route('POST', '/api/ai/criteria', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Dobór kryteriów jest dla przełożonego.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  if (b.typ !== 'B' && b.typ !== 'C') return invalid(res, { typ: 'Wybierz arkusz B lub C.' });
+  const duties = typeof b.duties === 'string' ? b.duties.slice(0, 3000) : '';
+  const position = db.prepare('SELECT position FROM users WHERE id=?').get(emp.id)?.position || '';
+  const mand = mandKeysFor(b.typ);
+  const allowed = MODEL.filter(c => !mand.includes(c.k));
+  const from = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const ev = Object.fromEntries(allowed.map(c => [c.k, 0])), fb = { ...ev };
+  for (const r of db.prepare('SELECT indicator FROM evidence WHERE employee_id=? AND date>=?').all(emp.id, from)) { const k = r.indicator.split('|')[0]; if (k in ev) ev[k]++; }
+  for (const r of db.prepare('SELECT indicator FROM feedback WHERE employee_id=? AND date>=?').all(emp.id, from)) { const k = r.indicator.split('|')[0]; if (k in fb) fb[k]++; }
+  const goals = db.prepare('SELECT s FROM goals WHERE user_id=?').all(emp.id).map(g => String(g.s || '').slice(0, 120)).filter(Boolean);
+  const nameOf = k => MODEL.find(c => c.k === k)?.n || k;
+  const list = allowed.map(c => `- ${c.k} (${c.n}): ${c.w.slice(0, 2).map(w => w.w.replace(/\s+/g, ' ')).join(' / ')} [informacje: ${ev[c.k]}, feedback: ${fb[c.k]}]`).join('\n');
+  const input = redactNames(`STANOWISKO: ${position || 'brak danych'}\nOBOWIĄZKI: ${duties || 'brak opisu'}\nCELE: ${goals.join('; ') || 'brak'}\nDOZWOLONE KRYTERIA (klucz dokładnie jak poniżej):\n${list}`);
+  const finish = (propozycje, odrzucone, source) => {
+    aiLog(null, u.id, 'criteria', input, { text: JSON.stringify(propozycje), source });
+    send(res, 200, { propozycje, odrzucone, source, ...(source === 'ai' ? { model: AI_MODEL } : {}) });
+  };
+  let odrzucone = 0;
+  try {
+    const raw = await llm(`Jesteś asystentem przełożonego w urzędzie. Dobierasz kryteria DODATKOWE do rozmowy rozpoczynającej. Wybierz 1–3 kryteria WYŁĄCZNIE z podanej listy dozwolonych (pole „kryterium” = klucz dokładnie jak na liście). Dla każdego napisz 1–2 zdania uzasadnienia odwołujące się do obowiązków, stanowiska lub zebranych informacji. Odpowiadaj po polsku. Nie oceniaj osoby, nie podawaj imion. Odpowiedz wyłącznie JSON-em: {"propozycje":[{"kryterium":"KLUCZ","uzasadnienie":"…"}]}`, input);
+    const m = raw.match(/\{[\s\S]*\}/);
+    const list2 = JSON.parse(m ? m[0] : raw)?.propozycje;
+    if (!Array.isArray(list2)) throw new Error('bad_shape');
+    const seen = new Set(), ok = [];
+    for (const p of list2) {
+      const k = typeof p?.kryterium === 'string' ? p.kryterium.trim() : '';
+      const why = typeof p?.uzasadnienie === 'string' ? p.uzasadnienie.trim().slice(0, 600) : '';
+      if (!allowed.some(c => c.k === k) || seen.has(k) || !why) { odrzucone++; continue; }
+      seen.add(k);
+      if (ok.length < MAX_EXTRA) ok.push({ k, n: nameOf(k), uzasadnienie: why }); else odrzucone++;
+    }
+    if (!ok.length) throw new Error('nothing_valid');
+    return finish(ok, odrzucone, 'ai');
+  } catch {
+    // Fallback regułowy: słowa kluczowe stanowiska i obowiązków + liczba zebranych informacji
+    const text = `${position} ${duties}`;
+    const tw = new Set(critWords(text));
+    const scored = allowed.map(c => {
+      const hint = CRIT_HINTS.find(h => h[0] === c.k);
+      const hintHit = hint && hint[1].test(text);
+      const wordHits = [...new Set([...critWords(c.n), ...c.w.flatMap(w => critWords(w.w))])].filter(x => tw.has(x)).length;
+      const info = ev[c.k] + fb[c.k];
+      const parts = [];
+      if (hintHit) parts.push(`Stanowisko lub obowiązki obejmują ${hint[2]}`);
+      else if (wordHits) parts.push('Opis stanowiska i obowiązków odpowiada wskaźnikom tego kryterium');
+      if (info) parts.push(`w ostatnich 12 miesiącach zebrano ${info} ${info === 1 ? 'informację' : 'informacji'} (informacje: ${ev[c.k]}, feedback: ${fb[c.k]})`);
+      return { c, score: (hintHit ? 10 : 0) + Math.min(wordHits, 5) + Math.min(info, 5), parts };
+    }).filter(x => x.score > 0).sort((a, z) => z.score - a.score || allowed.indexOf(a.c) - allowed.indexOf(z.c)).slice(0, MAX_EXTRA);
+    const propozycje = scored.map(x => ({ k: x.c.k, n: x.c.n, uzasadnienie: `${x.parts.join('; ').replace(/^./, ch => ch.toUpperCase())} – kryterium ${x.c.n}.` }));
+    if (!propozycje.length) { const c = allowed.find(x => x.k === 'ORIENTACJA NA KLIENTA') || allowed[0]; propozycje.push({ k: c.k, n: c.n, uzasadnienie: `Brak opisu obowiązków i zebranych informacji – kryterium ${c.n} to punkt wyjścia do rozmowy; uzupełnij obowiązki, aby dobór był trafniejszy.` }); }
+    return finish(propozycje, odrzucone, 'rules');
+  }
+});
 route('POST', '/api/ai/talk', async (req, res, u) => {
   const b = await readJson(req);
   const ev = ownEval(u, Number(b.evalId));
@@ -2045,13 +2119,13 @@ const server = http.createServer(async (req, res) => {
     const pa = route_.pattern.split('/'), ua = url.pathname.split('/');
     const params = {};
     pa.forEach((seg, i) => { if (seg.startsWith(':')) params[seg.slice(1)] = Number(ua[i]); });
-    const publicPaths = ['/api/login', '/api/logout', '/api/model', '/api/demo', '/api/activate'];
+    const publicPaths = ['/api/session', '/api/login', '/api/logout', '/api/model', '/api/demo', '/api/activate'];
     let u = null;
-    if (!publicPaths.includes(url.pathname)) {
+    if (!publicPaths.includes(url.pathname) || url.pathname === '/api/session') {
       u = sessionUser(req);
-      if (!u) return fail(res, 401, 'Zaloguj się.');
+      if (!u && url.pathname !== '/api/session') return fail(res, 401, 'Zaloguj się.');
       // Hasło nadane przez kogoś innego: do czasu zmiany dostępne są tylko dane konta i zmiana hasła
-      if (u.must_change && !['/api/me', '/api/password'].includes(url.pathname)) return fail(res, 403, 'Zmień hasło, aby kontynuować.', { code: 'password_change_required' });
+      if (u?.must_change && !['/api/me', '/api/session', '/api/password'].includes(url.pathname)) return fail(res, 403, 'Zmień hasło, aby kontynuować.', { code: 'password_change_required' });
     }
     await route_.handler(req, res, u, params);
   } catch (e) {
