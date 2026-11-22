@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS signatures(id INTEGER PRIMARY KEY, eval_id INTEGER NO
   role TEXT NOT NULL, signed_at TEXT NOT NULL, doc_sha256 TEXT NOT NULL, sig_value TEXT NOT NULL, note TEXT);
 CREATE TABLE IF NOT EXISTS ai_log(id INTEGER PRIMARY KEY, eval_id INTEGER, user_id INTEGER, action TEXT NOT NULL,
   model TEXT, input_sha256 TEXT, output_text TEXT, source TEXT, at TEXT NOT NULL);
--- Dowody: obserwacja zachowania przy konkretnym wskaźniku (sytuacja – działanie – rezultat)
+-- Informacje: obserwacja zachowania przy konkretnym wskaźniku (sytuacja – działanie – rezultat)
 CREATE TABLE IF NOT EXISTS evidence(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL,
   date TEXT NOT NULL, indicator TEXT NOT NULL, situation TEXT NOT NULL, action TEXT NOT NULL, result TEXT NOT NULL,
   link TEXT, task_ref TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS checkins(id INTEGER PRIMARY KEY, employee_id INTEGER 
 CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, author_id INTEGER NOT NULL, indicator TEXT NOT NULL,
   source TEXT NOT NULL, level INTEGER CHECK(level IS NULL OR level IN (1,3,5,7,9)), justification TEXT NOT NULL, relation TEXT NOT NULL,
   date TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL);
--- Oceny cząstkowe kwartalne: przyznaje oceniający, z uzasadnieniem i wskazaniem dowodów z kwartału
+-- Oceny cząstkowe kwartalne: przyznaje oceniający, z uzasadnieniem i wskazaniem informacji z kwartału
 CREATE TABLE IF NOT EXISTS partial_ratings(id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, evaluator_id INTEGER NOT NULL, quarter TEXT NOT NULL,
   competency TEXT NOT NULL, pts INTEGER NOT NULL CHECK(pts IN (1,3,5,7,9)), justification TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
   created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(employee_id, quarter, competency));
@@ -161,12 +161,12 @@ const MAX_EXTRA = 3;
 const now = () => new Date().toISOString();
 // Moduły spoza rozporządzenia: można je wyłączyć. Ocena okresowa, zapoznanie i sprzeciw są zawsze włączone.
 const MODULES = {
-  mod_evidence: { label: 'Dowody przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
+  mod_evidence: { label: 'Informacje przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
   mod_checkins: { label: 'Rozmowy miesięczne (check-in) i przegląd miesiąca', prefixes: ['/api/checkins', '/api/month'], default: '1' },
   mod_feedback: { label: 'Feedback między przełożonym a pracownikiem', prefixes: ['/api/feedback'], default: '1' },
   mod_partials: { label: 'Oceny cząstkowe kwartalne', prefixes: ['/api/partials'], default: '1' },
   mod_ai: { label: 'Asystent AI (podpowiedzi, nie decyzje)', prefixes: ['/api/ai/'], default: '1' },
-  mod_employee_evidence: { label: 'Pracownik widzi swoje dowody (opcjonalne)', prefixes: [], default: '1' },
+  mod_employee_evidence: { label: 'Pracownik widzi swoje informacje (opcjonalne)', prefixes: [], default: '1' },
 };
 const settingVal = key => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key); return r ? r.value : MODULES[key].default; };
 const modOn = key => settingVal(key) === '1';
@@ -184,7 +184,7 @@ const checkPass = (pw, stored) => {
   return usable && a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 // Dziennik ze łańcuchem hash: każdy wpis zawiera skrót poprzedniego (wykrywa modyfikacje).
-// Zmiany ocen, dowodów i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
+// Zmiany ocen, informacji i feedbacku zapisują poprzednią i nową wartość (JSON); obie wchodzą do skrótu.
 // Wpisy bez wartości liczą skrót jak dotąd, więc starsze dzienniki weryfikują się bez zmian.
 const auditHash = (prev, uid, action, target, at, pv = null, nv = null) => crypto.createHash('sha256')
   .update([prev || '', uid ?? '', action, target, at, ...(pv !== null || nv !== null ? [pv ?? '', nv ?? ''] : [])].join('|')).digest('hex');
@@ -262,7 +262,7 @@ function seed() {
     insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), now());
   });
 }
-// Dowody demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
+// Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
   const SIT = ['Przygotowanie raportu kwartalnego dla kierownictwa', 'Odpowiedź na pismo innej komórki organizacyjnej', 'Wdrożenie nowej procedury obiegu dokumentów',
     'Spotkanie projektowe z zespołem wykonawcy', 'Obsługa wniosku o udostępnienie informacji publicznej', 'Aktualizacja rejestru umów'];
@@ -273,13 +273,13 @@ function seedEvidence(mgr, emps, rnd) {
   const pick = a => a[Math.floor(rnd() * a.length)];
   const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const add = (eid, date, ind) => ins.run(eid, mgr, date, ind, pick(SIT), pick(ACT), pick(RES), null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
-  // Szkic oceny (ostatni pracownik): dowody do prawie wszystkich wskaźników – dwa celowo bez dowodu (demo walidacji)
+  // Szkic oceny (ostatni pracownik): informacje do prawie wszystkich wskaźników – dwa celowo bez informacji (demo walidacji)
   const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
   if (draft) {
     const inds = Object.keys(JSON.parse(draft.data).ratings || {});
     inds.slice(0, -2).forEach((ind, i) => add(draft.employee_id, `2026-0${1 + (i % 6)}-${String(5 + (i % 20)).padStart(2, '0')}`, ind));
   }
-  // Ostatnie miesiące: kilka dowodów na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
+  // Ostatnie miesiące: kilka informacji na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
   const pool = [...INDICATORS.keys()].filter(k => MAND_C.some(m => k.startsWith(m)));
   const months = [-2, -1, 0].map(d => { const t = new Date(); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() + d); return t.toISOString().slice(0, 7); });
   emps.slice(0, 4).forEach(eid => months.forEach(m => {
@@ -393,7 +393,7 @@ function sanitizeData(input, typ) {
   }
   return out;
 }
-// Liczba dowodów per wskaźnik w okresie (puste daty = bez ograniczenia)
+// Liczba informacji per wskaźnik w okresie (puste daty = bez ograniczenia)
 function evidenceCounts(empId, from, to) {
   const rows = db.prepare(`SELECT indicator, COUNT(*) n FROM evidence WHERE employee_id=? ${isDate(from) ? 'AND date>=?' : ''} ${isDate(to) ? 'AND date<=?' : ''} GROUP BY indicator`)
     .all(empId, ...[from, to].filter(isDate));
@@ -412,7 +412,7 @@ function missingForSubmit(ev) {
     });
     if (isSchema2(ev.typ, data) && !PTS5.includes(Number(data.partials?.[k]?.pts))) miss.push(`${comp.k}: brak oceny cząstkowej (1/3/5/7/9 pkt)`);
   }
-  // Ocena okresowa: każdy oceniany wskaźnik ma co najmniej jeden dowód z okresu oceny
+  // Ocena okresowa: każdy oceniany wskaźnik ma co najmniej jedną informację z okresu oceny
   // albo jawną adnotację „brak podstaw do oceny” (lvl = 'none')
   if (ev.typ !== 'pierwsza') {
     const counts = evidenceCounts(ev.employee_id, ev.period_from, ev.period_to);
@@ -420,7 +420,7 @@ function missingForSubmit(ev) {
       const comp = MODEL.find(c => c.k === k);
       comp.w.forEach((w, wi) => {
         const r = data.ratings?.[`${k}|${wi}`];
-        if (r && r.lvl !== 'none' && !counts[`${k}|${wi}`]) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez dowodu z okresu oceny (dodaj dowód albo zaznacz „brak podstaw do oceny”)`);
+        if (r && r.lvl !== 'none' && !counts[`${k}|${wi}`]) miss.push(`${comp.k}: wskaźnik ${wi + 1} bez informacji z okresu oceny (dodaj informację albo zaznacz „brak podstaw do oceny”)`);
       });
     }
   }
@@ -536,13 +536,13 @@ function seedRhythm(mgr, emps) {
   insF.run(emps[0], mgr, 'RZETELNOŚĆ|0', 'ZAD-214: zestawienie danych do sprawozdania', 7, 'Zestawienie przekazane z opisem metody i kontrolą sum; odbiorca nie zgłosił poprawek.', 'odbiorca', fbDate, at, at);
   insF.run(emps[0], mgr, 'KOMUNIKACJA|0', 'Spotkanie z wykonawcą – protokół ustaleń', null, 'Protokół rozesłany tego samego dnia, ustalenia jednoznaczne, bez pytań zwrotnych.', 'przelozony', fbDate, at, at);
   insF.run(emps[1], mgr, 'WSPÓŁPRACA|0', 'ZAD-331: wspólne opracowanie procedury', 5, 'Uwagi do procedury przekazane w terminie i uwzględnione w wersji końcowej.', 'wspolpracownik', fbDate, at, at);
-  // Ocena cząstkowa kwartalna: wskazuje dowody tej osoby z bieżącego kwartału
+  // Ocena cząstkowa kwartalna: wskazuje informacje tej osoby z bieżącego kwartału
   const q = quarterOf(today()), [qf, qt] = quarterRange(q);
   const evs = db.prepare('SELECT id,indicator FROM evidence WHERE employee_id=? AND date>=? AND date<=?').all(emps[0], qf, qt);
   const byComp = {};
   for (const e of evs) (byComp[INDICATORS.get(e.indicator).k] ||= []).push(e.id);
   const insP = db.prepare('INSERT INTO partial_ratings(employee_id,evaluator_id,quarter,competency,pts,justification,evidence_ids,created,updated) VALUES(?,?,?,?,?,?,?,?,?)');
-  Object.entries(byComp).slice(0, 2).forEach(([k, ids], i) => insP.run(emps[0], mgr, q, k, [5, 7][i], 'Rezultaty zadań w kwartale zgodne z wymaganiami; opis w dowodach.', JSON.stringify(ids.slice(0, 3)), at, at));
+  Object.entries(byComp).slice(0, 2).forEach(([k, ids], i) => insP.run(emps[0], mgr, q, k, [5, 7][i], 'Rezultaty zadań w kwartale zgodne z wymaganiami; opis w informacjach.', JSON.stringify(ids.slice(0, 3)), at, at));
 }
 
 // Dane demo i migracje (po definicji funkcji pomocniczych)
@@ -964,9 +964,9 @@ route('GET', '/api/evals/:id/document', async (req, res, u, p) => {
   res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${base}.pdf"`, 'cache-control': 'no-store', ...SECURITY });
   res.end(Buffer.from(pdfBytes));
 });
-// Szkic dokumentu z dowodów i check-inów okresu: bez poziomów, ocen cząstkowych i wyniku (uzupełnia oceniający)
+// Szkic dokumentu z informacji i check-inów okresu: bez poziomów, ocen cząstkowych i wyniku (uzupełnia oceniający)
 async function draftDocument(req, res, u, ev) {
-  if (u.role !== 'przelozony' || ev.evaluator_id !== u.id) return fail(res, 403, 'Szkic z dowodów jest dla oceniającego.');
+  if (u.role !== 'przelozony' || ev.evaluator_id !== u.id) return fail(res, 403, 'Szkic z informacji jest dla oceniającego.');
   const q = qs(req), format = q.get('format') === 'xml' ? 'xml' : 'pdf', inline = q.get('inline') === '1';
   const from = isDate(ev.period_from) ? ev.period_from : '0000-01-01', to = isDate(ev.period_to) ? ev.period_to : '9999-12-31';
   const ctx = { ev: { ...ev, data: JSON.parse(ev.data || '{}') }, model: MODEL,
@@ -1098,7 +1098,7 @@ route('PATCH', '/api/goals/:id', async (req, res, u, p) => {
   send(res, 200, { ok: true, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(g.id)) });
 });
 
-// ---------- Dowody (wskaźniki z app/kompetencje.js) ----------
+// ---------- Informacje (wskaźniki z app/kompetencje.js) ----------
 const EVIDENCE_FIELDS = ['employeeId', 'date', 'indicator', 'situation', 'action', 'result', 'link', 'taskRef'];
 function sanitizeEvidence(b, partial = false) {
   const errors = {}, v = {};
@@ -1145,7 +1145,7 @@ route('GET', '/api/evidence', async (req, res, u) => {
   send(res, 200, { evidence: evidenceQuery(u, q).map(evidenceRow) });
 });
 route('POST', '/api/evidence', async (req, res, u) => {
-  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody dodaje przełożony.');
+  if (u.role !== 'przelozony') return fail(res, 403, 'Informacje dodaje przełożony.');
   const b = await readJson(req);
   const emp = teamMember(u, b.employeeId);
   if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
@@ -1159,11 +1159,11 @@ route('POST', '/api/evidence', async (req, res, u) => {
   send(res, 201, { evidence: evidenceRow(row) });
 });
 route('PUT', '/api/evidence/:id', async (req, res, u, p) => {
-  if (u.role !== 'przelozony') return fail(res, 403, 'Dowody edytuje przełożony.');
+  if (u.role !== 'przelozony') return fail(res, 403, 'Informacje edytuje przełożony.');
   const cur = db.prepare('SELECT * FROM evidence WHERE id=?').get(p.id);
-  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono dowodu.');
+  if (!cur || !teamMember(u, cur.employee_id)) return fail(res, 404, 'Nie znaleziono informacji.');
   const b = await readJson(req);
-  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść dowodu na inną osobę.' });
+  if (b.employeeId !== undefined && Number(b.employeeId) !== cur.employee_id) return invalid(res, { employeeId: 'Nie można przenieść informacji na inną osobę.' });
   const { value: v, errors } = sanitizeEvidence(b, true);
   if (Object.keys(errors).length) return invalid(res, errors);
   const next = { ...cur, ...v };
@@ -1322,7 +1322,7 @@ route('PUT', '/api/feedback/:id', async (req, res, u, p) => {
   send(res, 200, { feedback: feedbackRow(db.prepare('SELECT * FROM feedback WHERE id=?').get(cur.id)), changed: true });
 });
 
-// ---------- Oceny cząstkowe kwartalne (przyznaje oceniający, z uzasadnieniem i dowodami) ----------
+// ---------- Oceny cząstkowe kwartalne (przyznaje oceniający, z uzasadnieniem i informacjami) ----------
 const PARTIAL_FIELDS = ['employeeId', 'quarter', 'competency', 'pts', 'justification', 'evidenceIds'];
 function sanitizePartial(b, empId, partial = false, cur = null) {
   const errors = {}, v = {};
@@ -1336,14 +1336,14 @@ function sanitizePartial(b, empId, partial = false, cur = null) {
   if (need('pts', PTS5.includes(Number(b.pts)), 'Ocena cząstkowa: 1, 3, 5, 7 lub 9 pkt.')) v.pts = Number(b.pts);
   const just = str(b.justification, 2000);
   if (need('justification', just.length >= 10, 'Uzasadnienie jest wymagane (min. 10 znaków).')) v.justification = just;
-  if (need('evidenceIds', Array.isArray(b.evidenceIds) && b.evidenceIds.length > 0 && b.evidenceIds.length <= 50, 'Wskaż co najmniej jeden dowód.')) v.evidenceIds = [...new Set(b.evidenceIds.map(Number))];
-  // Dowody: tej samej osoby, z tego kryterium i z tego kwartału
+  if (need('evidenceIds', Array.isArray(b.evidenceIds) && b.evidenceIds.length > 0 && b.evidenceIds.length <= 50, 'Wskaż co najmniej jedną informację.')) v.evidenceIds = [...new Set(b.evidenceIds.map(Number))];
+  // Informacje: tej samej osoby, z tego kryterium i z tego kwartału
   const quarter = v.quarter || cur?.quarter, comp = v.competency || cur?.competency;
   const ids = v.evidenceIds || (cur ? JSON.parse(cur.evidence_ids) : null);
   if (ids && quarter && comp && !errors.evidenceIds) {
     const [from, to] = quarterRange(quarter);
     const bad = ids.filter(id => { const e = db.prepare('SELECT employee_id,indicator,date FROM evidence WHERE id=?').get(id); return !e || e.employee_id !== empId || INDICATORS.get(e.indicator)?.k !== comp || e.date < from || e.date > to; });
-    if (bad.length) errors.evidenceIds = `Dowody spoza tej osoby, kryterium lub kwartału: ${bad.join(', ')}.`;
+    if (bad.length) errors.evidenceIds = `Informacje spoza tej osoby, kryterium lub kwartału: ${bad.join(', ')}.`;
   }
   return { value: v, errors };
 }
@@ -1390,8 +1390,8 @@ route('PUT', '/api/partials/:id', async (req, res, u, p) => {
   send(res, 200, { partial: partialRow(db.prepare('SELECT * FROM partial_ratings WHERE id=?').get(cur.id)), changed: true });
 });
 
-// ---------- Przegląd miesiąca (przełożony): dowody według wskaźników, bez punktacji ----------
-// Wskaźniki bez nowych dowodów w miesiącu są pomijane, żeby nie generować pustych ocen.
+// ---------- Przegląd miesiąca (przełożony): informacje według wskaźników, bez punktacji ----------
+// Wskaźniki bez nowych informacji w miesiącu są pomijane, żeby nie generować pustych ocen.
 route('GET', '/api/month', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Przegląd miesiąca jest dla przełożonego.');
   const q = qs(req);
@@ -1505,8 +1505,8 @@ route('POST', '/api/ai/development', async (req, res, u) => {
 // Asystent ogólny (czat): tylko system Kompas Kompetencji i procedury oceniania. Brak limitu zapytań.
 // Odpowiada wyłącznie na podstawie FAKTS (zweryfikowane zasady z aplikacji), bez danych ocen i osób.
 const CHAT_FACTS = `FAKTY O SYSTEMIE (jedyne źródło odpowiedzi):
-- System ma moduły: Start, Oceny (kreator oceny krok po kroku), Miesiąc (rozmowa miesięczna bez punktacji), Dowody (obserwacje przy wskaźnikach), Zestawienie, Wyniki zespołu, Dziennik (kto i kiedy działał), Ustawienia modułów. Nie ma sekcji „zadania”.
-- Role: przełożony (ocenia, widzi zespół) i pracownik (widzi swój profil, cele, dowody i swoje oceny po ich złożeniu).
+- System ma moduły: Start, Oceny (kreator oceny krok po kroku), Miesiąc (rozmowa miesięczna bez punktacji), Informacje (obserwacje przy wskaźnikach), Zestawienie, Wyniki zespołu, Dziennik (kto i kiedy działał), Ustawienia modułów. Nie ma sekcji „zadania”.
+- Role: przełożony (ocenia, widzi zespół) i pracownik (widzi swój profil, cele, informacje i swoje oceny po ich złożeniu).
 - Rodzaje ocen: pierwsza ocena (arkusz pierwszej oceny) oraz okresowa ocena kierownicza (Arkusz B) lub pozostałych (Arkusz C).
 - Kompetencje: 14 kompetencji, każda ma wskaźniki. Kryteria obowiązkowe są zawsze zaznaczone: dla B: zarządzanie ludźmi, podejmowanie decyzji, organizacja pracy, współpraca, komunikacja; dla C: wykorzystywanie wiedzy, rzetelność, organizacja pracy, współpraca, komunikacja. Pozostałe kryteria wybiera się dodatkowo, do 3.
 - Punktacja wskaźnika: 1, 3, 5, 7 lub 9 punktów (B i C); przy pierwszej ocenie 3, 5 lub 7. Poziom ogólny z kryteriów: znacznie poniżej, poniżej, na poziomie, powyżej, znacznie powyżej oczekiwań.
@@ -1573,8 +1573,8 @@ route('POST', '/api/ai/chat', async (req, res, u) => {
   }
 });
 
-// Pytania do rozmowy miesięcznej: tylko nazwy wskaźników i liczby dowodów (bez treści dowodów i bez danych osoby).
-// Asystent niczego nie zapisuje w ocenach, dowodach ani check-inach.
+// Pytania do rozmowy miesięcznej: tylko nazwy wskaźników i liczby informacji (bez treści informacji i bez danych osoby).
+// Asystent niczego nie zapisuje w ocenach, informacjach ani check-inach.
 route('POST', '/api/ai/checkin', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');
   const b = await readJson(req);
@@ -1585,10 +1585,10 @@ route('POST', '/api/ai/checkin', async (req, res, u) => {
   const lines = rows.map(r => `- ${INDICATORS.get(r.indicator)?.k.toLowerCase()} / ${INDICATORS.get(r.indicator)?.text.replace(/\n/g, ' ')}: ${r.n} dow.`).join('\n');
   const fallback = rows.length
     ? `Pytania do rozmowy (do 20 minut):\n- Co w ostatnim miesiącu poszło zgodnie z planem przy: ${rows.slice(0, 2).map(r => INDICATORS.get(r.indicator)?.k.toLowerCase()).join(', ')}?\n- Co utrudniało realizację zadań i czego potrzebujesz?\n- Jaki jeden cel ustalamy na kolejny miesiąc?`
-    : 'Brak dowodów w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
+    : 'Brak informacji w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
   try {
     const text = await llm(`Jesteś asystentem przełożonego w służbie cywilnej przed krótką (do 20 minut) rozmową miesięczną. ${RULES} Zaproponuj 3 pytania otwarte o rezultaty zadań i potrzebne wsparcie. Nie pytaj o czas pracy, obecność, stan zdrowia ani cechy osobowości. Nie proponuj ocen ani punktów.`,
-      `Wskaźniki z dowodami w miesiącu (liczba dowodów):\n${lines || 'brak'}`);
+      `Wskaźniki z informacjami w miesiącu (liczba informacji):\n${lines || 'brak'}`);
     audit(u.id, 'ai_checkin', `${emp.id}:${month}`); aiLog(null, u.id, 'checkin', lines, { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
@@ -1614,7 +1614,7 @@ function supportMetrics() {
   const base = { kMin: K_MIN, managers, suppressed: managers < K_MIN };
   if (base.suppressed) return base;
   const submitAt = new Map(db.prepare("SELECT target, MIN(at) at FROM audit WHERE action='submit_eval' GROUP BY target").all().map(r => [r.target, r.at]));
-  // 3. Ocenianie: w ilu miesiącach okresu jest co najmniej jeden dowód (nie liczba dowodów – nie zachęcamy do nadzoru)
+  // 3. Ocenianie: w ilu miesiącach okresu jest co najmniej jedną informację (nie liczba informacji – nie zachęcamy do nadzoru)
   const coverage = [];
   for (const e of evals) {
     if (!isDate(e.period_from) || !isDate(e.period_to) || e.period_from > e.period_to) continue;

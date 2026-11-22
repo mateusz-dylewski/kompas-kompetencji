@@ -28,16 +28,16 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Dowody i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
+      ["evidence", "Informacje i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
       ["evals", "Oceny", "clip", "Przygotuj ocenę krok po kroku"],
-      ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i dowody z miesiąca – bez punktacji"],
-      ["evidence", "Dowody", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
-      ["summary", "Zestawienie", "scale", "Liczby dowodów, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
+      ["month", "Miesiąc", "msg", "Krótka rozmowa miesięczna i informacje z miesiąca – bez punktacji"],
+      ["evidence", "Informacje", "book", "Obserwacje przy wskaźnikach: sytuacja, działanie, rezultat"],
+      ["summary", "Zestawienie", "scale", "Liczby informacji, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
@@ -137,7 +137,7 @@
     box.innerHTML = `<h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2>` + (m.suppressed
       ? `<div class="note warn">Metryki pokazujemy, gdy dane pochodzą od co najmniej ${m.kMin} przełożonych (obecnie ${m.managers}). Nie mierzymy pojedynczych osób.</div>`
       : `<ul class="c">
-          <li>Ocenianie: miesiące okresu z co najmniej jednym dowodem – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
+          <li>Ocenianie: miesiące okresu z co najmniej jedną informacją – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
           <li>Ocena na piśmie: od szkicu do złożenia – mediana <b>${m.submit.medianDays ?? "—"} dni</b>; poprawki po złożeniu: <b>${pct(m.submit.revisedPct)}</b></li>
           <li>Rozmowa rozpoczynająca w terminie 30 dni: <b>${pct(m.kickoff.onTimePct)}</b> (${m.kickoff.n}); zmiana kryteriów dodatkowych po rozmowie: <b>${pct(m.kickoff.criteriaChangedPct)}</b></li>
           <li>Przygotowanie do rozmowy (ankieta 1–5): ${m.prep.suppressed ? `za mało odpowiedzi (${m.prep.n})` : `mediana <b>${m.prep.median}</b> z ${m.prep.n} odpowiedzi`}</li></ul>
@@ -227,7 +227,7 @@
     return `<p class="muted">${why} Na razie możesz sam zaproponować cele – omówicie je na rozmowie.</p>${areas}
       <div class="btns" style="justify-content:flex-start"><button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
   }
-  // Dowody z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
+  // Informacje z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
   async function loadEvalEvidence(e) {
     const boxes = document.querySelectorAll("[data-comp-ev]"); if (!boxes.length) return;
     const q = new URLSearchParams();
@@ -238,8 +238,8 @@
     try { list = (await api("GET", `/api/evidence?${q}`)).evidence; } catch (_) { list = null; }
     boxes.forEach(box => {
       const mine = (list || []).filter(x => x.competency === box.dataset.compEv);
-      box.innerHTML = list === null ? `<p class="muted">Dowody są niedostępne (moduł wyłączony w ustawieniach).</p>`
-        : !mine.length ? `<p class="muted">Brak zapisanych dowodów przy tej kompetencji w okresie oceny.</p>`
+      box.innerHTML = list === null ? `<p class="muted">Informacje są niedostępne (moduł wyłączony w ustawieniach).</p>`
+        : !mine.length ? `<p class="muted">Brak zapisanych informacji przy tej kompetencji w okresie oceny.</p>`
         : `<ul class="ev-list">${mine.map(x => `<li><span class="muted">${esc(isoToPl(x.date))} · ${esc(x.indicatorText)}</span><br><b>Sytuacja:</b> ${esc(x.situation)} · <b>Działanie:</b> ${esc(x.action)} · <b>Rezultat:</b> ${esc(x.result)} ${safeLink(x.link)}</li>`).join("")}</ul>`;
     });
   }
@@ -630,7 +630,7 @@
         <div class="grid two">
           <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
           <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i dowody</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
         </div>
         <div class="grid two">
           <div class="card"><h2>Plan rozwoju z oceny</h2>${devPlan(d, items)}</div>
@@ -714,7 +714,7 @@
     return evalsList(true);
   }
 
-  // ---------- Dowody: obserwacje przy wskaźnikach (sytuacja – działanie – rezultat) ----------
+  // ---------- Informacje: obserwacje przy wskaźnikach (sytuacja – działanie – rezultat) ----------
   const IND = MODEL.flatMap(c => c.w.map((w, wi) => ({ key: c.k + "|" + wi, k: c.k, wi, text: w.w.replace(/\n/g, " ") })));
   const indLabel = key => { const i = IND.find(x => x.key === key); return i ? `${nameOf(i.k)} – ${i.wi + 1}. ${i.text}` : key; };
   const indOptions = (sel, onlyK) => MODEL.filter(c => !onlyK || c.k === onlyK).map(c => `<optgroup label="${esc(nameOf(c.k))}">${c.w.map((w, wi) => {
@@ -724,11 +724,11 @@
   const empName = id => first(((S.dash && S.dash.team) || []).find(t => t.id === +id)?.name || "");
   const safeLink = u => (/^https?:\/\//i.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">link<span class="sr"> (otwiera się w nowej karcie)</span></a>` : "");
   function evidenceTable(list, { editable, showEmp }) {
-    if (!list.length) return `<p class="muted">Brak dowodów dla wybranych filtrów.</p>`;
-    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Dowody (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
+    if (!list.length) return `<p class="muted">Brak informacji dla wybranych filtrów.</p>`;
+    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
       ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
         <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
-        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
+        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>`;
   }
   function evidencePage(isMgr) {
@@ -741,13 +741,13 @@
         <div><label class="f" for="fFrom">Od</label><input id="fFrom" name="from" type="date" value="${esc(f.from)}"></div>
         <div><label class="f" for="fTo">Do</label><input id="fTo" name="to" type="date" value="${esc(f.to)}"></div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button>
-          ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj dowód</button>` : ""}</div>
+          ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj informację</button>` : ""}</div>
       </form></div>
-      <div class="card"><h2>Dowody</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
+      <div class="card"><h2>Informacje</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
         <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>
       ${isMgr ? "" : `<div class="card"><h2>Feedback o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Rozmowy miesięczne</h2><div id="ciMine"><p class="muted">Ładowanie…</p></div></div>
-        <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem dowodów.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
+        <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem informacji.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
   }
   const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
   function feedbackList(list, editable) {
@@ -756,7 +756,7 @@
       <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj feedback z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
-  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(dowody: ${p.evidenceIds.length})</span>`;
+  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
   async function loadEmployeeExtras() {
     const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
     try {
@@ -767,7 +767,7 @@
     } catch (e) { put("fbMine", `<p class="muted">${esc(e.message)}</p>`); }
   }
 
-  // ---------- Przegląd miesiąca (przełożony): check-in, dowody według wskaźników, feedback ----------
+  // ---------- Przegląd miesiąca (przełożony): check-in, informacje według wskaźników, feedback ----------
   const quarterOf = m => `${m.slice(0, 4)}-Q${Math.floor((+m.slice(5, 7) - 1) / 3) + 1}`;
   function monthPage() {
     const m = S.month;
@@ -790,7 +790,7 @@
       const c = d.checkin || { done: "", attention: "", goal: "", date: "", status: "planowany" };
       const ro = "";
       box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna (check-in)</h2>
-          <p class="muted">Do 20 minut. Trzy pola i dowody z miesiąca. Bez punktacji i bez oceny osoby.</p>
+          <p class="muted">Do 20 minut. Trzy pola i informacje z miesiąca. Bez punktacji i bez oceny osoby.</p>
           <form id="ciForm" aria-labelledby="ciH" novalidate>
             <label class="f" for="ciDone">Co zrobiono</label><textarea id="ciDone" maxlength="600" ${ro}>${esc(c.done)}</textarea>
             <label class="f" for="ciAtt">Co wymaga uwagi</label><textarea id="ciAtt" maxlength="600" ${ro}>${esc(c.attention)}</textarea>
@@ -801,16 +801,16 @@
             <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
               <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button></div>
           </form><div id="aiCkOut" aria-live="polite"></div>
-          <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę dowodów. Nie zapisuje niczego i nie proponuje ocen.</p></div>
-        <div class="card"><div class="row"><h2>Dowody z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Dowód", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
-          <p class="muted">Pokazujemy tylko wskaźniki z nowymi dowodami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
+          <p class="note">Asystent widzi tylko nazwy wskaźników i liczbę informacji. Nie zapisuje niczego i nie proponuje ocen.</p></div>
+        <div class="card"><div class="row"><h2>Informacje z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Informacja", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
+          <p class="muted">Pokazujemy tylko wskaźniki z nowymi informacjami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
             <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
-              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj dowód z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak dowodów w tym miesiącu.</p>`}</div>
+              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
         <div class="card"><div class="row"><h2>Feedback z miesiąca</h2>${actBtn("plus", "Feedback", `data-act="addFeedback"`, "")}</div>
           <p class="muted">Feedback dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
         <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
-          <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem dowodów.</p>
+          <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem informacji.</p>
           ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
       bindActs(box);
       $("#ciForm").addEventListener("submit", async e => {
@@ -859,15 +859,15 @@
     const emp = pr ? pr.employeeId : S.month.employeeId;
     const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
     const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
-    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak dowodów z tego kryterium w kwartale. Najpierw dodaj dowód.</p>`; };
+    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
     openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
-      <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jeden dowód z kwartału.</p>
+      <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jedną informację z kwartału.</p>
       <form id="pqForm" novalidate>
         <label class="f" for="pqComp">Kryterium</label><select id="pqComp" required ${pr ? "disabled" : ""}><option value="">Wybierz…</option>${compOptions(v.competency)}</select>
         <fieldset class="plain"><legend class="f">Ocena cząstkowa</legend><div class="lv" role="radiogroup" aria-label="Ocena cząstkowa">
           ${PTS5.map((p, i) => `<label><input type="radio" name="pqPts" value="${p}" ${v.pts === p ? "checked" : ""}><span><b>${p} pkt</b> ${LEVELS5[i]}</span></label>`).join("")}</div></fieldset>
         <label class="f" for="pqJust">Uzasadnienie</label><textarea id="pqJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
-        <fieldset class="plain"><legend class="f">Dowody z kwartału</legend><div id="pqEvs">${v.competency ? evBoxes(v.competency) : `<p class="muted">Wybierz kryterium.</p>`}</div></fieldset>
+        <fieldset class="plain"><legend class="f">Informacje z kwartału</legend><div id="pqEvs">${v.competency ? evBoxes(v.competency) : `<p class="muted">Wybierz kryterium.</p>`}</div></fieldset>
         <div id="pqErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
@@ -896,11 +896,11 @@
     $("#fComp")?.addEventListener("change", e => { $("#fInd").innerHTML = `<option value="">Wszystkie</option>${indOptions("", e.target.value)}`; });
   }
   const fieldErrors = ex => (ex.data && ex.data.fields ? Object.values(ex.data.fields).join(" ") : ex.message);
-  // Formularz dowodu (dodanie / edycja). preset: { employeeId, indicator, date }, after: wywołanie po zapisie
+  // Formularz informacji (dodanie / edycja). preset: { employeeId, indicator, date }, after: wywołanie po zapisie
   function evidenceModal(ev, preset = {}, after) {
     const v = ev || { employeeId: preset.employeeId || S.evFilter.employeeId || "", indicator: preset.indicator || "", date: preset.date || new Date().toISOString().slice(0, 10), situation: "", action: "", result: "", link: "", taskRef: "" };
     const fixedEmp = !!ev || !!preset.employeeId;
-    openModal(`<h2 id="mTitle">${ev ? "Edytuj dowód" : "Nowy dowód"}</h2>
+    openModal(`<h2 id="mTitle">${ev ? "Edytuj informację" : "Nowa informacja"}</h2>
       <p class="muted">Jedna obserwacja przy jednym wskaźniku: sytuacja, działanie, rezultat. Zmiana trafia do dziennika.</p>
       <form id="evForm" novalidate>
         ${fixedEmp ? `<p><b>Pracownik:</b> ${empName(v.employeeId) || esc(S.cur?.empName || "")}</p>` : `<label class="f" for="eEmp">Pracownik</label><select id="eEmp" required><option value="">Wybierz…</option>${empOptions(v.employeeId)}</select>`}
@@ -920,18 +920,18 @@
         try {
           if (ev) await api("PUT", `/api/evidence/${ev.id}`, body);
           else await api("POST", "/api/evidence", { ...body, employeeId: +(fixedEmp ? v.employeeId : $("#eEmp").value) });
-          closeModal(); toast(ev ? "Zapisano zmiany dowodu." : "Dodano dowód.");
+          closeModal(); toast(ev ? "Zapisano zmiany informacji." : "Dodano informację.");
           if (after) await after(); else loadEvidence();
         } catch (ex) { $("#evErr").textContent = fieldErrors(ex); }
       });
     }, "mTitle");
   }
-  // Dowody przy wskaźniku w kreatorze oceny (okres oceny)
+  // Informacje przy wskaźniku w kreatorze oceny (okres oceny)
   function evidenceMini(indKey) {
     const c = S.cur, list = (c.evidence || []).filter(e => e.indicator === indKey);
-    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Dowód</button>` : "";
-    return `<div class="ev-mini"><div class="row"><span class="muted">Dowody z okresu oceny: <b>${list.length}</b></span>${add}</div>
-      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak dowodu. Przed złożeniem dodaj dowód albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
+    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Informacja</button>` : "";
+    return `<div class="ev-mini"><div class="row"><span class="muted">Informacje z okresu oceny: <b>${list.length}</b></span>${add}</div>
+      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
   }
   async function refreshWizardEvidence() {
     const c = S.cur; if (!c) return;
@@ -962,15 +962,15 @@
     try {
       const s = await api("GET", "/api/summary?" + q);
       box.innerHTML = `<div class="kpis">
-          <div class="kpi"><b>${s.evidenceTotal}</b><span>Dowody w okresie</span></div>
+          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie</span></div>
           <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Check-iny odbyte / zapisane</span></div>
           <div class="kpi"><b>${s.feedbackTotal}</b><span>Feedback</span></div>
-          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez dowodów</span></div></div>
-        <div class="card"><h2>Wskaźniki z dowodami lub feedbackiem</h2>
+          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez informacji</span></div></div>
+        <div class="card"><h2>Wskaźniki z informacjami lub feedbackiem</h2>
           <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
-          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Dowody</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z dowodami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
+          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z informacjami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
             ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
-            </tbody></table></div>` : `<p class="muted">Brak dowodów i feedbacku w okresie.</p>`}</div>
+            </tbody></table></div>` : `<p class="muted">Brak informacji i feedbacku w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
             <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
@@ -981,7 +981,7 @@
   function settingsPage() {
     const mods = S.moduleList || [];
     return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
-      <p class="muted">Dowody, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Dowody są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
+      <p class="muted">Informacje, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
       <form id="setForm">${mods.map(m => `<label class="choice"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span></label>`).join("")}
       <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
       <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B i C), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
@@ -1050,7 +1050,7 @@
     const done = comp.w.filter((_, wi) => c.ratings[comp.k + "|" + wi]).length;
     return `<div class="card"><div class="row"><h2 class="h-comp">${compIc(comp.k)}${esc(nameOf(comp.k))}</h2><span class="tag info">${done}/${comp.w.length} ocenione</span></div>
       <p class="muted">Wybierz poziom, który najlepiej opisuje to, co faktycznie obserwowałeś/aś. Dodaj jeden konkretny przykład: sytuacja, działanie, rezultat.</p>
-      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z dowodów (puste pola)</button></div>` : ""}</div>
+      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z informacji (puste pola)</button></div>` : ""}</div>
       ${comp.w.map((w, wi) => {
         const id = comp.k + "|" + wi, r = c.ratings[id] || {};
         const exId = "ex" + comp.k.length + "_" + wi;
@@ -1168,7 +1168,7 @@
   }
   function draftLinks(id) {
     const base = `/api/evals/${id}/document?variant=szkic`;
-    return `<div class="docs"><h3>Szkic z dowodów i check-inów</h3><p class="muted">Materiał roboczy: dowody i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
+    return `<div class="docs"><h3>Szkic z informacji i check-inów</h3><p class="muted">Materiał roboczy: informacje i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
       <div class="btns" style="justify-content:flex-start">
         <a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
         <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>
@@ -1186,7 +1186,7 @@
   function evalReadPage() {
     const e = S.readEval; if (!e) return `<p class="muted">Ładowanie…</p>`;
     const scores = scoreLocal({ criteria: e.data.criteria, ratings: e.data.ratings, typ: e.typ, data: e.data });
-    // Kompetencja = rozwijane „Szczegóły”: wskaźniki z punktami i przykładami oraz dowody z okresu oceny
+    // Kompetencja = rozwijane „Szczegóły”: wskaźniki z punktami i przykładami oraz informacje z okresu oceny
     const items = `<h2 style="margin:8px 0 12px">Kryteria – szczegóły</h2>` + MODEL.filter(m => e.data.criteria.includes(m.k)).map(m => {
       const sc = scores[m.k]?.avg;
       return `
@@ -1194,7 +1194,7 @@
         <summary><h3 class="h-comp">${compIc(m.k)}${esc(nameOf(m.k))}</h3><span class="muted">${sc === null || sc === undefined ? "brak oceny" : `${fmt(sc)} pkt`}</span><span class="more">Szczegóły</span></summary>
         <div class="comp-body">
           <h4>Wskaźniki</h4>${m.w.map((w, wi) => { const r = e.data.ratings[m.k + "|" + wi]; return `<div class="ind"><b>${esc(w.w)}</b><div class="muted">${!r ? "nieocenione" : r.lvl === "none" ? "brak podstaw do oceny" : `${e.typ === "pierwsza" ? PTS3[r.lvl - 1] : PTS5[r.lvl]} pkt`}</div>${r?.ex ? `<div>${esc(r.ex)}</div>` : ""}</div>`; }).join("")}
-          <h4>Dowody z okresu oceny</h4><div data-comp-ev="${esc(m.k)}"><p class="muted">Wczytywanie…</p></div>
+          <h4>Informacje z okresu oceny</h4><div data-comp-ev="${esc(m.k)}"><p class="muted">Wczytywanie…</p></div>
         </div>
       </details>`;
     }).join("");
@@ -1454,7 +1454,7 @@
       return evidenceModal(null, { employeeId: b.dataset.emp || "", indicator: b.dataset.ind || "" }, b.dataset.after === "month" ? () => loadMonth() : undefined);
     },
     addFeedback: () => feedbackModal(null),
-    // Uzupełnia puste pola „Przykład z okresu” treścią dowodów – nie ustawia poziomów (decyduje oceniający)
+    // Uzupełnia puste pola „Przykład z okresu” treścią informacji – nie ustawia poziomów (decyduje oceniający)
     fillFromEvidence: b => {
       const c = S.cur, k = b.dataset.comp, comp = MODEL.find(m => m.k === k); let n = 0;
       comp.w.forEach((_, wi) => {
@@ -1462,7 +1462,7 @@
         if (!list.length || (c.ratings[id] && (c.ratings[id].ex || "").trim())) return;
         c.ratings[id] = { ...(c.ratings[id] || {}), ex: list.slice(0, 2).map(e => `${e.date}: ${e.situation} – ${e.action} → ${e.result}`).join("\n") }; n++;
       });
-      c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z dowodami.");
+      c.data.ratings = c.ratings; queueSave(); render(); toast(n ? `Wstawiono przykłady przy ${n} wskaźnikach. Poziomy wybierasz Ty.` : "Brak pustych pól z informacjami.");
     },
     earlyException: async () => {
       const reason = prompt("Uzasadnienie wyjątku od reguły 6 miesięcy (min. 10 znaków). Wpis trafi do dziennika:");

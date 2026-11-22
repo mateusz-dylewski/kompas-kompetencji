@@ -105,7 +105,9 @@ Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostę
 
 Przy starcie serwer przenosi **szkice** ocen B/C bez pola `schema` do `schema: 2`: dodaje puste `partials` i usuwa ręcznie wpisany `wynik`. Oceniający musi wtedy przyznać oceny cząstkowe. Każdy taki szkic dostaje wpis `migrate_eval_schema2` w dzienniku. **Ocen złożonych nie zmieniamy**, bo ich treść jest podpisana skrótem. Ich oceny cząstkowe pozostają średnimi wskaźników, a wynik to ten wpisany przez oceniającego (`wynikSource: reczny_sprzed_migracji`).
 
-## Dowody (ekran „Dowody”)
+## Informacje (ekran „Informacje”, dawniej „Dowody”)
+
+W interfejsie i w PDF szkicu obserwacje przy wskaźnikach nazywają się **„Informacje”**. W API, bazie i XML zostaje nazwa techniczna `evidence` / `<Dowod>` (kontrakt bez zmian).
 
 Dowód to jedna obserwacja przy jednym wskaźniku z `app/kompetencje.js` (klucz `KOMPETENCJA|nr`, ten sam co w ocenie). Składa się z daty, opisu sytuacji, działania i rezultatu, opcjonalnego linku do artefaktu (http/https) i ID zadania. Na tym etapie (MVP) dowody dodaje i edytuje przełożony. Pracownik widzi swoje dowody tylko do odczytu.
 
