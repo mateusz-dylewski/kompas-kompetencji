@@ -1,5 +1,21 @@
 # NOTES – nocna iteracja (pamięć orkiestratora)
 
+## PRZERWANE – przekazanie (04:55)
+Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: commit 6b4525c (brief w 4 stałych sekcjach, 133/133 testów), potem commit WIP z niedokończonym front-endem.
+
+**Gotowe (w commitach, testy zielone – 133/133):**
+- Przygotowanie: ORCHESTRATOR.md, CLAUDE.md (z zasadami o API i limicie), role w .claude/agents/, Playwright + skrypty person (e2e/personas/run.mjs: krystyna, michal, ewa, juror, klawiatura, awaria; tryb PERSONA_AI=down|slow; kontrast, nazwy dostępne, skip link, interactiveMs).
+- Cykl 1: /api/session (start bez 401), POST /api/ai/criteria (ścieżka a, walidacja + fallback regułowy), menu mobilne 4 + „Więcej”, h1 na telefonie, etykiety list wyboru.
+- Cykl 2: design gov.pl/mObywatel (tokeny, Open Sans, karty 8 px, fokus), „Zaproponuj kryteria (AI)” w rozmowie rozpoczynającej, logowanie z wartością produktu (a/b/c), naprawa menu mobilnego poza ekranem, dane demo dla jury.
+- Cykl 3 (częściowo): test pełnej ścieżki demo (test/demo-flow.test.mjs), brief w 4 stałych sekcjach bez Markdown.
+- Wyniki rubryki: start 6,4 → cykl 1: 7,0 → cykl 2: 7,3. Persony (cykl 2): juror 6, Krystyna 5, klawiatura 6. Cyklu 3 nie oceniono.
+
+**Niegotowe:**
+- Commit WIP z front-endem cyklu 3 (app/app.js, app/app.css) – NIESPRAWDZONY (bez node --check, testów i person). Zakres w opisie commita: błąd JS na profilu pracownika, animacje wejścia, karta „Ocena w 3 krokach”, prosty język, aria-label z nazwiskiem, wylogowanie na telefonie, opis briefu, radar, okno rozmowy na telefonie.
+- Nieocenione personami po cyklu 3: Michał i Ewa nie były uruchamiane jako persony haiku.
+- `stash@0` (z cyklu 2, stara wersja app/app.css) pozostawiony na polecenie – jego treść jest już scalona.
+- Faza 2 (podsumowanie dla Janka) nie wykonana w pełnej formie – ten wpis ją zastępuje.
+
 ## Czas
 - Start: 2026-11-22 04:13:17 (epoch 1795317197)
 - Twardy koniec pętli: 06:03:17 · podsumowanie do 06:13:17
