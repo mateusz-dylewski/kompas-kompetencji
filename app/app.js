@@ -717,6 +717,10 @@
           <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
           ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
             : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
+        ${(d.upcoming || []).length || d.kickoff ? `<div class="card"><h2>Przygotuj się do rozmowy</h2>
+          <p class="muted">Asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
+          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
+          <div id="aiPrepOut" aria-live="polite"></div></div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
           <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
           <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
@@ -1499,6 +1503,12 @@
     },
     mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
     aiBrief: b => briefModal(+b.dataset.emp),
+    aiPrep: async b => {
+      const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
+      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+      b.disabled = false;
+    },
     briefTab: b => { document.querySelectorAll("[data-brief-pane]").forEach(p => { p.hidden = p.dataset.briefPane !== b.dataset.tab; }); document.querySelectorAll('[data-act="briefTab"]').forEach(t => t.setAttribute("aria-selected", t === b ? "true" : "false")); },
     briefDownload: () => {
       if (!S.briefJson) return;

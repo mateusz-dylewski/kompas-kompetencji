@@ -1575,6 +1575,43 @@ route('GET', '/api/summary', async (req, res, u) => {
 });
 
 // AI – wspomaganie przełożonego i pracownika (człowiek zawsze decyduje)
+// ---------- Przygotowanie pracownika do rozmowy (etap 7): o co może zapytać przełożony ----------
+// Wejście: kryteria bieżącej oceny lub rozmowy rozpoczynającej, pytania z bazy asystenta, własne cele i kroki.
+// Informacje z okresu tylko jako liczby na kryterium i tylko przy włączonym module wglądu pracownika. Bez poziomów i oceniania.
+function prepInput(u) {
+  const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(u.id);
+  const k = latestKickoff(u.id);
+  const criteria = draft ? JSON.parse(draft.data || '{}').criteria || [] : k ? [...mandKeysFor(k.typ), ...JSON.parse(k.extra_criteria || '[]')] : [];
+  const qs2 = criteria.map(c => { const e = ASSISTANT.kompetencje.find(x => c.startsWith(x.match)); return { k: c, name: MODEL.find(m => m.k === c)?.n || c, pytania: e ? [...e.niski.slice(0, 2), ...e.wysoki.slice(0, 2)] : [] }; });
+  const goals = goalsOf(u.id).map(g => ({ cel: g.s, termin: g.t, kroki: g.steps.map(x => `${x.t} (${x.confirmed_at ? 'potwierdzony' : x.reported_at ? 'zgłoszony' : 'do zrobienia'})`) }));
+  const from = isDate(draft?.period_from) ? draft.period_from : k?.ack_at ? k.ack_at.slice(0, 10) : `${+today().slice(0, 4) - 1}${today().slice(4)}`;
+  const counts = modOn('mod_employee_evidence') ? Object.fromEntries(criteria.map(c => [c, db.prepare("SELECT COUNT(*) n FROM evidence WHERE employee_id=? AND date>=? AND substr(indicator,1,length(?)+1)=?||'|'").get(u.id, from, c, c).n])) : null;
+  return { criteria: qs2, ogolne: ASSISTANT.ogolne || [], goals, counts };
+}
+function rulesPrep(inp) {
+  const qs2 = inp.criteria.length ? inp.criteria.flatMap(c => c.pytania.slice(0, 2).map(q => `- (${c.name.toLowerCase()}) ${q}`)) : (Array.isArray(inp.ogolne) ? inp.ogolne : []).slice(0, 5).map(q => `- ${typeof q === 'string' ? q : q.q || ''}`);
+  return ['O co może zapytać przełożony:', ...qs2.slice(0, 10),
+    '', 'Co warto przygotować:', '- 1–2 konkretne sytuacje do każdego kryterium: sytuacja, Twoje działanie, rezultat.',
+    ...inp.goals.slice(0, 3).map(g => `- Postęp celu „${g.cel}”: co zrobiłeś, co blokuje, czego potrzebujesz.`),
+    '', 'O co Ty możesz zapytać:', '- Jakie są oczekiwania na kolejny okres i jak poznam, że je spełniam?', '- Jakiego wsparcia mogę oczekiwać (szkolenia, mentoring)?', '- Które moje działania warto powtarzać?'].join('\n');
+}
+route('POST', '/api/ai/prep', async (req, res, u) => {
+  if (u.role !== 'pracownik') return fail(res, 403, 'Przygotowanie do rozmowy jest dla pracownika.');
+  const inp = prepInput(u);
+  const input = redactNames(JSON.stringify(inp));
+  try {
+    const text = await llm(`Jesteś asystentem pracownika służby cywilnej przed rozmową z przełożonym (rozmowa miesięczna lub oceniająca). Pomagasz się przygotować. ${RULES}
+Sekcje (nagłówki dokładnie tak): „O co może zapytać przełożony:” (wybierz i dopasuj pytania z bazy do kryteriów), „Co warto przygotować:” (konkretne przykłady sytuacji, postęp celów), „O co Ty możesz zapytać:”.
+Nie podawaj poziomów, punktów ani przewidywanej oceny. Nie oceniaj osoby. Opieraj się tylko na danych poniżej.`, `DANE (JSON):\n${input}`);
+    aiLog(null, u.id, 'prep', input, { text, source: 'ai' });
+    send(res, 200, { text, source: 'ai', model: AI_MODEL });
+  } catch {
+    const text = rulesPrep(inp);
+    aiLog(null, u.id, 'prep', input, { text, source: 'rules' });
+    send(res, 200, { text: text + '\n\n' + AI_RULE_NOTE, source: 'rules' });
+  }
+});
+
 // ---------- Brief do rozmowy (etap 6): wyszukiwanie faktów (serwer) + brief od modelu z odnośnikami do faktów ----------
 // JSON „kto co robił” buduje serwer z wpisów zrobionych przez ludzi (informacje, feedback, rozmowy miesięczne, kroki celów).
 // „Kto” to wyłącznie rola. Bez poziomów i punktów (także z feedbacku), bez wyniku. Model dostaje JSON po redactNames().
