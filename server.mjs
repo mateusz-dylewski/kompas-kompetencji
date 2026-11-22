@@ -123,6 +123,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS prep_survey(id INTEGER PRIMARY KEY, rating I
 try { db.exec('ALTER TABLE evals ADD COLUMN survey_done INTEGER NOT NULL DEFAULT 0'); } catch (_) { /* już istnieje */ }
 // Cele SMART: postęp z kroków (sprawdzalnych), a nie z suwaka – [{ t, done }]; progress = odsetek wykonanych kroków
 try { db.exec("ALTER TABLE goals ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* już istnieje */ }
+// Cele wyznacza przełożony (created_by); NULL = cel sprzed zmiany, założony przez pracownika
+try { db.exec('ALTER TABLE goals ADD COLUMN created_by INTEGER'); } catch (_) { /* już istnieje */ }
+// Migracja kroków { t, done } → { t, reported_at, confirmed_at, confirmed_by } (wykonane = potwierdzone przy migracji)
+for (const g of db.prepare("SELECT id, steps, created FROM goals WHERE steps LIKE '%\"done\"%'").all()) {
+  const steps = JSON.parse(g.steps || '[]').map(x => ('done' in x ? { t: x.t, reported_at: x.done ? g.created : null, confirmed_at: x.done ? g.created : null, confirmed_by: null } : x));
+  db.prepare('UPDATE goals SET steps=? WHERE id=?').run(JSON.stringify(steps), g.id);
+}
 
 // Dziennik: pieczęć HMAC każdego wpisu (klucz spoza bazy) i blokada UPDATE/DELETE na poziomie bazy
 try { db.exec('ALTER TABLE audit ADD COLUMN mac TEXT'); } catch (_) { /* już istnieje */ }
@@ -254,12 +261,15 @@ function seed() {
   });
   seedEvidence(mgr, emps, rnd);
   seedRhythm(mgr, emps);
-  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
   emps.forEach((eid, i) => {
     const doneN = i % 3 === 0 ? STEPS.length : i % STEPS.length;
-    const steps = STEPS.map((t, si) => ({ t, done: si < doneN }));
-    insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), now());
+    // Kroki demo: potwierdzone, jeden zgłoszony (czeka na potwierdzenie), reszta otwarta
+    const at = now();
+    const steps = STEPS.map((t, si) => ({ t, reported_at: si <= doneN ? at : null, confirmed_at: si < doneN ? at : null, confirmed_by: si < doneN ? mgr : null }));
+    if (doneN === STEPS.length) steps.forEach(x => { x.reported_at = at; });
+    insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), mgr, at);
   });
 }
 // Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
@@ -837,6 +847,11 @@ route('GET', '/api/dashboard', async (req, res, u) => {
   }).sort((a, b) => (a.days ?? 1e9) - (b.days ?? 1e9));
   const dueById = Object.fromEntries(deadlines.map(d => [d.id, d.due]));
   teamRows.forEach(r => { r.nextDue = dueById[r.id] || null; });
+  // Cele: kroki zgłoszone przez pracownika, czekające na potwierdzenie przełożonego
+  for (const r of teamRows) {
+    r.goalsToConfirm = goalsOf(r.id).reduce((n, g) => n + g.stepsReported, 0);
+    if (r.goalsToConfirm) alerts.push({ kind: 'goals', employeeId: r.id, name: r.name, text: `Kroki celów do potwierdzenia: ${r.goalsToConfirm}` });
+  }
   // Rozmowa rozpoczynająca: po każdej ocenie okresowej, w ciągu 30 dni; potem zapoznanie pracownika (część I)
   for (const r of teamRows) {
     const last = lastPeriodic(evals.filter(e => e.employee_id === r.id));
@@ -1048,53 +1063,104 @@ route('POST', '/api/evals/:id/discuss', async (req, res, u, p) => {
 });
 
 // Cele SMART (pracownik)
-// Cel SMART z krokami: każdy krok jest sprawdzalny (wykonany albo nie), postęp liczy się sam – nie trzeba go „dostrajać”.
-// Cel bez kroków (sprzed tej zmiany) ma tylko stan zrealizowany / w toku.
+// Cele SMART wyznacza przełożony (moduł przełożonego, etap 3). Każdy krok jest sprawdzalny:
+// pracownik ZGŁASZA wykonanie, przełożony POTWIERDZA. Postęp = potwierdzone kroki / wszystkie (deterministycznie).
+// Krok: { t, reported_at, confirmed_at, confirmed_by }. Cel bez kroków (sprzed zmian) ma tylko stan zrealizowany / w toku.
 const GOAL_STEPS_MAX = 8, GOAL_YEARS_MAX = 5;
-const goalRow = g => { const steps = JSON.parse(g.steps || '[]'); return { ...g, steps, done: !!g.done, stepsDone: steps.filter(x => x.done).length }; };
-const goalProgress = steps => (steps.length ? Math.round(steps.filter(x => x.done).length / steps.length * 100) : null);
-const goalsOf = uid => db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY id').all(uid).map(goalRow);
+const newStep = t => ({ t, reported_at: null, confirmed_at: null, confirmed_by: null });
+const goalProgress = steps => (steps.length ? Math.round(steps.filter(x => x.confirmed_at).length / steps.length * 100) : null);
+const goalRow = g => {
+  const steps = JSON.parse(g.steps || '[]');
+  return { ...g, steps, done: !!g.done, legacy: !g.created_by, stepsConfirmed: steps.filter(x => x.confirmed_at).length,
+    stepsReported: steps.filter(x => x.reported_at && !x.confirmed_at).length };
+};
+const goalsOf = uid => db.prepare('SELECT * FROM goals WHERE user_id=? ORDER BY done, t, id').all(uid).map(goalRow);
 const stepText = t => str(t, 150);
-route('GET', '/api/goals', async (req, res, u) => send(res, 200, { goals: goalsOf(u.id) }));
+const goalAuditView = g => ({ s: g.s, m: g.m, a: g.a, r: g.r, t: g.t, done: !!g.done, steps: typeof g.steps === 'string' ? JSON.parse(g.steps) : g.steps });
+function validateGoal(b, partial = false) {
+  const errors = {}, v = {};
+  for (const [k, label] of [['s', 'Konkretnie'], ['m', 'Mierzalnie'], ['a', 'Osiągalnie'], ['r', 'Istotnie']]) {
+    if (partial && b[k] === undefined) continue;
+    v[k] = str(b[k], 200); if (!v[k]) errors[k] = `Uzupełnij pole „${label}”.`;
+  }
+  if (!partial || b.t !== undefined) {
+    const t = typeof b.t === 'string' ? b.t : '';
+    const maxT = `${+today().slice(0, 4) + GOAL_YEARS_MAX}${today().slice(4)}`;
+    if (!isDate(t)) errors.t = 'Podaj prawdziwą datę (DD.MM.RRRR).';
+    else if (t < today()) errors.t = 'Termin nie może być w przeszłości.';
+    else if (t > maxT) errors.t = `Termin najpóźniej za ${GOAL_YEARS_MAX} lat.`;
+    else v.t = t;
+  }
+  return { v, errors };
+}
+route('GET', '/api/goals', async (req, res, u) => {
+  if (u.role === 'pracownik') return send(res, 200, { goals: goalsOf(u.id) });
+  const q = qs(req);
+  const ids = q.get('employeeId') ? [teamMember(u, q.get('employeeId'))?.id].filter(Boolean)
+    : db.prepare("SELECT id FROM users WHERE manager_id=? AND role='pracownik'").all(u.id).map(r => r.id);
+  send(res, 200, { goals: ids.flatMap(goalsOf) });
+});
 route('POST', '/api/goals', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Cele wyznacza przełożony. Swoje propozycje zgłoś na rozmowie miesięcznej.');
   const b = await readJson(req);
-  const errors = {};
-  const g = {};
-  for (const [k, label] of [['s', 'Konkretnie'], ['m', 'Mierzalnie'], ['a', 'Osiągalnie'], ['r', 'Istotnie']]) { g[k] = str(b[k], 200); if (!g[k]) errors[k] = `Uzupełnij pole „${label}”.`; }
-  const t = typeof b.t === 'string' ? b.t : '';
-  const maxT = `${+today().slice(0, 4) + GOAL_YEARS_MAX}${today().slice(4)}`;
-  if (!isDate(t)) errors.t = 'Podaj prawdziwą datę (DD.MM.RRRR).';
-  else if (t < today()) errors.t = 'Termin nie może być w przeszłości.';
-  else if (t > maxT) errors.t = `Termin najpóźniej za ${GOAL_YEARS_MAX} lat.`;
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  const { v, errors } = validateGoal(b);
   const steps = Array.isArray(b.steps) ? b.steps.map(stepText).filter(Boolean) : [];
   if (!steps.length) errors.steps = 'Dodaj co najmniej jeden krok – po nim widać postęp.';
   else if (steps.length > GOAL_STEPS_MAX) errors.steps = `Najwyżej ${GOAL_STEPS_MAX} kroków.`;
   if (Object.keys(errors).length) return invalid(res, errors, Object.values(errors)[0]);
-  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created) VALUES(?,?,?,?,?,?,0,0,?,?)')
-    .run(u.id, g.s, g.m, g.a, g.r, t, JSON.stringify(steps.map(x => ({ t: x, done: false }))), now()).lastInsertRowid;
-  send(res, 201, { id, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(id)) });
+  const id = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,0,0,?,?,?)')
+    .run(emp.id, v.s, v.m, v.a, v.r, v.t, JSON.stringify(steps.map(newStep)), u.id, now()).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM goals WHERE id=?').get(id);
+  audit(u.id, 'create_goal', `goal:${id}`, null, { employeeId: emp.id, ...goalAuditView(row) });
+  send(res, 201, { id, goal: goalRow(row) });
 });
-// { step: i, done } – oznacza krok; { addStep: "…" } – dopisuje krok; { done } – tylko dla celu bez kroków
+// Pracownik (właściciel): { step, reported } – zgłasza / cofa zgłoszenie (nie cofa kroku potwierdzonego).
+// Przełożony (cel osoby z zespołu): { step, confirmed }, { addStep }, zmiana s/m/a/r/t.
+// Cel bez kroków: { done } – właściciel albo przełożony.
 route('PATCH', '/api/goals/:id', async (req, res, u, p) => {
-  const g = db.prepare('SELECT * FROM goals WHERE id=? AND user_id=?').get(p.id, u.id);
-  if (!g) return fail(res, 404, 'Nie znaleziono celu.');
+  const g = db.prepare('SELECT * FROM goals WHERE id=?').get(p.id);
+  const isOwner = g && u.role === 'pracownik' && g.user_id === u.id;
+  const isMgr = g && u.role === 'przelozony' && !!teamMember(u, g.user_id);
+  if (!isOwner && !isMgr) return fail(res, 404, 'Nie znaleziono celu.');
   const b = await readJson(req);
   const steps = JSON.parse(g.steps || '[]');
-  if (b.step !== undefined) {
-    const i = Number(b.step);
-    if (!Number.isInteger(i) || !steps[i]) return invalid(res, { step: 'Nie ma takiego kroku.' });
-    steps[i].done = !!b.done;
+  const next = { ...g };
+  let action;
+  const stepAt = () => { const i = Number(b.step); return Number.isInteger(i) && steps[i] ? steps[i] : null; };
+  if (b.reported !== undefined) {
+    if (!isOwner) return fail(res, 403, 'Wykonanie kroku zgłasza pracownik.');
+    const st = stepAt(); if (!st) return invalid(res, { step: 'Nie ma takiego kroku.' });
+    if (st.confirmed_at) return fail(res, 409, 'Krok jest już potwierdzony przez przełożonego.');
+    st.reported_at = b.reported ? now() : null; action = 'goal_step_report';
+  } else if (b.confirmed !== undefined) {
+    if (!isMgr) return fail(res, 403, 'Krok potwierdza przełożony.');
+    const st = stepAt(); if (!st) return invalid(res, { step: 'Nie ma takiego kroku.' });
+    if (b.confirmed) { st.confirmed_at = now(); st.confirmed_by = u.id; } else { st.confirmed_at = null; st.confirmed_by = null; }
+    action = 'goal_step_confirm';
   } else if (b.addStep !== undefined) {
+    if (!isMgr) return fail(res, 403, 'Kroki dodaje przełożony.');
     const t = stepText(b.addStep);
     if (!t) return invalid(res, { addStep: 'Opisz krok.' });
     if (steps.length >= GOAL_STEPS_MAX) return invalid(res, { addStep: `Najwyżej ${GOAL_STEPS_MAX} kroków.` });
-    steps.push({ t, done: false });
+    steps.push(newStep(t)); action = 'update_goal';
+  } else if (['s', 'm', 'a', 'r', 't'].some(k => b[k] !== undefined)) {
+    if (!isMgr) return fail(res, 403, 'Cel zmienia przełożony.');
+    const { v, errors } = validateGoal(b, true);
+    if (Object.keys(errors).length) return invalid(res, errors, Object.values(errors)[0]);
+    Object.assign(next, v); action = 'update_goal';
   } else if (b.done !== undefined) {
-    if (steps.length) return invalid(res, { done: 'Cel z krokami jest zrealizowany, gdy wszystkie kroki są wykonane.' });
+    if (steps.length) return invalid(res, { done: 'Cel z krokami jest zrealizowany, gdy przełożony potwierdzi wszystkie kroki.' });
+    next.done = b.done ? 1 : 0; action = 'update_goal';
   } else return invalid(res, { step: 'Brak zmiany.' });
   const progress = goalProgress(steps);
-  const done = steps.length ? progress === 100 : !!b.done;
-  db.prepare('UPDATE goals SET steps=?, done=?, progress=? WHERE id=?').run(JSON.stringify(steps), done ? 1 : 0, progress ?? (done ? 100 : 0), g.id);
+  next.steps = JSON.stringify(steps);
+  if (steps.length) next.done = progress === 100 ? 1 : 0;
+  next.progress = progress ?? (next.done ? 100 : 0);
+  db.prepare('UPDATE goals SET s=?,m=?,a=?,r=?,t=?,steps=?,done=?,progress=? WHERE id=?').run(next.s, next.m, next.a, next.r, next.t, next.steps, next.done, next.progress, g.id);
+  const ch = diffObj(goalAuditView(g), goalAuditView(next));
+  if (ch) audit(u.id, action, `goal:${g.id}`, ch.prev, ch.next);
   send(res, 200, { ok: true, goal: goalRow(db.prepare('SELECT * FROM goals WHERE id=?').get(g.id)) });
 });
 

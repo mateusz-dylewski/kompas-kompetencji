@@ -194,28 +194,60 @@
     input.addEventListener("blur", () => { const dg = maskDigits(input.value); if (dg.length) show(check(dg), true); });
     return { iso: () => { const dg = maskDigits(input.value), msg = check(dg); show(msg, true); return msg ? "" : `${dg.slice(4)}-${dg.slice(2, 4)}-${dg.slice(0, 2)}`; } };
   }
-  // ---------- Cele: karta z krokami (postęp = wykonane kroki / wszystkie) ----------
-  function goalCard(g) {
-    const n = g.steps.length, k = g.stepsDone;
-    const state = g.done ? '<span class="tag ok">zrealizowany</span>' : '<span class="tag info">w toku</span>';
-    const steps = n ? `
-          <div class="seg" role="img" aria-label="Wykonane kroki: ${k} z ${n}">${g.steps.map(x => `<i class="${x.done ? "on" : ""}"></i>`).join("")}</div>
-          <div class="muted">Wykonane kroki: <b>${k} z ${n}</b></div>
-          <ul class="steps">${g.steps.map((x, i) => `<li class="${x.done ? "is-done" : ""}"><input type="checkbox" id="gs${g.id}_${i}" data-goal-step="${g.id}:${i}" ${x.done ? "checked" : ""}><label for="gs${g.id}_${i}">${esc(x.t)}</label></li>`).join("")}</ul>
-          ${n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}`
-      : `<p class="muted">Ten cel nie ma kroków. Dodaj kroki, żeby postęp liczył się sam.</p>
-          <div class="btns" style="justify-content:flex-start;margin-top:8px"><button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>
-          <button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button></div>`;
-    return `
-        <div class="goal ${g.done ? "is-done" : ""}">
-          <div class="row"><b>${esc(g.s)}</b>${state}</div>
-          <div class="muted">Miara: ${esc(g.m)} · Termin: ${esc(isoToPl(g.t))}</div>${steps}
-        </div>`;
+  // ---------- Cele: kafelki (wyznacza przełożony; pracownik zgłasza krok, przełożony potwierdza) ----------
+  const goalStepState = x => (x.confirmed_at ? "confirmed" : x.reported_at ? "reported" : "open");
+  function goalTile(g, mode) {
+    const n = g.steps.length, k = g.stepsConfirmed, rep = g.stepsReported;
+    const state = g.done ? '<span class="tag ok">zrealizowany</span>' : rep ? `<span class="tag wr">${rep} do potwierdzenia</span>` : '<span class="tag info">w toku</span>';
+    const stepBtn = (x, i) => {
+      const st = goalStepState(x);
+      if (mode === "emp") return st === "confirmed" ? `<span class="muted">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
+        : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
+      return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
+    };
+    const label = { confirmed: "potwierdzony", reported: "zgłoszony – czeka na potwierdzenie", open: "do zrobienia" };
+    const body = n ? `
+        <div class="seg" role="img" aria-label="Potwierdzone kroki: ${k} z ${n}${rep ? `, zgłoszone: ${rep}` : ""}">${g.steps.map(x => `<i class="${{ confirmed: "on", reported: "rep", open: "" }[goalStepState(x)]}"></i>`).join("")}</div>
+        <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
+        <details class="goal-steps"><summary>Kroki</summary>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
+          ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
+        </details>`
+      : `<p class="muted">Cel sprzed zmian – bez kroków.</p><button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>`;
+    return `<div class="goal-tile ${g.done ? "is-done" : ""}">
+        <div class="row"><b class="goal-t">${esc(g.s)}</b>${state}</div>
+        <div class="muted">Miara: ${esc(g.m)}<br>Termin: ${esc(isoToPl(g.t))}${g.legacy ? " · cel założony przez pracownika" : ""}</div>${body}
+      </div>`;
+  }
+  const goalTiles = (goals, mode) => goals.length ? `<div class="goal-tiles">${goals.map(g => goalTile(g, mode)).join("")}</div>`
+    : `<p class="muted">${mode === "emp" ? "Nie masz jeszcze celów. Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej." : "Brak celów. Dodaj pierwszy cel z krokami."}</p>`;
+  // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
+  async function goalsModal(empId) {
+    const emp = (S.dash.team || []).find(t => t.id === empId);
+    const goals = (await api("GET", `/api/goals?employeeId=${empId}`)).goals;
+    S.goalsCtx = { empId, where: "modal" };
+    openModal(`<h2 id="gmTitle">Cele – ${first(emp ? emp.name : "")}</h2>
+      <p class="muted">Pracownik zgłasza wykonanie kroku, Ty potwierdzasz. Postęp liczy tylko potwierdzone kroki.</p>
+      <div class="btns" style="justify-content:flex-start;margin-top:0;border:0;padding-top:0"><button class="btn" data-act="newGoalFor" data-emp="${empId}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
+      ${goalTiles(goals, "mgr")}
+      <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`, null, "gmTitle");
+  }
+  async function loadMonthGoals() {
+    const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
+    try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; }
+    catch (ex) { box.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+  }
+  // Po zmianie celu odśwież miejsce, w którym pracuje użytkownik
+  async function refreshGoals() {
+    if (S.user.role === "pracownik") { await refreshData(); return render(); }
+    if ($("#modal") && S.goalsCtx?.where === "modal") return goalsModal(S.goalsCtx.empId);
+    if (S.view === "month") return loadMonthGoals();
+    await refreshData(); render();
   }
   // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
   function devPlan(d, items) {
     const weak = items.slice(0, 3).map(([k]) => k);
-    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))} <button class="btn sm g" data-act="goalFromArea" data-area="${esc(nameOf(k))}">${KK_ICON("plus")}<span>Cel z tego obszaru</span></button></li>`).join("")}</ul>` : "";
+    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
     if (d.latestDev) {
       const e = d.latestDevEval;
       return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
@@ -224,7 +256,7 @@
     }
     const last = d.evals[0];
     const why = !last ? "Nie masz jeszcze złożonej oceny." : last.status === "submitted" ? "Ocena jest złożona – wnioski przełożony zapisze po rozmowie oceniającej." : "Przełożony nie zapisał wniosków rozwojowych w ostatniej ocenie.";
-    return `<p class="muted">${why} Na razie możesz sam zaproponować cele – omówicie je na rozmowie.</p>${areas}
+    return `<p class="muted">${why} Cele ustala przełożony – swoje propozycje zgłoś na rozmowie miesięcznej.</p>${areas}
       <div class="btns" style="justify-content:flex-start"><button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
   }
   // Informacje z okresu oceny pogrupowane według kompetencji (pracownik: własne, jeśli moduł jest włączony)
@@ -570,7 +602,7 @@
     animateIn(root);
     if (S.view === "log") loadLog();
     if (S.view === "evidence") { bindEvidencePage(); loadEvidence(); if (u.role === "pracownik") loadEmployeeExtras(); }
-    if (S.view === "month") { bindMonthPage(); loadMonth(); }
+    if (S.view === "month") { bindMonthPage(); loadMonth(); S.goalsCtx = { empId: +S.month.employeeId, where: "month" }; loadMonthGoals(); }
     if (S.view === "summary") { bindSummaryPage(); loadSummary(); }
     if (S.view === "results") loadMetrics();
     if (S.view === "evalView" && S.readEval) { loadSigs(S.readEval.id, S.readEval.status); loadEvalEvidence(S.readEval); }
@@ -641,10 +673,8 @@
         </div>`;
     }
     if (v === "goals") {
-      const list = S.goals.map(goalCard).join("") || `<p class="muted">Nie masz jeszcze celów. Dodaj pierwszy – najlepiej taki, który da się zmierzyć.</p>`;
-      return `<div class="row" style="margin-bottom:12px"><span class="muted">Cele SMART: konkretny, mierzalny, osiągalny, istotny, z terminem. Postęp liczy się z wykonanych kroków.</span>
-        <button class="btn" data-act="addGoal">${KK_ICON("plus")}<span>Nowy cel</span></button></div>
-        <div class="card">${list}</div>`;
+      return `<p class="muted" style="margin:0 0 12px">Cele ustala przełożony. Gdy wykonasz krok, zgłoś to – przełożony potwierdzi. Postęp liczy tylko potwierdzone kroki.</p>
+        ${goalTiles(S.goals, "emp")}`;
     }
     if (v === "evidence") return evidencePage(false);
     // evals
@@ -672,7 +702,8 @@
       const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
       const rows = d.team.map(t => `
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button></div></div></div></td>
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
+          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
@@ -683,7 +714,7 @@
         <section class="next card anim">
           <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
           <button class="btn btn-next" data-nav="evals"><span>Przejdź do ocen</span>${KK_ICON("arrow")}</button></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
+        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
           <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
@@ -777,7 +808,8 @@
         <div><label class="f" for="mMonth">Miesiąc</label><input id="mMonth" name="month" type="month" value="${esc(m.month)}" max="${new Date().toISOString().slice(0, 7)}"></div>
         <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
-      <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>`;
+      <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
+      <div class="card" id="monthGoals" aria-live="polite"><p class="muted">Ładowanie celów…</p></div>`;
   }
   async function loadMonth() {
     const box = $("#monthBody"); if (!box) return;
@@ -826,7 +858,7 @@
   }
   function bindMonthPage() {
     const fm = $("#monthForm"); if (!fm) return;
-    fm.addEventListener("submit", e => { e.preventDefault(); S.month.employeeId = $("#mEmp").value; S.month.month = $("#mMonth").value || S.month.month; loadMonth(); });
+    fm.addEventListener("submit", e => { e.preventDefault(); S.month.employeeId = $("#mEmp").value; S.month.month = $("#mMonth").value || S.month.month; S.goalsCtx = { empId: +S.month.employeeId, where: "month" }; loadMonth(); loadMonthGoals(); });
   }
   const RELATIONS = { przelozony: "przełożony bezpośredni", wspolpracownik: "współpracownik (przekazane przełożonemu)", odbiorca: "odbiorca rezultatu (przekazane przełożonemu)" };
   function feedbackModal(fb) {
@@ -1377,17 +1409,26 @@
       catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
-    toggleGoal: async b => { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshData(); render(); },
+    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(ex.message); } },
     addStep: async b => {
       const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
       if (!t || !t.trim()) return;
-      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshData(); render(); } catch (ex) { toast(ex.message); }
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(ex.message); }
     },
-    goalFromArea: b => act("addGoal", b),
+    goalReport: async b => {
+      try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, reported: b.dataset.val === "1" }); toast(b.dataset.val === "1" ? "Zgłoszono wykonanie kroku. Przełożony je potwierdzi." : "Cofnięto zgłoszenie."); await refreshGoals(); }
+      catch (ex) { toast(ex.message); }
+    },
+    goalConfirm: async b => {
+      try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, confirmed: b.dataset.val === "1" }); await refreshGoals(); }
+      catch (ex) { toast(ex.message); }
+    },
+    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
+    newGoalFor: b => act("addGoal", b),
     addGoal: b => openModal(`
       <h2>Nowy cel SMART</h2>
       <form id="goalForm" novalidate>
-        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required value="${esc(b?.dataset?.area ? "Rozwój: " + b.dataset.area : "")}">
+        <label class="f" for="gS">Konkretnie (Specific)</label><input id="gS" maxlength="200" required>
         <label class="f" for="gM">Mierzalnie (Measurable)</label><input id="gM" maxlength="200" required>
         <label class="f" for="gA">Osiągalnie (Achievable)</label><input id="gA" maxlength="200" required>
         <label class="f" for="gR">Istotnie (Relevant)</label><input id="gR" maxlength="200" required>
@@ -1417,7 +1458,8 @@
         if (!t) { $("#gT").focus(); return; }
         const steps = [...document.querySelectorAll("[data-step-in]")].map(x => x.value.trim()).filter(Boolean);
         if (!steps.length) { $("#gErr").textContent = "Dodaj co najmniej jeden krok – po nim widać postęp."; document.querySelector("[data-step-in]").focus(); return; }
-        try { await api("POST", "/api/goals", { s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t, steps }); closeModal(); toast("Dodano cel."); await refreshData(); render(); }
+        const employeeId = +b.dataset.emp;
+        try { await api("POST", "/api/goals", { employeeId, s: v("gS"), m: v("gM"), a: v("gA"), r: v("gR"), t, steps }); closeModal(); toast("Dodano cel. Pracownik zobaczy go w swoich celach."); if (S.goalsCtx?.where === "modal" && S.view !== "month") goalsModal(employeeId); else await refreshGoals(); }
         catch (ex) { $("#gErr").textContent = ex.message; }
       });
     }),
@@ -1574,11 +1616,7 @@
     if (t.dataset.field && S.cur) {
       S.cur.data[t.dataset.field] = t.value; queueSave(); return;
     }
-    if (t.dataset.goalStep) {
-      const [gid, si] = t.dataset.goalStep.split(":");
-      try { await api("PATCH", `/api/goals/${gid}`, { step: +si, done: t.checked }); await refreshData(); render(); }
-      catch (ex) { t.checked = !t.checked; toast(ex.message); }
-    }
+
   });
   document.addEventListener("input", e => {
     const t = e.target;
