@@ -66,6 +66,52 @@ const aiFallbackCheck = async p => {
   });
 };
 
+
+// ---- Pomoce dla persony „klawiatura”: wyłącznie klawisze, bez myszy ----
+const KB_MAX_TABS = 80;
+const kbState = p => p.evaluate(() => {
+  const a = document.activeElement;
+  if (!a || a === document.body) return { name: 'body', focusVisible: false, id: '' };
+  const nm = el => { const al = el.getAttribute('aria-label'); if (al) return al.trim(); if (el.labels?.length) return [...el.labels].map(l => l.textContent).join(' ').replace(/\s+/g, ' ').trim(); return ((el.textContent || '').replace(/\s+/g, ' ').trim() || el.title || el.getAttribute('placeholder') || el.id || '').slice(0, 60); };
+  const vis = el => { if (!el) return false; const c = getComputedStyle(el); return (c.outlineStyle !== 'none' && parseFloat(c.outlineWidth) > 0) || (c.boxShadow && c.boxShadow !== 'none'); };
+  // dla pól wyboru wskaźnik bywa na etykiecie/sąsiednim elemencie
+  const fv = vis(a) || (/^(radio|checkbox)$/.test(a.type || '') && (vis(a.closest('label')) || vis(a.nextElementSibling) || vis(a.parentElement)));
+  return { name: nm(a), focusVisible: !!fv, id: a.id || a.dataset.act || a.dataset.nav || a.dataset.wiz || '' };
+});
+// Naciska Tab (maks. 80 razy), aż fokus trafi w widoczny element pasujący do selektora
+const tabTo = async (p, sel) => {
+  const hit = () => p.evaluate(s => { const a = document.activeElement; return !!(a && a !== document.body && a.matches(s) && (a.offsetWidth || a.offsetHeight || a.getClientRects().length)); }, sel);
+  const passed = [];
+  for (let n = 0; n <= KB_MAX_TABS; n++) {
+    if (await hit()) return { found: true, tabs: n, passed, ...(await kbState(p)) };
+    if (n === KB_MAX_TABS) break;
+    await p.keyboard.press('Tab');
+    passed.push((await kbState(p)).id);
+  }
+  return { found: false, tabs: KB_MAX_TABS, passed, ...(await kbState(p)) };
+};
+// Krok klawiaturowy: [selektor, klawisz po dojściu]; składa wynik z kilku podkroków
+const kbStep = async (p, parts) => {
+  let tabs = 0, last = {}, trap = false; const trace = [];
+  for (const [sel, key, wait] of parts) {
+    const r = await tabTo(p, sel); tabs += r.tabs; last = r; trace.push(`${sel}:${r.found ? r.tabs : 'BRAK'}`);
+    if (!r.found) { trap = true; break; }
+    if (key) { await p.keyboard.press(key); await p.waitForTimeout(wait ?? 500); }
+  }
+  const st = await kbState(p);
+  return { tabs, focus: last.name || st.name, focusVisible: last.focusVisible ?? st.focusVisible, keyboardTrap: trap, kbTrace: trace, passed: last.passed, kbCtx: { activeAfter: st.name } };
+};
+// Przejście do widoku klawiaturą (na mobile: przez „Więcej”, jeśli pozycji nie ma w dolnym pasku)
+const kbNav = view => async (p, vp) => {
+  const sel = `[data-nav="${view}"]`;
+  let r = await kbStep(p, [[sel, 'Enter', 600]]);
+  if (r.keyboardTrap && vp === 'mobile' && await p.locator('#moreBtn').count()) {
+    const r1 = await kbStep(p, [['#moreBtn', 'Enter', 400], [sel, 'Enter', 600]]);
+    r1.tabs += r.tabs; return r1;
+  }
+  return r;
+};
+
 // Scenariusze person: lista [nazwa kroku, funkcja]
 const SCENARIOS = {
   // Awaria AI (uruchamiać z PERSONA_AI=down): czy użytkownik widzi komunikat zamiast pustki
@@ -144,6 +190,47 @@ const SCENARIOS = {
     ['enter-na-fokusie', async p => { await p.keyboard.press('Enter'); await p.waitForTimeout(600); }],
     ['escape', async p => { await p.keyboard.press('Escape'); await p.waitForTimeout(300); }],
     ['tab-x6', async p => { for (let i = 0; i < 6; i++) await p.keyboard.press('Tab'); }],
+    // (a) kryteria – tylko klawiatura
+    ['a-start-klawiatura', async (p, vp) => { await p.keyboard.press('Escape'); return kbNav('home')(p, vp); }],
+    ['a-ustal-kryteria-klawiatura', p => kbStep(p, [['[data-act="kickoff"]', 'Enter', 900]])],
+    ['a-modal-kryteria-spacja', async p => {
+      let pre = null;
+      // jeśli arkusz nie jest jeszcze wybrany, kryteria dodatkowe się nie pokazują – wybierz arkusz Spacją
+      if (!(await p.locator('#modal [data-extra]').count())) { pre = await kbStep(p, [['#modal input[name="kTyp"]', 'Space', 400]]); }
+      const r = await kbStep(p, [['#modal [data-extra]', 'Space', 300]]);
+      if (pre) { r.tabs += pre.tabs; r.kbTrace = [...pre.kbTrace, ...r.kbTrace]; r.keyboardTrap = r.keyboardTrap || pre.keyboardTrap; r.passed = [...(pre.passed || []), ...(r.passed || [])]; }
+      r.aiButtonOnTabPath = (r.passed || []).includes('kAiBtn');
+      r.checkboxChecked = await p.evaluate(() => !!document.activeElement?.checked);
+      r.modalOpen = !!(await p.locator('#modal').count());
+      return r;
+    }],
+    ['a-escape-zamyka-okno', async p => {
+      await p.keyboard.press('Escape'); await p.waitForTimeout(400);
+      const s = await kbState(p);
+      return { tabs: 0, focus: s.name, focusVisible: s.focusVisible, modalClosed: !(await p.locator('#modal').count()), focusReturned: s.name !== 'body' };
+    }],
+    // (b) ocena – tylko klawiatura
+    ['b-oceny-klawiatura', kbNav('evals')],
+    ['b-otworz-szkic-klawiatura', p => kbStep(p, [['[data-act="openEval"]', 'Enter', 900]])],
+    ['b-dalej-1-klawiatura', p => kbStep(p, [['[data-wiz="next"]', 'Enter', 600]])],
+    ['b-dalej-2-klawiatura', p => kbStep(p, [['[data-wiz="next"]', 'Enter', 600]])],
+    ['b-poziom-strzalki', async p => {
+      const r = await kbStep(p, [['input[type="radio"][data-rate], input[type="radio"][data-partial]', null]]);
+      if (r.keyboardTrap) return r;
+      const before = await p.evaluate(() => document.activeElement.value);
+      await p.keyboard.press('ArrowDown'); await p.waitForTimeout(300);
+      const after = await p.evaluate(() => ({ v: document.activeElement.value, ok: document.activeElement.checked }));
+      r.radioBefore = before; r.radioAfter = after.v; r.radioChecked = after.ok; r.arrowWorks = after.v !== before && after.ok;
+      return r;
+    }],
+    // (c) miesiąc i brief – tylko klawiatura
+    ['c-miesiac-klawiatura', kbNav('month')],
+    ['c-brief-klawiatura', async p => { const r = await kbStep(p, [['[data-act="aiBrief"]', 'Enter', 300]]); await waitAI(p); return r; }],
+    ['c-escape-brief', async p => {
+      await p.keyboard.press('Escape'); await p.waitForTimeout(400);
+      const s = await kbState(p);
+      return { tabs: 0, focus: s.name, focusVisible: s.focusVisible, modalClosed: !(await p.locator('#modal').count()), focusReturned: s.name !== 'body' };
+    }],
   ],
 };
 
@@ -256,7 +343,7 @@ async function runPersona(name) {
         await p.screenshot({ path: path.join(outDir, file), fullPage: vpName === 'desktop' ? false : false }).catch(() => {});
         st.screenshot = file;
         const a = await a11yCheck(p).catch(() => ({ issues: ['a11y: nie udało się sprawdzić'], focus: '' }));
-        st.a11y = a.issues; st.focus = a.focus;
+        st.a11y = a.issues; st.a11yFocus = a.focus; st.focus = st.focus || a.focus;
         st.contrastFails = a.contrastFails || 0; st.contrastSamples = a.contrastSamples || []; st.duplicateNames = a.duplicateNames || []; st.skipLinkMissing = !!a.skipLinkMissing;
         run.steps.push(st);
       }
@@ -275,6 +362,12 @@ async function runPersona(name) {
     contrastFails: r.steps.reduce((a, s) => a + (s.contrastFails || 0), 0),
     duplicateNames: r.steps.filter(s => s.duplicateNames?.length).map(s => `${s.step}: ${s.duplicateNames.join(', ')}`),
     skipLinkMissing: r.steps.filter(s => s.skipLinkMissing).length,
+    ...(name === 'klawiatura' ? {
+      keyboardTraps: r.steps.filter(s => s.keyboardTrap).map(s => `${s.step}: ${s.kbTrace?.join(' > ')}`),
+      invisibleFocus: r.steps.filter(s => 'focusVisible' in s && !s.focusVisible).length,
+      invisibleFocusSteps: r.steps.filter(s => 'focusVisible' in s && !s.focusVisible).map(s => s.step),
+      tabsPerPath: Object.fromEntries(['a', 'b', 'c'].map(k => [k, r.steps.filter(s => s.step.startsWith(k + '-') && s.tabs != null).reduce((x, s) => x + s.tabs, 0)])),
+    } : {}),
     a11yIssues: [...new Set(r.steps.flatMap(s => s.a11y))].slice(0, 15),
   }]));
   log.summary = sum; log.aiMode = AI_MODE;
