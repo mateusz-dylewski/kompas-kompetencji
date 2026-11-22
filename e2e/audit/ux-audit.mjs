@@ -121,6 +121,7 @@ const MGR = [
   ['wyniki', nav('results')],
   ['dziennik', nav('log')],
   ['asystent-ai', nav('ai')],
+  ['asystent-ai-przykladowe-pytanie', async p => { await act('aiAsk')(p); await p.waitForTimeout(1500); }],
   ['ustawienia', nav('settings')],
 ];
 const EMP = [

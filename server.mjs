@@ -172,8 +172,8 @@ const now = () => new Date().toISOString();
 // Moduły spoza rozporządzenia: można je wyłączyć. Ocena okresowa, zapoznanie i sprzeciw są zawsze włączone.
 const MODULES = {
   mod_evidence: { label: 'Informacje przy wskaźnikach (obserwacje: sytuacja, działanie, rezultat)', prefixes: ['/api/evidence'], default: '1' },
-  mod_checkins: { label: 'Rozmowy miesięczne (check-in) i przegląd miesiąca', prefixes: ['/api/checkins', '/api/month'], default: '1' },
-  mod_feedback: { label: 'Feedback między przełożonym a pracownikiem', prefixes: ['/api/feedback'], default: '1' },
+  mod_checkins: { label: 'Rozmowy miesięczne i przegląd miesiąca', prefixes: ['/api/checkins', '/api/month'], default: '1' },
+  mod_feedback: { label: 'Informacja zwrotna między przełożonym a pracownikiem', prefixes: ['/api/feedback'], default: '1' },
   mod_partials: { label: 'Oceny cząstkowe kwartalne', prefixes: ['/api/partials'], default: '1' },
   mod_ai: { label: 'Asystent AI (podpowiedzi, nie decyzje)', prefixes: ['/api/ai/'], default: '1' },
   mod_employee_evidence: { label: 'Pracownik widzi swoje informacje (opcjonalne)', prefixes: [], default: '1' },

@@ -33,7 +33,7 @@
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
       ["evidence", "Informacje i opinie", "book", "Obserwacje, informacja zwrotna i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
-      ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
+      ["ai", "Asystent AI", "spark", "Pytania o obsługę systemu i zasady oceny"],
     ],
     przelozony: [
       ["home", "Start", "home", "Kto czeka na ocenę"],
@@ -43,7 +43,7 @@
       ["summary", "Zestawienie", "scale", "Liczby informacji, daty i rozkład poziomów – bez średniej i bez sugestii wyniku"],
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
-      ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
+      ["ai", "Asystent AI", "spark", "Pytania o obsługę systemu i zasady oceny"],
       ["settings", "Ustawienia", "gear", "Moduły spoza rozporządzenia – włącz lub wyłącz"],
     ],
   };
@@ -921,7 +921,7 @@
   function mgrPage(v) {
     if (v === "settings") return settingsPage();
     // Dziennik zdarzeń: kto, kiedy i co zmienił (z poprzednią i nową wartością) – wypełnia loadLog()
-    if (v === "log") return `<div class="card"><h2>Dziennik zdarzeń</h2><p class="muted">Każda zmiana ocen, informacji, feedbacku, celów i planów rozwoju – z autorem, czasem oraz poprzednią i nową wartością. Integralność chroni łańcuch skrótów.</p><div id="logBody" aria-live="polite"><p class="muted">Wczytywanie…</p></div></div>`;
+    if (v === "log") return `<div class="card"><h2>Dziennik zdarzeń</h2><p class="muted">Każda zmiana ocen, informacji, informacji zwrotnej, celów i planów rozwoju – z autorem, czasem oraz poprzednią i nową wartością. Integralność chroni łańcuch skrótów.</p><div id="logBody" aria-live="polite"><p class="muted">Wczytywanie…</p></div></div>`;
     const d = S.dash, c = d.counts;
     if (v === "home") {
       const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
@@ -1608,18 +1608,23 @@
     ai_talk: "Podpowiedź AI: pytania do rozmowy", ai_formal: "Podpowiedź AI: uzasadnienie formalne", ai_development: "Podpowiedź AI: działania rozwojowe", ai_checkin: "Podpowiedź AI: rozmowa miesięczna", ai_brief: "Podpowiedź AI: brief do rozmowy", ai_prep: "Podpowiedź AI: przygotowanie do rozmowy", ai_criteria: "Podpowiedź AI: dobór kryteriów" };
   const evtName = a => EVT[a] || (a ? String(a).replace(/_/g, " ").replace(/^./, c => c.toUpperCase()) : "");
   // Czytelny cel wpisu dziennika (np. „5:pdf” → „Ocena nr 5 – PDF”)
+  // Treść podpowiedzi AI w dzienniku: propozycje kryteriów (JSON) jako „Nazwa – uzasadnienie”, tekst bez zmian
+  const aiOutText = out => { try { const j = JSON.parse(out); if (Array.isArray(j)) return j.map(p => `${nameOf(p.k) || p.n || p.k}${p.uzasadnienie ? ` – ${p.uzasadnienie}` : ""}`).join("; ") || "brak propozycji"; } catch (_) {} return String(out || ""); };
+  // Osoby z zespołu po numerze (przełożony widzi swój zespół), ocena po numerze → osoba
+  const empById = id => (S.dash?.team || []).find(t => String(t.id) === String(id))?.name || null;
+  const evalWho = id => { const e = (S.evals || []).find(x => String(x.id) === String(id)); return e ? empById(e.employeeId) : null; };
   function targetLabel(a) {
     const t = String(a.target || ""), act = a.action || "";
     let m;
     if ((m = /^(evidence|goal|kickoff|devplan|checkin|feedback|partial):(\d+)$/.exec(t))) return { evidence: `Informacja nr ${m[2]}`, goal: `Cel nr ${m[2]}`, kickoff: `Rozmowa rozpoczynająca nr ${m[2]}`, devplan: `Plan rozwoju pracownika nr ${m[2]}`, checkin: `Rozmowa miesięczna nr ${m[2]}`, feedback: `Informacja zwrotna nr ${m[2]}`, partial: `Ocena cząstkowa nr ${m[2]}` }[m[1]];
-    if ((m = /^(\d+):(pdf|xml)$/i.exec(t))) return `Ocena nr ${m[1]} – ${m[2].toUpperCase()}`;
-    if ((m = /^(\d+):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, okres ${isoToPl(m[2])} – ${isoToPl(m[3])}`;
-    if ((m = /^(\d+):(\d{4})-(\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, miesiąc ${m[3]}.${m[2]}`;
+    if ((m = /^(\d+):(pdf|xml)$/i.exec(t))) return `Ocena nr ${m[1]}${evalWho(m[1]) ? ` (${evalWho(m[1])})` : ""} – ${m[2].toUpperCase()}`;
+    if ((m = /^(\d+):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(t))) return `${empById(m[1]) || `Pracownik nr ${m[1]}`}, okres ${isoToPl(m[2])} – ${isoToPl(m[3])}`;
+    if ((m = /^(\d+):(\d{4})-(\d{2})$/.exec(t))) return `${empById(m[1]) || `Pracownik nr ${m[1]}`}, ${monthPl(`${m[2]}-${m[3]}`)}`;
     if ((m = /^(\d+):(\w+)(?:: (.*))?$/.exec(t)) && act === "objection_decision") return `Ocena nr ${m[1]} – ${m[2]}${m[3] ? ": " + m[3] : ""}`;
     if ((m = /^(\w+)=([01])$/.exec(t)) && act === "setting") return `${m[1]}: ${m[2] === "1" ? "włączony" : "wyłączony"}`;
     if (t === "session_rotated") return "Nowa sesja";
     if (!t) return /login|logout|session/.test(act) ? "Własne konto" : "—";
-    if (/^\d+$/.test(t)) return /eval|download|^ai_(talk|formal)$/.test(act) ? `Ocena nr ${t}` : /employee|activat|password/.test(act) ? `Konto nr ${t}` : `Nr ${t}`;
+    if (/^\d+$/.test(t)) return /eval|download|^ai_(talk|formal)$/.test(act) ? `Ocena nr ${t}${evalWho(t) ? ` (${evalWho(t)})` : ""}` : /employee|activat|password/.test(act) ? `Konto: ${empById(t) || `nr ${t}`}` : `Nr ${t}`;
     return t;
   }
   const plTime = at => { const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : at || ""; };
@@ -1644,14 +1649,14 @@
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
         + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(evtName(a.action))}</td><td data-label="Czego dotyczy">${esc(targetLabel(a))}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
-        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${x.source === "ai" ? esc(x.model || "") : "—"}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"}</td><td>${esc(plTime(x.at))}</td><td>${esc(aiOutText(x.output))}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
   function chatBubble(m) {
     const who = m.role === "user" ? "Ty" : "Asystent";
-    const src = m.role === "assistant" ? `<div class="chat-src">${m.source === "ai" ? `model AI ${aiWhere()}` : "odpowiedź regułowa"}</div>` : "";
-    return `<div class="chat-row ${m.role}"><div class="chat-bub"><span class="chat-who">${who}</span>${esc(m.text)}${src}</div></div>`;
+    const src = m.role === "assistant" ? `<div class="chat-src">${m.source === "ai" ? `model AI ${aiWhere()}` : "odpowiedź z reguł systemu"}</div>` : "";
+    return `<div class="chat-row ${m.role}"><div class="chat-bub"><span class="chat-who">${who}</span>${m.role === "assistant" ? `<div class="chat-txt">${briefHtml(m.text, true)}</div>` : esc(m.text)}${src}</div></div>`;
   }
   // Przewijanie czatu na dół; przy oczekiwaniu uruchamia licznik sekund
   function scrollChat(thinking) {
@@ -1661,7 +1666,11 @@
   }
   function aiPage() {
     const msgs = (S.aiChat || []).map(chatBubble).join("") + (S.aiPending ? `<div class="chat-row assistant"><div class="chat-bub chat-typing">${thinkingHtml("Asystent układa odpowiedź…")}</div></div>` : "");
-    const empty = `<div class="chat-hello">Cześć! Pytaj o obsługę systemu, terminy, sprzeciw, wskaźniki i kryteria obowiązkowe. Nie oceniam osób i nie podejmuję decyzji.</div>`;
+    const EXQ = S.user?.role === "pracownik"
+      ? ["Ile mam czasu na złożenie sprzeciwu?", "Jak przygotować się do rozmowy oceniającej?", "Co oznacza 5 pkt w ocenie?"]
+      : ["Które kryteria są obowiązkowe w arkuszu C?", "Jak opisać przykład zachowania w ocenie?", "Kiedy trzeba przeprowadzić rozmowę rozpoczynającą?"];
+    const empty = `<div class="chat-hello">Cześć! Pytaj o obsługę systemu, terminy, sprzeciw, wskaźniki i kryteria obowiązkowe. Nie oceniam osób i nie podejmuję decyzji.
+      <div class="chat-ex" role="group" aria-label="Przykładowe pytania">${EXQ.map(q => `<button type="button" class="btn sm g" data-act="aiAsk" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`;
     return `<section class="chat" aria-labelledby="aiH">
       <h2 id="aiH" class="sr">Asystent AI</h2>
       <div class="chat-log" id="aiChatOut" role="log" aria-live="polite" aria-label="Rozmowa z asystentem">${msgs || empty}</div>
@@ -1705,6 +1714,7 @@
       try { await api("POST", `/api/evals/${S.cur.id}/discuss`, { dev }); S.cur.status = "discussed"; S.cur.data.dev = dev; toast("Oznaczono jako omówioną."); render(); }
       catch (e) { toast(errMsg(e)); }
     },
+    aiAsk: b => { const inp = $("#aiQ"); if (!inp) return; inp.value = b.dataset.q || ""; document.querySelector('[data-act="aiChat"]')?.click(); },
     aiChat: async b => {
       const inp = $("#aiQ"); const q = (inp?.value || "").trim();
       if (q.length < 2) return toast("Napisz pytanie.");
