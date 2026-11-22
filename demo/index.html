@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kompas Kompetencji – pokaz</title>
+<meta name="description" content="Wersja pokazowa Kompasu Kompetencji: cały proces oceny pracownika z perspektywy przełożonego, krok po kroku, na przykładowych danych.">
+<meta property="og:title" content="Kompas Kompetencji – pokaz dla przełożonego">
+<meta property="og:description" content="Od opisu stanowiska do planu rozwoju: ocena oparta na modelu kompetencji, z asystentem formalnym i asystentem rozmowy.">
+<meta property="og:image" content="assets/icon-kk.png">
+<link rel="icon" type="image/png" href="assets/icon-kk.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+<header class="top" id="top">
+  <div class="top-brand">
+    <img src="assets/icon-kk.png" alt="" width="32" height="32">
+    <span><b>Kompas Kompetencji</b><small>wersja pokazowa · dane przykładowe</small></span>
+  </div>
+  <nav class="chapters" id="chapters" aria-label="Etapy pokazu"></nav>
+  <div class="top-ctl">
+    <button class="tbtn" id="btnMode" type="button" aria-pressed="true" title="Przełącz: odtwarza samo / klikam sam"></button>
+    <button class="tbtn icon" id="btnRestart" type="button" title="Od początku" aria-label="Od początku"></button>
+  </div>
+  <div class="prog" aria-hidden="true"><i id="progBar"></i></div>
+</header>
+
+<div class="stage" id="stage">
+  <div class="app" id="app">
+    <aside class="side" id="side">
+      <div class="side-brand"><img src="assets/icon-kk.png" alt="" width="36" height="36"><img class="side-logo" src="assets/logo-kk.svg" alt="Kompas Kompetencji" height="30"></div>
+      <nav class="side-nav" id="sideNav"></nav>
+      <div class="side-user"><span class="av av-ez">EZ</span><span><b>Ewa Zielińska</b><small>naczelniczka wydziału</small></span></div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+</div>
+
+<div class="blocker" id="blocker" aria-hidden="true"></div>
+<div class="spot" id="spot" aria-hidden="true"></div>
+<div class="cursor" id="cursor" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M4 2l15 10.5-6.6 1.3L9.5 21z" fill="#1b1b1b" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+<section class="tip" id="tip" role="dialog" aria-live="polite" aria-labelledby="tipTitle"></section>
+<div class="overlay" id="overlay"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="icons.js"></script>
+<script src="data.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>
