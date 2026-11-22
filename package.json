@@ -1,7 +1,7 @@
 {
   "name": "kompaskompetencji",
   "version": "1.0.0",
-  "description": "Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika służby cywilnej (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.",
+  "description": "Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika urzędu (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.",
   "main": "index.js",
   "directories": {
     "doc": "docs"

@@ -1,6 +1,6 @@
 # Kompas Kompetencji – prototyp
 
-Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika służby cywilnej (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.
+Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika urzędu (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.
 
 ## Uruchomienie
 
