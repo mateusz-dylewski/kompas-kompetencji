@@ -1,4 +1,4 @@
-# Kompas Kompetencji – prototyp
+# Kompas Kompetencji – rozwiązanie wdrożeniowe
 
 Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika urzędu (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.
 
@@ -23,7 +23,7 @@ npm test
 
 Testy używają wbudowanego `node:test`, bez dodatkowych zależności. `test/documents.test.mjs` sprawdza obliczenia oceny: skalę 1/3/5/7/9, średnią, przedziały z § 11 ust. 1 pkt 2, ocenę negatywną z § 11 ust. 4 i brak danych.
 
-## Konta demonstracyjne
+## Konta prezentacyjne (dane przykładowe)
 
 | Rola | E-mail | Hasło |
 |---|---|---|
@@ -39,7 +39,7 @@ Hasło kont demo pochodzi z konfiguracji seedu (`lib/seed-config.mjs`):
 - `KK_MODE=production`: bez domyślnego hasła i bez kont demo. Seed jest możliwy tylko z `KK_SEED_DEMO=1` i `KK_DEMO_PASSWORD`. Cookie dostaje flagę `Secure`, a odpowiedzi nagłówek HSTS. Tryb produkcyjny wymaga też zmiennych z sekcji „Bezpieczeństwo” (`KK_PUBLIC_ORIGIN`, `KK_SIGN_KEY`, `KK_AUDIT_KEY`); bez nich serwer nie wystartuje.
 - `KK_SEED_DEMO=0`: nie twórz kont demo także lokalnie.
 
-Hasła demo są tylko do testów lokalnych. Nie używaj ich nigdzie poza tym prototypem.
+Hasła kont prezentacyjnych służą tylko do pokazu lokalnego. W instalacji urzędu wyłącz je (`KK_SEED_DEMO=0`) i używaj logowania urzędu.
 
 ## AI (lokalny Qwen)
 
@@ -85,7 +85,7 @@ Lokalnie masz model `orcarouter/Qwen3.8-27B-Uncensored:iq2_m`. Nie jest on domy�
 
 ## Styl graficzny
 
-Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostępne materiały nie zawierają pełnej palety systemu designu Ministerstwa Cyfryzacji, więc prototyp używa ogólnego języka usług państwowych (granat, biel). Po otrzymaniu tokenów z systemu designu wystarczy podmienić wartości w `:root`.
+Kolory i zaokrąglenia są tokenami w `app/app.css` (`:root`). Publicznie dostępne materiały nie zawierają pełnej palety systemu designu Ministerstwa Cyfryzacji, więc rozwiązanie używa ogólnego języka usług państwowych (granat, biel). Po otrzymaniu tokenów z systemu designu wystarczy podmienić wartości w `:root`.
 
 ## Struktura
 
@@ -180,10 +180,10 @@ Projekt i etapy: `docs/projekt-modul-przelozonego.md`.
 - **Szczegóły kryteriów w podglądzie oceny:** każda kompetencja rozwija się („Szczegóły”) i pokazuje wskaźniki z punktami i przykładami oraz dowody z okresu oceny przy tej kompetencji.
 - **Migracja:** kolumna `goals.steps` (domyślnie `[]`). Istniejące cele nie mają kroków – ekran proponuje ich dodanie.
 
-## Ograniczenia prototypu
+## Zakres wdrożenia i integracje
 
 - Serwer nie obsługuje HTTPS sam; w produkcji stoi za reverse proxy z TLS. Sesje i licznik nieudanych logowań są w pamięci serwera (reset po restarcie).
-- Link aktywacyjny trafia do skrzynki nadawczej `data/outbox/aktywacje.jsonl` (symulacja e-maila). Wysyłkę SMTP albo logowanie SSO urzędu trzeba dodać przed wdrożeniem (plan P1.1).
+- Link aktywacyjny trafia do skrzynki nadawczej `data/outbox/aktywacje.jsonl` (do czasu podłączenia poczty urzędu). Wysyłkę SMTP albo logowanie SSO urzędu trzeba dodać przed wdrożeniem (plan P1.1).
 - Dowody, check-iny, feedback i oceny cząstkowe kwartalne zapisuje w MVP tylko przełożony. Nie ma usuwania wpisów, tylko edycja.
 - Redakcja nazwisk przed wysłaniem do AI działa na rdzeniu słowa i może nadmiarowo zastąpić zwykłe słowo o tym samym rdzeniu.
 - Brak rejestracji kont przez system zewnętrzny; konto zakłada przełożony, a hasło ustala pracownik linkiem aktywacyjnym.
@@ -209,7 +209,7 @@ Nazwa urzędu w nagłówku: ustaw zmienną `KK_UNIT`, np. `KK_UNIT="Ministerstwo
 
 Ograniczenia: arkusz pierwszej oceny nie zawiera jeszcze daty nawiązania stosunku pracy ani rozmowy wstępnej. Ustalenia poziomów dla pierwszej oceny (3/5/7 pkt) wymagają weryfikacji z przepisami 2015.
 
-## Bezpieczeństwo (stan prototypu)
+## Bezpieczeństwo
 
 - Cookie sesji `kk_sid`: `HttpOnly; SameSite=Strict; Path=/` (w produkcji także `Secure`). Po zalogowaniu poprzednia sesja z tej przeglądarki jest unieważniana (rotacja) i serwer wydaje nowy identyfikator.
 - Limit prób logowania (okno 10 minut), który nie pozwala zablokować cudzego konta ani całego biura: para adres IP + konto po 5 nieudanych próbach, sam adres IP po 50, a jedno konto atakowane z wielu adresów dostaje rosnące odstępy między próbami (1, 2, 4… s, maks. 60 s). Odpowiedź `429` z `Retry-After`. Blokady trafiają do dziennika (`login_blocked`); login nieistniejącego konta zapisujemy jako `[nieznany login]`.
@@ -234,7 +234,7 @@ Automatyczna przy starcie, dane zostają:
 - kolumny `users.must_change`, `audit.mac` i tabela `activation`;
 - konta założone wcześniej przez przełożonego (wpis `create_employee` w dzienniku) dostają `must_change=1` i przy logowaniu muszą zmienić hasło;
 - wpisy dziennika sprzed migracji są jednorazowo pieczętowane HMAC. Lokalnie dzieje się to samo, w produkcji tylko z `KK_AUDIT_MIGRATE=1` przy pierwszym starcie (bez tej zmiennej wpisy bez pieczęci są zgłaszane jako naruszenie). Po migracji usuń zmienną;
-- przy przejściu z trybu lokalnego na produkcyjny ustaw `KK_SIGN_KEY` na zawartość `data/sign.key`, a `KK_AUDIT_KEY` na zawartość `data/audit.key` (inaczej dotychczasowe podpisy mock i pieczęcie nie przejdą weryfikacji), po czym usuń te pliki z katalogu danych.
+- przy przejściu z trybu lokalnego na produkcyjny ustaw `KK_SIGN_KEY` na zawartość `data/sign.key`, a `KK_AUDIT_KEY` na zawartość `data/audit.key` (inaczej dotychczasowe podpisy systemu i pieczęcie nie przejdą weryfikacji), po czym usuń te pliki z katalogu danych.
 
 Zmiana kontraktu API (potrzebna ze względów bezpieczeństwa): `POST /api/employees` nie przyjmuje już hasła i zwraca `{ id, activation: { expires, delivered, link? } }`; żądania zmieniające dane bez `content-type: application/json` (także puste) dostają `415`.
 
@@ -248,10 +248,10 @@ Kontrola ręczna (bez dodawania zależności do projektu):
 2. **axe:** rozszerzenie przeglądarki „axe DevTools” na każdym ekranie albo jednorazowo `npx @axe-core/cli http://localhost:8080` (wymaga zalogowanej sesji, więc wygodniej przez rozszerzenie). Oczekiwany wynik: 0 naruszeń „critical/serious”.
 3. **Czytnik ekranu:** VoiceOver (macOS: Cmd+F5) lub NVDA. Sprawdź, że wybór poziomu, błędy formularzy i wyniki filtrów są ogłaszane.
 
-## Zgodność, dostępność, AI Act (stan prototypu)
+## Zgodność, dostępność, AI Act
 
 - Macierz wymagań: [docs/zgodnosc-regulacje.md](docs/zgodnosc-regulacje.md). Ocena ryzyka AI: [docs/ai-act-ocena-ryzyka.md](docs/ai-act-ocena-ryzyka.md). Szkic DPIA: [docs/dpia-szkic.md](docs/dpia-szkic.md). Deklaracja dostępności (szkic): [docs/deklaracja-dostepnosci.md](docs/deklaracja-dostepnosci.md).
-- **Podpis (mock):** przełożony podpisuje złożoną ocenę, pracownik rejestruje zapoznanie. Podpis to SHA-256 treści oceny i HMAC z kluczem w `data/sign.key` (nie w repo). Weryfikacja w API i w PDF/XML. Nie jest to podpis kwalifikowany.
+- **Podpis systemu (do integracji z podpisem kwalifikowanym lub zaufanym):** przełożony podpisuje złożoną ocenę, pracownik rejestruje zapoznanie. Podpis to SHA-256 treści oceny i HMAC z kluczem w `data/sign.key` (nie w repo). Weryfikacja w API i w PDF/XML. Nie jest to podpis kwalifikowany.
 - **Sprzeciw:** pracownik może złożyć sprzeciw w 7 dni od zapoznania (art. 83 ust. 1). Po terminie serwer go odrzuca. Przełożony widzi alert.
 - **Dziennik:** każdy wpis ma skrót SHA-256 poprzedniego. Widok dziennika pokazuje, czy łańcuch jest zgodny.
 - **AI:** każda podpowiedź jest zapisana w tabeli `ai_log` (skrót wejścia, treść wyjścia, źródło). Podpowiedzi nie zmieniają ocen.

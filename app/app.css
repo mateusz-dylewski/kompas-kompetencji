@@ -27,14 +27,8 @@ button{cursor:pointer}
 .login{min-height:100vh;display:flex;flex-direction:column;position:relative;z-index:1}
 .login-main{flex:1;display:grid;place-items:center;padding:20px}
 .login-grid{display:grid;gap:24px;width:min(980px,100%);align-items:start}
-@media(min-width:900px){.login-grid{grid-template-columns:1.15fr 1fr;gap:48px;align-items:center}}
-.login-val h2{font-size:28px;line-height:1.25;margin:0 0 12px;color:#1b1b1b}
-.login-val .lead{font-size:18px;color:var(--mu);margin:0 0 20px}
-ol.val-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
-.val-list li{display:flex;gap:14px;align-items:flex-start;background:var(--card);border:1px solid var(--ln);border-radius:var(--r);padding:14px}
-.val-list .vn{flex:none;width:32px;height:32px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-weight:700}
-.val-list b{display:block;color:#1b1b1b}
-.val-list span.t{color:var(--mu);font-size:15px}
+/* Logowanie: jedna karta na środku (bez kolumny z opisem) */
+.login-grid{width:min(440px,100%)}
 .login-card{border:1px solid var(--ln)}
 .demo-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
 .demo-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:72px;padding:12px 8px;border:2px solid var(--navy);border-radius:var(--r);background:var(--sky);color:var(--navy);font-weight:700;font-size:15px;cursor:pointer;transition:transform .15s var(--ease),background .2s}
@@ -51,7 +45,7 @@ ol.val-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .login-card{width:min(440px,100%);justify-self:center;background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:28px;animation:rise .15s var(--ease) both}
 .login-card .brand{display:flex;gap:12px;align-items:center;margin-bottom:18px}
 .login h1{font-size:22px;margin:0}
-label.f{display:block;font-weight:600;font-size:14px;margin:12px 0 6px}
+label.f,span.f,legend.f{display:block;padding:0;font-weight:600;font-size:14px;margin:12px 0 6px}
 input,select,textarea{width:100%;padding:12px 14px;border:1.5px solid var(--ln);border-radius:var(--r-btn);background:var(--bg);transition:border-color .2s,box-shadow .2s}
 input:focus,select:focus,textarea:focus{border-color:var(--ring)}
 /* Listy rozwijane: ten sam wygląd co pola tekstowe, własna strzałka (zamiast domyślnej systemowej) */
@@ -390,7 +384,7 @@ details.comp>.comp-body{padding:0 16px 16px;border-top:1px solid var(--ln)}
 .ev-list li{padding:8px 0;border-top:1px solid var(--ln);font-size:14px}
 .ev-list li:first-child{border-top:0}
 /* Cele jako kafelki (moduł przełożonego) */
-.goal-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));margin-bottom:16px}
+.goal-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));margin-bottom:16px}
 .goal-tile{border:1px solid var(--ln);background:var(--card);padding:16px;display:flex;flex-direction:column;gap:6px}
 .goal-tile:hover{border-color:var(--navy)}
 .goal-tile.is-done{background:var(--ok-bg)}
@@ -467,7 +461,7 @@ ol.s3-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:12px}
 .wiz-body-pad,#view:has(.wiz-nav){padding-bottom:120px}
 @media(max-width:959px){.wiz-body-pad,#view:has(.wiz-nav){padding-bottom:190px}}
 /* Logowanie na telefonie: formularz pierwszy, opis wartości pod spodem */
-@media(max-width:899px){.login-card{order:-1}.login-val h2{font-size:22px}.login-val .lead{font-size:16px}}
+
 @media(max-width:479px){
   .wiz-nav{gap:6px;padding:8px}
   .wiz-nav .btn{min-width:0;padding-left:12px;padding-right:12px}
@@ -564,3 +558,61 @@ details.adv[open]>summary{margin-bottom:6px}
 .goal-steps .steps span{font-size:inherit;font-weight:inherit;padding:0;border:0;border-radius:0;color:inherit;transition:none}
 .goal-steps .steps .st-meta{font-size:13px;font-weight:400;color:var(--mu)}
 .goal-steps .steps li{gap:12px}
+/* Telefon: podtytuł strony w nagłówku zawija się zamiast ucinać wielokropkiem */
+@media(max-width:639px){
+  .top .sub{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
+  .top>div:nth-child(2){overflow:visible}
+  .table thead th{display:block;width:1px;height:1px;padding:0;overflow:hidden;white-space:nowrap}
+}
+/* Stopka tekstowa (bez godła i logotypów urzędów – zasada projektu) */
+.foot-gov .foot-t{display:flex;flex-direction:column;gap:2px;color:var(--tx)}
+.foot-gov .foot-t b{font-size:14px;color:var(--navy)}
+/* Start: kolumna działań w tabeli zespołu i zwijane terminy */
+.team-acts{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:170px}
+.team-acts .act-btn{justify-content:flex-start;width:100%}
+.team-kick{margin-top:4px;font-size:13px}
+.team-pend{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+details.dl-card>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;cursor:pointer;list-style:none}
+details.dl-card>summary::-webkit-details-marker{display:none}
+details.dl-card>summary h2{margin:0}
+details.dl-card>summary::after{content:"Pokaż";margin-left:auto;color:var(--navy);font-weight:700;font-size:14px}
+details.dl-card[open]>summary::after{content:"Ukryj"}
+details.dl-card[open]>summary{margin-bottom:8px}
+@media(max-width:639px){.team-acts{min-width:0;margin-top:4px}}
+@media(max-width:639px){
+  .team-table td:first-child::before{display:none}
+  .team-table td:nth-child(2),.team-table td:nth-child(3){display:inline-block;width:auto;vertical-align:top;margin-right:18px}
+  .team-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .team-acts .act-btn:first-child{grid-column:1/-1;justify-content:center}
+  .team-acts .act-btn{justify-content:center}
+}
+.br-facts-h{margin-top:22px}
+/* Stopka zawsze na dole ekranu, także na krótkich stronach */
+.app>.col{display:flex;flex-direction:column;min-height:100vh;min-width:0}
+.app>.col>main.view{flex:1 0 auto}
+/* Pola formularza: białe tło i ramka o kontraście ≥ 3:1 (WCAG 1.4.11) – nie wyglądają na wyłączone */
+input:not([type="checkbox"]):not([type="radio"]),textarea{background:#fff;border-color:#757b85}
+select{border-color:#757b85}
+input:disabled,textarea:disabled,input[readonly],textarea[readonly]{background:var(--bg);border-color:var(--ln);color:var(--mu);cursor:not-allowed}
+/* Telefon: wylogowanie w menu „Więcej” – nagłówek bez powielonego przycisku (więcej miejsca na treść) */
+@media(max-width:959px){.hdr-logout-more{display:none}}
+/* Kryteria – szczegóły na telefonie: nazwa w pełnej szerokości, punkty i „Szczegóły” w drugim wierszu */
+details.comp>summary .muted{white-space:nowrap}
+@media(max-width:639px){
+  details.comp>summary{flex-wrap:wrap;row-gap:6px}
+  details.comp>summary .h-comp{flex:1 1 100%}
+  details.comp>summary .more{margin-left:auto}
+}
+/* Telefon: przyciski działań w kartach jeden pod drugim, na pełną szerokość (bez łamania napisów w 3–4 linie) */
+@media(max-width:639px){
+  .card .btns[style*="flex-start"]>.btn{flex:1 1 100%;justify-content:center}
+}
+/* Telefon: krok celu – tytuł i stan w pełnej szerokości, przycisk pod spodem */
+@media(max-width:639px){
+  .goal-steps .steps li{flex-direction:column;align-items:flex-start;gap:8px}
+  .goal-steps .steps li .btn{align-self:flex-start}
+}
+.chat-ex{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px}
+.chat-ex .btn{white-space:normal;text-align:left}
+.chat-txt h3,.chat-txt h4{font-size:15px;margin:8px 0 4px}.chat-txt ul{margin:4px 0;padding-left:20px}.chat-txt p{margin:4px 0}
+.chat-txt{white-space:normal}

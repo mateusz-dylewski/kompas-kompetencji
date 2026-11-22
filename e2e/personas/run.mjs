@@ -18,7 +18,8 @@ const VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390,
 // Tryb awarii: PERSONA_AI=ok (domyślnie) | down (500 na wszystko) | slow (odpowiedź po 6 s)
 const AI_MODE = ['down', 'slow'].includes(process.env.PERSONA_AI) ? process.env.PERSONA_AI : 'ok';
 // Atrapa „dobrego modelu”: rozpoznaje rodzaj zapytania po prompcie systemowym i odpowiada deterministycznie, po polsku
-const cut = (t, n = 90) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n).replace(/[\s,;.]+$/, '');
+// Skrót na granicy słowa (atrapa AI nie ucina wyrazów w połowie)
+const cut = (t, n = 90) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); if (x.length <= n) return x.replace(/[\s,;.]+$/, ''); const y = x.slice(0, n); return y.slice(0, Math.max(y.lastIndexOf(' '), 20)).replace(/[\s,;.–-]+$/, '') + '…'; };
 const nice = k => String(k || '').toLowerCase().replace(/^./, c => c.toUpperCase());
 function mockAnswer(sys, usr) {
   if (/Dobierasz kryteria DODATKOWE/.test(sys)) {

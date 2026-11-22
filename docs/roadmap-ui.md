@@ -37,4 +37,4 @@ Status: notatki do następnej sesji. Priorytety mogą się zmienić po przegląd
 
 ## 7. Zgodność (do domknięcia)
 - [docs/zgodnosc-regulacje.md](zgodnosc-regulacje.md), [docs/ai-act-ocena-ryzyka.md](ai-act-ocena-ryzyka.md), [docs/dpia-szkic.md](dpia-szkic.md), [docs/deklaracja-dostepnosci.md](deklaracja-dostepnosci.md).
-- Podpis kwalifikowany i login.gov.pl: poza zakresem prototypu, do integracji.
+- Podpis kwalifikowany i login.gov.pl: integracja przy wdrożeniu w urzędzie.

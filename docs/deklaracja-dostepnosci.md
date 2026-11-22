@@ -1,6 +1,6 @@
 # Deklaracja dostępności – Kompas Kompetencji (szkic)
 
-Podmiot: [do uzupełnienia]. Data sporządzenia: [do uzupełnienia]. Aplikacja prototypowa.
+Podmiot: [do uzupełnienia]. Data sporządzenia: [do uzupełnienia].
 
 **Stan zgodności:** częściowa zgodność z WCAG 2.1 na poziomie AA. Wykonano automatyczny audyt (axe-core) i poprawki (link pomijający, etykiety, zakresy nagłówków tabel, pasek postępu z rolą, zamykanie okien klawiszem Escape, kontrast tekstu pomocniczego).
 
