@@ -17,17 +17,44 @@ const VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390,
 // Atrapa modelu AI (API Ollama): odpowiada po polsku po 800 ms, żeby widać było stan „model myśli”
 // Tryb awarii: PERSONA_AI=ok (domyślnie) | down (500 na wszystko) | slow (odpowiedź po 6 s)
 const AI_MODE = ['down', 'slow'].includes(process.env.PERSONA_AI) ? process.env.PERSONA_AI : 'ok';
+// Atrapa „dobrego modelu”: rozpoznaje rodzaj zapytania po prompcie systemowym i odpowiada deterministycznie, po polsku
+const cut = (t, n = 90) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n).replace(/[\s,;.]+$/, '');
+const nice = k => String(k || '').toLowerCase().replace(/^./, c => c.toUpperCase());
+function mockAnswer(sys, usr) {
+  if (/Dobierasz kryteria DODATKOWE/.test(sys)) {
+    const keys = [...usr.matchAll(/^- ([^(\n]+?) \(/gm)].map(m => m[1].trim()).slice(0, 2);
+    const why = k => `Opisane obowiązki i zebrane informacje wskazują, że kryterium ${nice(k)} warto uzgodnić z pracownikiem już na początku okresu.`;
+    return JSON.stringify({ propozycje: keys.map(k => ({ kryterium: k, uzasadnienie: why(k) })) });
+  }
+  if (/Przygotowujesz brief do rozmowy/.test(sys)) {
+    let json = {}; try { json = JSON.parse(usr.slice(usr.indexOf('{'))); } catch { /* brak JSON */ }
+    const facts = json.fakty || [];
+    const crit = [...new Set(facts.map(f => f.kryterium).filter(Boolean))];
+    const topics = (crit.length ? crit : ['współpraca w zespole', 'terminowość zadań', 'potrzebne wsparcie']).slice(0, 3);
+    while (topics.length < 3) topics.push(['terminowość zadań', 'potrzebne wsparcie', 'plan na kolejny okres'][topics.length]);
+    const withText = facts.filter(f => f.id);
+    const pick = [...withText.filter(f => f.rodzaj === 'informacja'), ...withText.filter(f => f.rodzaj !== 'informacja')].slice(0, 3);
+    const ex = pick.length ? pick.map(f => `- ${cut(f.dzialanie || f.co_zrobiono || f.opis || f.sytuacja) || 'Zadanie zrealizowane w okresie'}${f.rezultat ? ` – rezultat: ${cut(f.rezultat, 60)}` : ''} [${f.id}]`).join('\n') : '- Brak zapisanych faktów w tym okresie.';
+    const gaps = (json.braki || []).slice(0, 3).map(k => `- ${nice(k)}`).join('\n');
+    return `Tematy do omówienia:\n${topics.map(t => `- ${nice(t)}`).join('\n')}\n\nPrzykłady z okresu:\n${ex}\n\nPytania otwarte:\n- Co pomogło Ci w osiągnięciu tego rezultatu?\n- Jakie utrudnienia pojawiły się w trakcie realizacji zadań?\n- Jakiego wsparcia potrzebujesz w kolejnym okresie?${gaps ? `\n\nKryteria bez informacji:\n${gaps}` : ''}`;
+  }
+  if (/przed rozmową z przełożonym/.test(sys)) return 'O co może zapytać przełożony:\n- Jakie zadania z tego miesiąca zakończyły się rezultatem?\n- Co utrudniało realizację celów?\n- Jakie wsparcie byłoby pomocne?\n\nCo warto przygotować:\n- Dwa konkretne przykłady zadań z datą i rezultatem.\n- Stan realizacji każdego celu.\n\nO co Ty możesz zapytać:\n- Jakie priorytety obowiązują w kolejnym miesiącu?';
+  if (/rozmowę oceniającą/.test(sys)) return 'Mocne strony z przykładami:\n- Terminowe przygotowanie materiałów dla zespołu.\n- Jasne przekazywanie ustaleń.\n\nObszary do rozwoju:\n- Wcześniejsze zgłaszanie ryzyk.\n- Delegowanie części zadań.\n\nPytania otwarte:\n- Co było dla Ciebie najtrudniejsze w tym okresie?\n- Jakiego wsparcia oczekujesz?\n- Jak widzisz swój rozwój w kolejnym okresie?';
+  if (/asystentem formalnym/.test(sys)) return 'Uwagi do uzasadnień:\n- W jednym uzasadnieniu opis dotyczy osoby, nie zachowania – zastąp go opisem konkretnej sytuacji i działania.\n\nProponowane przeformułowania:\n- „Zebrał dane i przekazał zestawienie przed terminem” zamiast oceny ogólnej.';
+  if (/doradcą rozwoju/.test(sys)) return 'Działania rozwojowe:\n- Szkolenie z pracy na danych do końca kwartału (miernik: ukończony kurs i jedno zestawienie).\n- Prowadzenie krótkiej odprawy zespołu raz w miesiącu (miernik: 3 odprawy).\n\nWsparcie od przełożonego:\n- Informacja zwrotna po każdej odprawie.';
+  if (/rozmową miesięczną/.test(sys)) return 'Pytania otwarte:\n- Jaki rezultat z tego miesiąca uważasz za najważniejszy?\n- Co utrudniało realizację zadań?\n- Jakiego wsparcia potrzebujesz w kolejnym miesiącu?';
+  return 'Podsumowanie:\n- Dane wskazują na stałą realizację zadań w okresie.\n- Warto omówić potrzebne wsparcie.\n\nNastępne kroki:\n- Uzgodnić priorytety na kolejny miesiąc.';
+}
 function startMockAI() {
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', c => { b += c; }); req.on('end', () => {
       res.setHeader('content-type', 'application/json');
       if (AI_MODE === 'down') { res.statusCode = 500; return res.end(JSON.stringify({ error: 'AI niedostępne (atrapa: down)' })); }
       if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'qwen2.5:14b' }] }));
-      // Atrapa cytuje prawdziwe identyfikatory faktów z promptu (jak dobry model), żeby brief wyglądał jak w demo
-      let ids = [];
-      try { ids = [...new Set((JSON.parse(b).messages || []).map(m => m.content).join(' ').match(/"id":"[IFCG][0-9.]+"/g) || [])].map(x => x.slice(6, -1)).slice(0, 2); } catch { /* nie JSON */ }
-      const ex = ids.length ? ids.map((id, i) => `- ${i ? 'Przygotowanie wersji roboczej i zebranie uwag przed terminem' : 'Uzgodnienie harmonogramu z wykonawcą'} [${id}]`).join('\n') : '- Uzgodnienie harmonogramu z wykonawcą.';
-      const content = `Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n${ex}\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?`;
+      let msgs = []; try { msgs = JSON.parse(b).messages || []; } catch { /* nie JSON */ }
+      const sys = (msgs.find(m => m.role === 'system') || msgs[0] || {}).content || '';
+      const usr = [...msgs].reverse().find(m => m.role === 'user')?.content || '';
+      const content = mockAnswer(sys, usr);
       setTimeout(() => res.end(JSON.stringify({ message: { content } })), AI_MODE === 'slow' ? 6000 : 800);
     });
   }).listen(0, '127.0.0.1');
@@ -235,6 +262,28 @@ const SCENARIOS = {
       await p.locator('#sigBox').waitFor({ timeout: 4000 }).catch(() => {});
       return { sigVisible: /Podpisy i zapoznanie/.test(await p.locator('#sigBox').innerText().catch(() => '')) };
     }],
+    ['b-sekcja-podpisy-i-zapoznanie', async (p, vp) => {
+      const box = p.locator('#sigBox');
+      if (!(await box.count())) return { sigSectionShot: false, note: 'brak sekcji podpisów' };
+      await box.scrollIntoViewIfNeeded(); await p.waitForTimeout(300);
+      const dir = path.join(HERE, 'out', 'ewa'); fs.mkdirSync(dir, { recursive: true });
+      await box.screenshot({ path: path.join(dir, `b-sekcja-podpisy-${vp}.png`) });
+      return { sigSectionShot: true, sigText: (await box.innerText()).replace(/\s+/g, ' ').slice(0, 200) };
+    }],
+    ['b-zamknij-podglad', closeModal],
+    ['a-kryteria-ai-propozycje', async (p, vp) => {
+      await nav('home')(p, vp);
+      await clickAct('kickoff', { wait: 800 })(p);
+      await p.locator('input[name="kTyp"][value="C"]').check(); await p.waitForTimeout(200);
+      await p.fill('#kDuties', 'Obsługa interesantów, przygotowywanie zestawień i raportów dla dyrektora.');
+      await p.locator('#kAiBtn').scrollIntoViewIfNeeded(); await p.locator('#kAiBtn').click();
+      await p.waitForFunction(() => !document.querySelector('#kAiOut .ai-think') && document.querySelector('#kAiOut')?.innerText.trim(), null, { timeout: 15000 }).catch(() => {});
+      await p.waitForTimeout(300);
+      const props = await p.locator('#kAiOut .ai-prop').count();
+      const txt = (await p.locator('#kAiOut').innerText()).replace(/\s+/g, ' ').slice(0, 300);
+      await p.locator('#kAiOut').scrollIntoViewIfNeeded();
+      return { critProposals: props, critText: txt, critOk: props >= 1 };
+    }],
     ['b-pobierz-pdf', ewaPdf],
   ],
   // Juror – 3 minuty: pierwsze wrażenie, przełożony, pracownik
@@ -244,7 +293,11 @@ const SCENARIOS = {
     ['a-kryteria', clickAct('kickoff', { wait: 800 })],
     ['a-zamknij', closeModal],
     ['b-kreator-oceny', async (p, vp) => { await nav('evals')(p, vp); await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
-    ['c-brief', async (p, vp) => { await nav('month')(p, vp); await clickAct('aiBrief', { wait: 300 })(p); await waitAI(p); }],
+    ['c-brief', async (p, vp) => { await nav('month')(p, vp); await clickAct('aiBrief', { wait: 300 })(p); await waitAI(p);
+      const t = (await p.locator('#modal').innerText().catch(() => '')).replace(/\s+/g, ' ');
+      const tema = await p.evaluate(() => { const hs = [...document.querySelectorAll('#modal h3, #modal h4, #modal strong, #modal b')]; const h = hs.find(x => /Tematy do omówienia/.test(x.textContent)); if (!h) return 0; const box = h.nextElementSibling; return box ? (box.querySelectorAll('li').length || box.children.length || 1) : 0; });
+      return { briefTopics: tema, briefFactRefs: (t.match(/\[[IFCG][0-9.]+\]/g) || []).length, briefQuestions: (t.match(/Pytania otwarte(.*)/)?.[1] || '').split('?').length - 1, briefText: t.slice(0, 700) };
+    }],
     ['c-zamknij', closeModal],
     ['pracownik-start', async p => { const lo = p.locator('[data-act="logout"]:visible'); if (!(await lo.count()) && await p.locator('#moreBtn').count()) { if ((await p.locator('#moreBtn').getAttribute('aria-expanded')) !== 'true') await p.locator('#moreBtn').click(); await p.waitForTimeout(300); } await lo.first().click(); await p.waitForTimeout(600); await login('pracownik1@demo.kk')(p); }],
     ['c-pracownik-profil', nav('profile')],
