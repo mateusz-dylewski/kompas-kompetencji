@@ -51,7 +51,7 @@ ol.val-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .login-card{width:min(440px,100%);justify-self:center;background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:28px;animation:rise .15s var(--ease) both}
 .login-card .brand{display:flex;gap:12px;align-items:center;margin-bottom:18px}
 .login h1{font-size:22px;margin:0}
-label.f{display:block;font-weight:600;font-size:14px;margin:12px 0 6px}
+label.f,span.f,legend.f{display:block;padding:0;font-weight:600;font-size:14px;margin:12px 0 6px}
 input,select,textarea{width:100%;padding:12px 14px;border:1.5px solid var(--ln);border-radius:var(--r-btn);background:var(--bg);transition:border-color .2s,box-shadow .2s}
 input:focus,select:focus,textarea:focus{border-color:var(--ring)}
 /* Listy rozwijane: ten sam wygląd co pola tekstowe, własna strzałka (zamiast domyślnej systemowej) */
@@ -390,7 +390,7 @@ details.comp>.comp-body{padding:0 16px 16px;border-top:1px solid var(--ln)}
 .ev-list li{padding:8px 0;border-top:1px solid var(--ln);font-size:14px}
 .ev-list li:first-child{border-top:0}
 /* Cele jako kafelki (moduł przełożonego) */
-.goal-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));margin-bottom:16px}
+.goal-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));margin-bottom:16px}
 .goal-tile{border:1px solid var(--ln);background:var(--card);padding:16px;display:flex;flex-direction:column;gap:6px}
 .goal-tile:hover{border-color:var(--navy)}
 .goal-tile.is-done{background:var(--ok-bg)}

@@ -1013,8 +1013,8 @@
         ${isMgr ? `<div><label class="f" for="fEmp">Pracownik</label><select id="fEmp" name="employeeId"><option value="">Cały zespół</option>${empOptions(f.employeeId)}</select></div>` : ""}
         <div><label class="f" for="fComp">Kompetencja</label><select id="fComp" name="competency"><option value="">Wszystkie</option>${compOptions(f.competency)}</select></div>
         <div><label class="f" for="fInd">Wskaźnik</label><select id="fInd" name="indicator"><option value="">Wszystkie</option>${indOptions(f.indicator, f.competency)}</select></div>
-        <div><label class="f" for="fFrom">Od</label><input id="fFrom" name="from" type="date" value="${esc(f.from)}"></div>
-        <div><label class="f" for="fTo">Do</label><input id="fTo" name="to" type="date" value="${esc(f.to)}"></div>
+        <div><label class="f" for="fFrom">Od</label>${dateFieldHtml("fFrom", f.from)}</div>
+        <div><label class="f" for="fTo">Do</label>${dateFieldHtml("fTo", f.to)}</div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button>
           ${isMgr ? `<button class="btn g" type="button" data-act="addEvidence">+ Dodaj informację</button>` : ""}</div>
       </form></div>
@@ -1031,7 +1031,7 @@
       <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(isoToPl(f.date))}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(monthPl(c.month))}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(isoToPl(c.date || ""))}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
-  const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
+  const partialText = p => `<b>${esc(quarterPl(p.quarter))}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
   async function loadEmployeeExtras() {
     const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
     try {
@@ -1043,13 +1043,19 @@
   }
 
   // ---------- Przegląd miesiąca (przełożony): check-in, informacje według wskaźników, feedback ----------
+  // Lista miesięcy po polsku (24 ostatnie) zamiast natywnego pola, którego język zależy od przeglądarki
+  const monthOptions = sel => { const d = new Date(), out = []; for (let i = 0; i < 24; i++) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`); }
+    if (sel && !out.includes(sel)) out.push(sel);
+    return out.map(v => `<option value="${v}"${v === sel ? " selected" : ""}>${esc(monthPl(v))}</option>`).join(""); };
+  // „2026-Q4” → „IV kwartał 2026”
+  const quarterPl = q => { const m = /^(\d{4})-Q([1-4])$/.exec(q || ""); return m ? `${["I", "II", "III", "IV"][+m[2] - 1]} kwartał ${m[1]}` : q || ""; };
   const quarterOf = m => `${m.slice(0, 4)}-Q${Math.floor((+m.slice(5, 7) - 1) / 3) + 1}`;
   function monthPage() {
     const m = S.month;
     if (!m.employeeId && S.dash.team.length) m.employeeId = String(S.dash.team[0].id);
     return `<div class="card"><form id="monthForm" class="grid two" aria-label="Wybór pracownika i miesiąca" novalidate>
         <div><label class="f" for="mEmp">Pracownik</label><select id="mEmp" name="employeeId">${empOptions(m.employeeId)}</select></div>
-        <div><label class="f" for="mMonth">Miesiąc</label><input id="mMonth" name="month" type="month" value="${esc(m.month)}" max="${new Date().toISOString().slice(0, 7)}"></div>
+        <div><label class="f" for="mMonth">Miesiąc</label><select id="mMonth" name="month">${monthOptions(m.month)}</select></div>
         <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
       <div id="monthBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
@@ -1086,7 +1092,7 @@
               ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(isoToPl(e.date))} – ${esc(indShort(e.indicator))}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
         <div class="card"><div class="row"><h2>Informacja zwrotna z miesiąca</h2>${actBtn("plus", "Informacja zwrotna", `data-act="addFeedback"`, "")}</div>
           <p class="muted">Informacja zwrotna dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
-        <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
+        <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterPl(quarterOf(m.month)))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
           <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem informacji.</p>
           ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
       bindActs(box);
@@ -1141,7 +1147,7 @@
     const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
     const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
     const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(isoToPl(e.date))}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
-    openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
+    openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa"} – ${esc(quarterPl(q))}</h2>
       <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jedną informację z kwartału.</p>
       <form id="pqForm" novalidate>
         <label class="f" for="pqComp">Kryterium</label><select id="pqComp" required ${pr ? "disabled" : ""}><option value="">Wybierz…</option>${compOptions(v.competency)}</select>
@@ -1173,7 +1179,11 @@
   }
   function bindEvidencePage() {
     const fm = $("#evFilter"); if (!fm) return;
-    fm.addEventListener("submit", e => { e.preventDefault(); const fd = new FormData(fm); Object.keys(S.evFilter).forEach(k => { S.evFilter[k] = fd.get(k) || ""; }); loadEvidence(); });
+    const hF = bindDate("fFrom"), hT = bindDate("fTo");
+    fm.addEventListener("submit", e => { e.preventDefault(); const fd = new FormData(fm);
+      const from = readDate(hF, "fFrom"), to = readDate(hT, "fTo");
+      if (from === null) { $("#fFrom").focus(); return; } if (to === null) { $("#fTo").focus(); return; }
+      Object.keys(S.evFilter).forEach(k => { S.evFilter[k] = fd.get(k) || ""; }); S.evFilter.from = from; S.evFilter.to = to; loadEvidence(); });
     $("#fComp")?.addEventListener("change", e => { $("#fInd").innerHTML = `<option value="">Wszystkie</option>${indOptions("", e.target.value)}`; });
   }
   const fieldErrors = ex => (ex.data && ex.data.fields ? Object.values(ex.data.fields).join(" ") : ex.message);
@@ -1229,8 +1239,8 @@
     if (!f.employeeId && S.dash.team.length) f.employeeId = String(S.dash.team[0].id);
     return `<div class="card"><form id="sumForm" class="grid two" aria-label="Wybór pracownika i okresu" novalidate>
         <div><label class="f" for="sEmp">Pracownik</label><select id="sEmp">${empOptions(f.employeeId)}</select></div>
-        <div><label class="f" for="sFrom">Od (domyślnie 12 miesięcy wstecz)</label><input id="sFrom" type="date" value="${esc(f.from)}"></div>
-        <div><label class="f" for="sTo">Do</label><input id="sTo" type="date" value="${esc(f.to)}"></div>
+        <div><label class="f" for="sFrom">Od (domyślnie 12 miesięcy wstecz)</label>${dateFieldHtml("sFrom", f.from)}</div>
+        <div><label class="f" for="sTo">Do</label>${dateFieldHtml("sTo", f.to)}</div>
         <div class="btns" style="justify-content:flex-start;align-self:end"><button class="btn" type="submit">Pokaż</button></div>
       </form></div>
       <div id="sumBody" aria-live="polite"><p class="muted">Ładowanie…</p></div>
@@ -1238,7 +1248,11 @@
   }
   function bindSummaryPage() {
     const fm = $("#sumForm"); if (!fm) return;
-    fm.addEventListener("submit", e => { e.preventDefault(); Object.assign(S.sum, { employeeId: $("#sEmp").value, from: $("#sFrom").value, to: $("#sTo").value }); loadSummary(); });
+    const hF = bindDate("sFrom"), hT = bindDate("sTo");
+    fm.addEventListener("submit", e => { e.preventDefault();
+      const from = readDate(hF, "sFrom"), to = readDate(hT, "sTo");
+      if (from === null) { $("#sFrom").focus(); return; } if (to === null) { $("#sTo").focus(); return; }
+      Object.assign(S.sum, { employeeId: $("#sEmp").value, from, to }); loadSummary(); });
   }
   const distChips = d => `<span class="dist">${PTS5.map(p => `<span title="${p} pkt">${p} pkt: <b>${d[p] || 0}</b></span>`).join("")}</span>`;
   async function loadSummary() {
@@ -1259,7 +1273,7 @@
             </tbody></table></div>` : `<p class="muted">Brak informacji i informacji zwrotnej w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
-            <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
+            <p class="muted">${c.partials.map(p => `${esc(quarterPl(p.quarter))}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
         <div class="card"><h2>Rozmowy miesięczne</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(monthPl(m.month))} (${esc(m.status)})`).join(" · ")}</p>` : `<p class="muted">Brak rozmów miesięcznych w okresie.</p>`}</div>`;
     } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
