@@ -23,7 +23,12 @@ function startMockAI() {
       res.setHeader('content-type', 'application/json');
       if (AI_MODE === 'down') { res.statusCode = 500; return res.end(JSON.stringify({ error: 'AI niedostępne (atrapa: down)' })); }
       if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'qwen2.5:14b' }] }));
-      setTimeout(() => res.end(JSON.stringify({ message: { content: 'Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n- Uzgodnienie harmonogramu z wykonawcą.\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?' } })), AI_MODE === 'slow' ? 6000 : 800);
+      // Atrapa cytuje prawdziwe identyfikatory faktów z promptu (jak dobry model), żeby brief wyglądał jak w demo
+      let ids = [];
+      try { ids = [...new Set((JSON.parse(b).messages || []).map(m => m.content).join(' ').match(/"id":"[IFCG][0-9.]+"/g) || [])].map(x => x.slice(6, -1)).slice(0, 2); } catch { /* nie JSON */ }
+      const ex = ids.length ? ids.map((id, i) => `- ${i ? 'Przygotowanie wersji roboczej i zebranie uwag przed terminem' : 'Uzgodnienie harmonogramu z wykonawcą'} [${id}]`).join('\n') : '- Uzgodnienie harmonogramu z wykonawcą.';
+      const content = `Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n${ex}\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?`;
+      setTimeout(() => res.end(JSON.stringify({ message: { content } })), AI_MODE === 'slow' ? 6000 : 800);
     });
   }).listen(0, '127.0.0.1');
   return new Promise(ok => srv.once('listening', () => ok(srv)));
