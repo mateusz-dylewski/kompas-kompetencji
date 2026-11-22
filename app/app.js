@@ -101,12 +101,12 @@
       <h2 id="kTitle">Rozmowa rozpoczynająca – ${first(emp ? emp.name : "")}</h2>
       <p class="muted">Termin: 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny.${list[0] && list[0].ackAt ? ` Ostatnia rozmowa: ${esc(list[0].date)} (zapoznano).` : ""}</p>
       <form id="kForm" novalidate>
-        <fieldset class="plain"><legend class="f">Arkusz</legend>
+        <fieldset class="plain"><legend class="f">Rodzaj arkusza oceny</legend>
           <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>Arkusz B – osoby kierujące zespołem</span></label>
           <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>Arkusz C – pozostałe stanowiska</span></label>
           <p class="muted" id="kTypHelp">Arkusz B dotyczy osób kierujących zespołem, arkusz C – pozostałych stanowisk. Od arkusza zależą kryteria obowiązkowe, dlatego wybierasz go świadomie – bez ustawienia domyślnego.</p></fieldset>
         <label class="f" for="kDate">Data rozmowy</label><input id="kDate" type="date" required value="${esc(v.date)}">
-        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div>
+        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div><p class="muted mand-note">Kryteria obowiązkowe wg rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r. (załącznik – arkusz B/C).</p>
           <div class="ai-crit"><button type="button" class="btn" id="kAiBtn">${KK_ICON("star")}<span>Zaproponuj kryteria (AI)</span></button>
             <div class="ai-crit-out" id="kAiOut" aria-live="polite"></div>
             <p class="muted">AI proponuje tylko kryteria z rozporządzenia. Decyzja należy do Ciebie.</p></div></fieldset>
@@ -169,7 +169,7 @@
     let m; try { m = await api("GET", "/api/metrics"); } catch (ex) { box.querySelector("p").textContent = ex.message; return; }
     const pct = v => (v === null || v === undefined ? "—" : `${v}%`);
     box.innerHTML = `<h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2>` + (m.suppressed
-      ? `<div class="note warn">Metryki pokazujemy, gdy dane pochodzą od co najmniej ${m.kMin} przełożonych (obecnie ${m.managers}). Nie mierzymy pojedynczych osób.</div>`
+      ? `<div class="note warn">Metryki wsparcia przełożonych pokazujemy od ${m.kMin} przełożonych – obecnie ${m.managers}. To dane o korzystaniu z aplikacji, nie o pojedynczych osobach.</div>`
       : `<ul class="c">
           <li>Ocenianie: miesiące okresu z co najmniej jedną informacją – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
           <li>Ocena na piśmie: od szkicu do złożenia – mediana <b>${m.submit.medianDays ?? "—"} dni</b>; poprawki po złożeniu: <b>${pct(m.submit.revisedPct)}</b></li>
@@ -244,7 +244,7 @@
         <div class="seg" role="img" aria-label="Potwierdzone kroki: ${k} z ${n}${rep ? `, zgłoszone: ${rep}` : ""}">${g.steps.map(x => `<i class="${{ confirmed: "on", reported: "rep", open: "" }[goalStepState(x)]}"></i>`).join("")}</div>
         <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
         <div class="trend" data-trend-goal="${g.id}"></div>
-        <details class="goal-steps"><summary>Kroki</summary>
+        <details class="goal-steps"${n <= 5 ? " open" : ""}><summary>Kroki</summary>
           <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
           ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
         </details>`
@@ -286,22 +286,43 @@
         <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Kryterium</th><th scope="col">Poprzednio</th><th scope="col">Teraz</th><th scope="col">Zmiana</th></tr></thead><tbody>
         ${r.competencies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.previous} pkt</td><td>${c.current} pkt</td><td><span class="tag ${c.direction === "wzrost" ? "ok" : c.direction === "spadek" ? "wr" : ""}">${arrow[c.direction]}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">Brak wspólnych kryteriów w obu ocenach.</td></tr>`}</tbody></table></div>`);
   }
+  // Terminy i sprawy: wpisy tej samej osoby w jednym wierszu (zdanie prostym językiem + przyciski akcji)
+  function alertsCard(alerts) {
+    if (!alerts || !alerts.length) return "";
+    const plural = n => n === 1 ? "krok celu czeka" : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "kroki celu czekają" : "kroków celu czeka";
+    const sentence = x => {
+      let m;
+      if (x.kind === "goals" && (m = /(\d+)\s*$/.exec(x.text))) return `${m[1]} ${plural(+m[1])} na Twoje potwierdzenie`;
+      if (x.kind === "kickoff" && (m = /(\d{4}-\d{2}-\d{2})/.exec(x.text))) return /minął/.test(x.text) ? `Termin rozmowy rozpoczynającej minął ${isoToPl(m[1])}` : `Rozmowa rozpoczynająca do ${isoToPl(m[1])}`;
+      if (x.kind === "kickoff_ack" && (m = /(\d{4}-\d{2}-\d{2})/.exec(x.text))) return `Rozmowa rozpoczynająca z ${isoToPl(m[1])} czeka na zapoznanie pracownika`;
+      return x.text;
+    };
+    const btn = x => x.kind === "goals" ? `<button class="btn g" data-act="mgrGoals" data-emp="${x.employeeId}" aria-label="Cele – ${first(x.name)}">Cele</button>`
+      : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn g" data-act="kickoff" data-emp="${x.employeeId}" aria-label="Rozmowa rozpoczynająca – ${first(x.name)}">Rozmowa rozpoczynająca</button>`
+      : `<button class="btn g" data-act="openEval" data-id="${x.evalId}" aria-label="Otwórz ocenę – ${first(x.name)}">Otwórz</button>`;
+    const groups = [];
+    alerts.forEach(x => { let g = groups.find(y => y.name === x.name); if (!g) groups.push(g = { name: x.name, items: [] }); g.items.push(x); });
+    return `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="todo">${groups.map(g => `<li class="todo-row"><div class="todo-t"><b>${first(g.name)}</b>${g.items.map(x => `<span>${esc(sentence(x))}</span>`).join("")}</div><div class="todo-a">${g.items.map(btn).join("")}</div></li>`).join("")}</ul></div>`;
+  }
   // Brief do rozmowy: tekst z odnośnikami do faktów + fakty (JSON „kto co robił”) zbudowane przez serwer
   const factLine = f => `<li id="fact-${esc(f.id.replace(/\./g, "-"))}"><b>[${esc(f.id)}]</b> <span class="muted">${esc(isoToPl(f.data))} · ${esc(f.rodzaj)}${f.kryterium ? " · " + esc(nameOf(f.kryterium)) : ""} · ${esc(f.kto_zapisal || f.kto || "")}${f.zrodlo ? " · źródło: " + esc(f.zrodlo) : ""}</span><br>${esc([f.sytuacja, f.dzialanie, f.rezultat, f.opis, f.co_zrobiono, f.co_wymaga_uwagi, f.krok ? `${f.cel}: ${f.krok}` : ""].filter(Boolean).join(" · "))}</li>`;
   const briefInline = t => esc(t).replace(/\s*\[([IFCG][0-9.]+)\]/g, (m, id) => ` <a class="src-link" href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}" aria-label="źródło: fakt ${id}">źródło</a>`);
-  // Brief: linie „Nagłówek:” -> h3, „- …” -> pozycje listy, reszta -> akapit
-  function briefHtml(text) {
-    let out = "", open = false;
-    const close = () => { if (open) { out += "</ul>"; open = false; } };
+  // Tekst wielowierszowy (brief, odpowiedzi AI, plan rozwoju): „Nagłówek:” -> h3, „- …” -> lista punktowana, „1. …” -> lista numerowana, reszta -> akapit
+  function briefHtml(text, plain) {
+    let out = "", open = "";
+    const close = () => { if (open) { out += `</${open}>`; open = ""; } };
+    const start = tag => { if (open !== tag) { close(); out += `<${tag} class="c">`; open = tag; } };
     String(text).replace(/\r/g, "").split("\n").forEach(raw => {
-      const l = raw.trim(); if (!l) return;
-      const li = /^[-*•]\s+(.*)$/.exec(l);
-      if (li) { if (!open) { out += "<ul class=\"c\">"; open = true; } out += `<li>${briefInline(li[1])}</li>`; return; }
+      const l = raw.trim().replace(/^#{1,4}\s+/, "").replace(/\*\*/g, ""); if (!l) return;
+      let m;
+      if ((m = /^[-*•]\s+(.*)$/.exec(l))) { start("ul"); out += `<li>${briefInline(m[1])}</li>`; return; }
+      if ((m = /^\d+[.)]\s+(.*)$/.exec(l))) { start("ol"); out += `<li>${briefInline(m[1])}</li>`; return; }
       close();
-      if (/^[^.!?]{2,70}:$/.test(l)) out += `<h3>${esc(l.replace(/:$/, ""))}</h3>`; else out += `<p class="muted">${briefInline(l)}</p>`;
+      if (/^[^.!?]{2,70}:$/.test(l)) out += `<h3>${esc(l.replace(/:$/, ""))}</h3>`; else out += `<p${plain ? "" : ' class="muted"'}>${briefInline(l)}</p>`;
     });
     close(); return out;
   }
+  const aiRich = t => `<div class="ai-out brief-text">${briefHtml(t, true)}</div>`;
   async function briefModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
     openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><p class="muted">Tematy, przykłady z zebranych informacji z odnośnikami do faktów, pytania otwarte. Bez ocen i punktów. Zwykle 10–30 s.</p><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
@@ -311,7 +332,7 @@
     stop(); if (!body.isConnected) return; S.briefJson = r.json;
     const j = r.json;
     body.innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · ${r.source === "ai" ? "Przygotował asystent AI" : "Przygotowano bez modelu AI (reguły)"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
-      <div class="ai-out brief-text">${briefHtml(r.brief)}</div>
+      <div class="ai-out brief-text">${briefHtml(String(r.brief).replace(/Kryteria bez informacji:\s*\n\s*[-*•]\s*brak\.?\s*$/i, "Wszystkie kryteria mają zebrane informacje."))}</div>
       <h3 id="brFacts">Fakty, na które powołuje się brief</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
       <details class="adv"><summary>Dla zaawansowanych: dane w formacie JSON</summary><pre class="json-out" tabindex="0" aria-label="Dane w formacie JSON">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></details>
       <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
@@ -356,7 +377,7 @@
   }
   // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
   function devPlan(d, items) {
-    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<p style="margin:6px 0 0;white-space:pre-line">${esc(d.devPlan.plan)}</p>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
+    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<div class="plan-text">${briefHtml(d.devPlan.plan, true)}</div>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
     return mp + devPlanFromEval(d, items, !!d.devPlan);
   }
   function devPlanFromEval(d, items, hasPlan) {
@@ -365,7 +386,7 @@
     if (d.latestDev) {
       const e = d.latestDevEval;
       return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
-        <p>${esc(d.latestDev)}</p>${areas}
+        <div class="plan-text">${briefHtml(d.latestDev, true)}</div>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
     if (hasPlan) return areas;
@@ -423,7 +444,9 @@
       root.querySelectorAll("[data-to]").forEach(countUp);
     });
   }
-  function radar(scores) {
+  const SHORT = { "WYKORZYSTYWANIE WIEDZY": "Wykorzystywanie wiedzy", "ORGANIZACJA PRACY": "Organizacja pracy", "ORIENTACJA NA KLIENTA": "Orientacja na klienta", "RADZENIE SOBIE W SYTUACJIACH KR": "Sytuacje kryzysowe", "PODEJMOWANIE DECYZJI I ODPOWIED": "Podejmowanie decyzji", "ZARZĄDZANIE STRATEGICZNE": "Zarządzanie strategiczne" };
+  const shortName = k => SHORT[k] || nameOf(k);
+  function radar(scores, withList) {
     const items = Object.entries(scores).filter(([, v]) => v.avg !== null);
     if (items.length < 3) return `<p class="muted">Wykres pojawi się, gdy ocenionych będzie co najmniej 3 kompetencje.</p>`;
     const N = items.length, C = 230, CY = 180, R = 95;
@@ -433,9 +456,10 @@
     const poly = items.map(([, v], i) => pt(i, R * v.avg / 9).join(",")).join(" ");
     // Etykiety w dwóch wierszach (do 16 znaków każdy); pełna nazwa zawsze w <title>
     const wrap = full => { const w = full.split(" "), L = [""]; w.forEach(x => { const l = L[L.length - 1]; if (l && (l + " " + x).length > 16 && L.length < 2) L.push(x); else L[L.length - 1] = l ? l + " " + x : x; }); return L.map((l, i) => (l.length > 17 && (i === L.length - 1)) ? l.slice(0, 16).trim() + "…" : l); };
-    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 14), full = nameOf(k), ls = wrap(full), anc = x < C - 8 ? "end" : x > C + 8 ? "start" : "middle", y0 = y + (y < CY - 5 ? -(ls.length - 1) * 13 : 4);
+    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 14), full = nameOf(k), ls = wrap(shortName(k)), anc = x < C - 8 ? "end" : x > C + 8 ? "start" : "middle", y0 = y + (y < CY - 5 ? -(ls.length - 1) * 13 : 4);
       return `<text x="${x.toFixed(1)}" y="${y0.toFixed(1)}" font-size="12.5" text-anchor="${anc}" fill="var(--tx)"><title>${esc(full)}</title>${ls.map((l, n) => `<tspan x="${x.toFixed(1)}" dy="${n ? 13 : 0}">${esc(l)}</tspan>`).join("")}</text>`; }).join("");
-    return `<svg class="radar" viewBox="0 0 460 360" role="img" aria-label="Profil kompetencji, skala 0 do 9 punktów, 5 punktów to poziom oczekiwań">${rings}${axes}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg><p class="muted radar-scale">Skala 0–9 pkt, 5 pkt = na poziomie oczekiwań. Pierścienie: 3, 6 i 9 pkt.</p>`;
+    const svg = `<svg class="radar" viewBox="0 0 460 360" role="img" aria-label="Profil kompetencji, skala 1 do 9 punktów, 5 punktów to poziom oczekiwań">${rings}${axes}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg><p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań. Pierścienie: 3, 6 i 9 pkt.</p>`;
+    return withList ? `<div class="radar-box"><div class="radar-desk">${svg}</div><div class="radar-mob">${scoreBars(scores)}<p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań.</p></div></div>` : svg;
   }
   const scoreBars = scores => Object.entries(scores).map(([k, v]) => `
     <div class="sb"><div class="row"><span class="sb-l">${compIc(k)}${esc(nameOf(k))}</span><span class="muted">${v.avg === null ? "brak" : fmt(v.avg) + " pkt"}</span></div>${bar(v.avg)}</div>`).join("");
@@ -470,6 +494,7 @@
 
   // ---------- Logowanie ----------
   function renderLogin(err = "") {
+    lastPageKey = ""; window.scrollTo(0, 0);
     $("#root").innerHTML = `
       <div class="login"><div class="login-main"><div class="login-grid">
       <section class="login-val" aria-labelledby="valH">
@@ -495,7 +520,7 @@
           <button class="btn w" style="margin-top:16px" type="submit">Zaloguj się</button>
           ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
         </form>
-        <p class="note">Konta testowe są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
+        <p class="note">Wersja demonstracyjna na danych fikcyjnych. We wdrożeniu logowanie przez system tożsamości urzędu (SSO).</p>
       </div></div></div>${footer("foot-login")}</div>`;
     // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
     const demoRow = $(".demo-row");
@@ -636,7 +661,7 @@
             <button class="btn sm g hdr-logout" data-act="logout" ><span aria-hidden="true">⎋</span> Wyloguj</button>
           </header>
           <main class="view" id="view" tabindex="-1">
-            ${opts.hidePageHead ? "" : `<div class="page-h"><h1>${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
+            ${opts.hidePageHead ? "" : `<div class="page-h"><h1 tabindex="-1">${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
             ${content}
           </main>
           ${footer()}
@@ -753,7 +778,8 @@
       : a.dataset.nav ? `.side-nav [data-nav="${CSS.escape(a.dataset.nav)}"]` : a.dataset.wiz ? `[data-wiz="${CSS.escape(a.dataset.wiz)}"]` : null) : null;
     const pageChanged = pageKey !== lastPageKey; lastPageKey = pageKey;
     root.innerHTML = shell(html, navView, title, sub, opts);
-    if (pageChanged && sel) { const vw = $("#view"); if (vw) { vw.setAttribute("data-pf", ""); vw.addEventListener("blur", () => vw.removeAttribute("data-pf"), { once: true }); vw.focus({ preventScroll: true }); } }
+    if (pageChanged) window.scrollTo(0, 0);
+    if (pageChanged && sel) { const vw = $("#view"); const h = vw && (vw.querySelector("h1") || vw.querySelector("h2")); if (h) { if (!h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); } else if (vw) vw.focus({ preventScroll: true }); }
     else if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
     bindShell();
     initSelects();
@@ -834,16 +860,16 @@
       const items = Object.entries(sc).filter(([, x]) => x.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
       return `
         <div class="grid two">
-          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
-          <div class="card"><h2>Obszary do rozwoju</h2><p class="muted">Skala 1–9 pkt; 5 pkt = na poziomie oczekiwań. Pokazujemy 5 kryteriów z najniższą oceną.</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im wyższy wynik, tym mocniejsza kompetencja.</p>${radar(sc, true)}</div>
+          <div class="card"><h2>Obszary do rozwoju</h2><p class="muted">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań. Pokazujemy 5 kryteriów z najniższą oceną.</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
+            + `<p class="muted" style="margin:12px 0 8px">Omów to z przełożonym na rozmowie miesięcznej.</p><div class="btns" style="justify-content:flex-start;margin-top:0"><button class="btn" data-act="aiDev">${KK_ICON("spark")}<span>Zaplanuj działania z asystentem</span></button><button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button></div>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
         </div>
         <div class="grid two">
           <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
           <div class="card"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
-            <div id="aiDevOut"></div></div>
+            <div id="aiDevOut" aria-live="polite"></div></div>
         </div>
         <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
     }
@@ -876,7 +902,7 @@
     if (v === "home") {
       const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
       const toDiscuss = d.team.filter(t => t.status === "submitted");
-      const status = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
+      const status = todo.length ? `Ocen do przygotowania: ${todo.length}` : toDiscuss.length ? `Ocen do omówienia z pracownikami: ${toDiscuss.length}` : "Wszystkie oceny są przygotowane";
       // „Ocena w 3 krokach”: krok 1 dla pierwszej osoby bez zapisanej rozmowy rozpoczynającej, krok 3 dla pierwszej z oceną do omówienia
       const kickEmp = d.team.find(t => !t.kickoff) || d.team[0] || null;
       const briefEmp = toDiscuss[0] || d.team.find(t => t.status !== "none") || d.team[0] || null;
@@ -891,7 +917,7 @@
             : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}" aria-label="Omów ocenę – ${first(t.name)}"`)
             : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}" aria-label="Otwórz ocenę – ${first(t.name)}"`)}</td></tr>`).join("");
       return `
-        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)}. Zacznij od kroku 1, potem przejdź do kolejnych.</p>
+        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)} · zacznij od kroku 1, potem przejdź do kolejnych.</p>
           <ol class="s3-list">
             <li><span class="vn" aria-hidden="true">1</span><div><b>Ustal kryteria</b><span class="t">Rozmowa rozpoczynająca z pracownikiem. Asystent AI podpowie kryteria dla jego stanowiska.</span>
               ${kickEmp ? `<button class="btn" data-act="kickoff" data-emp="${kickEmp.id}" aria-label="Ustal kryteria – rozmowa rozpoczynająca – ${first(kickEmp.name)}">${KK_ICON("star")}<span>Ustal kryteria</span></button>` : ""}</div></li>
@@ -900,7 +926,7 @@
             <li><span class="vn" aria-hidden="true">3</span><div><b>Przygotuj rozmowę</b><span class="t">Brief z zebranych faktów: tematy i pytania otwarte, bez ocen i punktów.</span>
               ${briefEmp ? `<button class="btn" data-act="aiBrief" data-emp="${briefEmp.id}" aria-label="Przygotuj rozmowę – brief – ${first(briefEmp.name)}">${KK_ICON("msg")}<span>Przygotuj rozmowę</span></button>` : ""}</div></li>
           </ol></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}" aria-label="Cele – ${first(x.name)}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}" aria-label="Rozmowa rozpoczynająca – ${first(x.name)}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}" aria-label="Otwórz ocenę – ${first(x.name)}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
+        ${alertsCard(d.alerts)}
         <div class="kpis">
           <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole<small>Osoby przypisane do Ciebie.</small></span></div>
           <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania<small>Oceny bez szkicu lub niedokończone.</small></span></div>
@@ -915,10 +941,10 @@
     if (v === "results") {
       const agg = d.aggregate;
       const body = agg.suppressed
-        ? `<div class="note warn">Wyniki zbiorcze pokazujemy od ${agg.kMin} złożonych ocen (obecnie ${agg.n}). To chroni prywatność pracowników.</div>`
+        ? `<div class="note warn">Wyniki zespołu pokazujemy od ${agg.kMin} złożonych ocen (ochrona prywatności) – obecnie ${agg.n}.</div>`
         : `<p class="muted">Średnie z ${agg.n} ocen. Widok zbiorczy: nie pokazuje wyników pojedynczych osób.</p>${agg.competencies.map(x => `<div class="sb"><div class="row"><span class="sb-l">${compIc(x.k)}${esc(nameOf(x.k))}</span><span class="muted">${fmt(x.avg)} pkt</span></div>${bar(x.avg)}</div>`).join("")}`;
       return `<div class="grid two">
-        <div class="card"><h2>Wyniki zespołu</h2>${body}</div>
+        <div class="card"><h2>Wyniki zespołu</h2><p class="muted">Wyniki zespołu pokazujemy od ${agg.kMin} złożonych ocen (ochrona prywatności). Metryki wsparcia przełożonych – od ${agg.kMin} przełożonych.</p>${body}</div>
         <div class="card" id="metricsCard"><h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2><p class="muted">Wczytywanie…</p></div>
         <div class="card"><h2>Jak czytać ten widok</h2>
           <ul class="c"><li>Kompetencje posortowane od najsłabszej. To punkt startowy do rozmów, nie wyrok.</li>
@@ -1264,7 +1290,7 @@
         const dis = !isFirst && isMand(m.k, S.cur && S.cur.typ);
         return `<label class="choice${dis ? " is-mand" : ""}"><input type="checkbox" data-crit="${esc(m.k)}" ${c.criteria.includes(m.k) ? "checked" : ""} ${dis ? "disabled" : ""}>
           <span class="crit-h">${compIc(m.k)}<span><b>${esc(nameOf(m.k))}</b>${dis ? ` <span class="tag mand">${KK_ICON("lock")}<span>Obowiązkowe – zawsze w ocenie</span></span>` : ""}<br><span class="muted">${m.w.length} wskaźników</span></span></span></label>`;
-      }).join("")}</div></div>`;
+      }).join("")}</div><p class="muted mand-note">Kryteria obowiązkowe wg rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r. (załącznik – arkusz B/C).</p></div>`;
   }
   function rateOne(comp) {
     const c = S.cur, isFirst = c.typ === "pierwsza";
@@ -1336,7 +1362,7 @@
             <button class="btn g" data-act="aiBrief" data-emp="${c.employeeId}">Przygotuj brief do rozmowy</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
-      <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
+      <div id="aiOut">${c.aiText ? `${aiRich(c.aiText)}<p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
       <p class="note">Model działa na Twoim komputerze, dane nie opuszczają urządzenia. To propozycja do przemyślenia. Ocenę wystawiasz Ty.</p></div>`;
   }
   function sumStep() {
@@ -1513,12 +1539,26 @@
   }
   const EVT = { login: "Logowanie", create_eval: "Utworzenie oceny", update_eval: "Zmiana oceny", submit_eval: "Złożenie oceny", create_evidence: "Dodanie informacji", update_evidence: "Zmiana informacji", create_kickoff: "Rozmowa rozpoczynająca", update_kickoff: "Zmiana rozmowy rozpoczynającej", create_goal: "Nowy cel", goal_step_confirm: "Potwierdzenie kroku celu", update_devplan: "Plan rozwoju", discuss_eval: "Omówienie oceny", create_checkin: "Rozmowa miesięczna", update_checkin: "Zmiana rozmowy miesięcznej", create_feedback: "Informacja zwrotna", update_feedback: "Zmiana informacji zwrotnej", create_partial: "Ocena cząstkowa", update_partial: "Zmiana oceny cząstkowej", login_fail: "Nieudane logowanie", setting: "Zmiana ustawienia" };
   const plTime = at => { const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : at || ""; };
+  // Dziennik: „pole: przed → po” z pól prev_value / new_value (JSON); długi opis trafia do <details>
+  function auditChange(a) {
+    const parse = t => { if (t === null || t === undefined || t === "") return undefined; try { return JSON.parse(t); } catch { return String(t); } };
+    const val = v => v === undefined || v === null ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    const pv = parse(a.prev_value), nv = parse(a.new_value), isO = v => v && typeof v === "object" && !Array.isArray(v);
+    let lines = [];
+    if (isO(pv) || isO(nv)) {
+      const o = isO(pv) ? pv : {}, n = isO(nv) ? nv : {};
+      [...new Set([...Object.keys(o), ...Object.keys(n)])].forEach(k => { if (JSON.stringify(o[k]) !== JSON.stringify(n[k])) lines.push(`${k}: ${val(o[k])} → ${val(n[k])}`); });
+    } else if (pv !== undefined || nv !== undefined) lines.push(`${val(pv)} → ${val(nv)}`);
+    if (!lines.length) return `<span class="muted">—</span>`;
+    const full = lines.join("\n"), short = full.length > 120 ? full.slice(0, 117).replace(/\s+\S*$/, "") + "…" : full;
+    return full.length > 120 ? `<span class="chg">${esc(short)}</span><details class="chg-more"><summary>Pokaż całość</summary><pre class="chg-full">${esc(full)}</pre></details>` : `<span class="chg">${esc(full).replace(/\n/g, "<br>")}</span>`;
+  }
   async function loadLog() {
     const b = $("#logBody"); if (!b) return;
     try {
       const r = await api("GET", "/api/audit");
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
-        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(EVT[a.action] || a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(plTime(a.at))}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
+        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(EVT[a.action] || a.action)}</td><td data-label="Czego dotyczy">${esc(a.target || "")}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
         + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
@@ -1599,7 +1639,8 @@
     aiDev: async () => {
       const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
       const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa działania rozwojowe…`); const stop = startThinking(outEl);
-      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
+      outEl.scrollIntoView({ block: "nearest" });
+      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
       catch (e) { stop(); outEl.innerHTML = ""; toast(errMsg(e)); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
@@ -1621,7 +1662,7 @@
     aiBrief: b => briefModal(+b.dataset.emp),
     aiPrep: async b => {
       const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
       catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
       b.disabled = false;
     },
@@ -1721,7 +1762,7 @@
     },
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
       catch (e) { stop(); out.innerHTML = ""; toast(errMsg(e)); }
       b.disabled = false;
     },
