@@ -609,3 +609,12 @@ details.comp>summary .muted{white-space:nowrap}
   details.comp>summary .h-comp{flex:1 1 100%}
   details.comp>summary .more{margin-left:auto}
 }
+/* Telefon: przyciski działań w kartach jeden pod drugim, na pełną szerokość (bez łamania napisów w 3–4 linie) */
+@media(max-width:639px){
+  .card .btns[style*="flex-start"]>.btn{flex:1 1 100%;justify-content:center}
+}
+/* Telefon: krok celu – tytuł i stan w pełnej szerokości, przycisk pod spodem */
+@media(max-width:639px){
+  .goal-steps .steps li{flex-direction:column;align-items:flex-start;gap:8px}
+  .goal-steps .steps li .btn{align-self:flex-start}
+}

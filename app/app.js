@@ -129,7 +129,7 @@
           const r = await api("POST", "/api/ai/criteria", { employeeId: empId, typ: document.querySelector('[name="kTyp"]:checked').value, duties: $("#kDuties").value });
           const pr = r.propozycje || [];
           out.innerHTML = pr.length ? `<ul class="ai-props">${pr.map(p => `<li class="ai-prop"><b>${esc(nameOf(p.k))}</b><span>${esc(p.uzasadnienie || "")}</span></li>`).join("")}</ul>
-            <p class="ai-crit-src">Źródło: ${r.source === "ai" ? "model AI" : "reguły"}.</p>
+            <p class="ai-crit-src">Źródło: ${r.source === "ai" ? "model AI" : "reguły systemu (asystent AI był niedostępny)"}.</p>
             <button type="button" class="btn" id="kAiApply">Zaznacz te kryteria</button>` : `<p class="muted">Brak propozycji dla podanych obowiązków. Wybierz kryteria samodzielnie.</p>`;
           const ap = $("#kAiApply");
           if (ap) ap.addEventListener("click", () => {
@@ -253,7 +253,7 @@
     const state = g.done ? '<span class="tag ok">zrealizowany</span>' : rep ? `<span class="tag wr">${rep} do potwierdzenia</span>` : '<span class="tag info">w toku</span>';
     const stepBtn = (x, i) => {
       const st = goalStepState(x);
-      if (mode === "emp") return st === "confirmed" ? `<span class="st-meta">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
+      if (mode === "emp") return st === "confirmed" ? "" // data potwierdzenia jest w opisie stanu kroku
         : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}" aria-label="${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"} kroku „${esc(x.t)}” – ${esc(g.s)}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
       return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}" aria-label="${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"} krok „${esc(x.t)}” – ${esc(g.s)}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
     };
@@ -263,7 +263,7 @@
         <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
         <div class="trend" data-trend-goal="${g.id}"></div>
         <details class="goal-steps"${n <= 5 ? " open" : ""}><summary>Kroki</summary>
-          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><span class="st-meta">${label[goalStepState(x)]}</span></span>${stepBtn(x, i)}</li>`).join("")}</ul>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><span class="st-meta">${label[goalStepState(x)]}${x.confirmed_at ? ` ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}` : ""}</span></span>${stepBtn(x, i)}</li>`).join("")}</ul>
           ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
         </details>`
       : `<p class="muted">Cel sprzed zmian – bez kroków.</p><button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>`;
@@ -405,11 +405,11 @@
     return mp + devPlanFromEval(d, items, !!d.devPlan);
   }
   function devPlanFromEval(d, items, hasPlan) {
-    const weak = items.slice(0, 3).map(([k]) => k);
-    const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
+    const weak = items.filter(([, x]) => x.avg < 5).slice(0, 3).map(([k]) => k); // tylko poniżej poziomu oczekiwań (5 pkt)
+    const areas = weak.length ? `<h3>Obszary poniżej poziomu oczekiwań</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
     if (d.latestDev) {
       const e = d.latestDevEval;
-      return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}` : ""}.</p>
+      return `<h3>Wnioski rozwojowe z oceny</h3><p class="muted">Zapisał przełożony${e ? ` w ocenie „${esc(TYP[e.typ])}” za okres ${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}` : ""}.</p>
         <div class="plan-text">${briefHtml(d.latestDev, true)}</div>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
@@ -885,8 +885,9 @@
       return `
         <div class="grid two prof-grid">
           <div class="card prof-plan"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
-          <div class="card prof-areas"><h2>Obszary do rozwoju</h2><p class="muted">Pokazujemy 5 kryteriów z najniższą oceną (od najniższej).</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<p class="muted" style="margin:12px 0 8px">Omów to z przełożonym na rozmowie miesięcznej.</p><div class="btns" style="justify-content:flex-start;margin-top:0"><button class="btn" data-act="aiDev">${KK_ICON("spark")}<span>Zaplanuj działania z asystentem</span></button><button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button></div>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+          <div class="card prof-areas"><h2>Obszary do rozwoju</h2>${(() => { const below = items.filter(([, x]) => x.avg < 5);
+            return `<p class="muted">${below.length ? "Kryteria poniżej poziomu oczekiwań (5 pkt), od najniższej oceny." : "Wszystkie kryteria są na poziomie oczekiwań lub wyżej. Poniżej trzy z najniższą oceną."}</p>`; })()}${items.length ? scoreBars(Object.fromEntries((items.filter(([, x]) => x.avg < 5).length ? items.filter(([, x]) => x.avg < 5) : items.slice(0, 3)).slice(0, 5)))
+            + `<p class="muted" style="margin:12px 0 8px">Omów to z przełożonym na rozmowie miesięcznej.</p><div class="btns" style="justify-content:flex-start;margin-top:0"><button class="btn" data-act="aiDev">${KK_ICON("spark")}<span>Zaplanuj działania z asystentem</span></button><button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie</span></button></div>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
           <div class="card prof-comp"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im wyższy wynik, tym mocniejsza kompetencja.</p>${radar(sc, true)}</div>
           <div class="card prof-asst"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
@@ -1424,7 +1425,7 @@
             <button class="btn g" data-act="aiBrief" data-emp="${c.employeeId}">Przygotuj brief do rozmowy</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
-      <div id="aiOut">${c.aiText ? `${aiRich(c.aiText)}<p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
+      <div id="aiOut">${c.aiText ? `${aiRich(c.aiText)}<p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły systemu (asystent AI był niedostępny)"}</p>` : ""}</div>
       <p class="note">Model działa na Twoim komputerze, dane nie opuszczają urządzenia. To propozycja do przemyślenia. Ocenę wystawiasz Ty.</p></div>`;
   }
   function sumStep() {
@@ -1643,7 +1644,7 @@
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
         + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(evtName(a.action))}</td><td data-label="Czego dotyczy">${esc(targetLabel(a))}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
-        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
@@ -1723,7 +1724,7 @@
       const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
       const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa działania rozwojowe…`); const stop = startThinking(outEl);
       outEl.scrollIntoView({ block: "nearest" });
-      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
+      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"}</p>`; }
       catch (e) { stop(); outEl.innerHTML = ""; toast(errMsg(e)); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
@@ -1745,7 +1746,7 @@
     aiBrief: b => briefModal(+b.dataset.emp),
     aiPrep: async b => {
       const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"} · propozycja do przemyślenia</p>`; }
       catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
       b.disabled = false;
     },
@@ -1845,7 +1846,7 @@
     },
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły systemu (asystent AI był niedostępny)"} · propozycja do przemyślenia</p>`; }
       catch (e) { stop(); out.innerHTML = ""; toast(errMsg(e)); }
       b.disabled = false;
     },
