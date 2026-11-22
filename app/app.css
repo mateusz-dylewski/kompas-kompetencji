@@ -486,7 +486,7 @@ ol.s3-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:12px}
 /* --- Brief --- */
 .brief-text h3{margin:14px 0 6px;font-size:16px;color:var(--navy)}
 .brief-text ul{margin:0 0 8px}
-.src-link{font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap}
+.src-link{font-size:14px;font-weight:700;color:var(--navy);white-space:nowrap}
 .adv{margin:14px 0;border:1px solid var(--ln);border-radius:var(--r);padding:8px 12px}
 .adv summary{cursor:pointer;font-weight:700;color:var(--navy)}
 
@@ -501,9 +501,12 @@ ol.s3-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:12px}
 .radar-scale{text-align:center;font-size:13px}
 .mod-row{align-items:center}
 .mod-row>span:nth-of-type(1){flex:1}
-.mod-state{font-weight:700;font-size:13px;padding:3px 10px;border-radius:var(--r-btn);white-space:nowrap}
+.mod-state{display:inline-flex;align-items:center;gap:5px;font-weight:700;font-size:13px;padding:3px 10px;border-radius:var(--r-btn);white-space:nowrap}
+.mod-state .ic-svg{width:16px;height:16px}
 .mod-state.on{background:var(--ok-bg);color:var(--ok)}
-.mod-state.off{background:#eef0f3;color:#3b4a5f}
+.mod-state.off{background:#e4e7eb;color:#3b4a5f;border:1px solid #9aa3ad}
+.choice.mod-row:has(input:not(:checked)){background:#eef0f3;border-color:#c9ced6;border-style:dashed}
+.choice.mod-row:has(input:not(:checked)) b{color:#3b4a5f}
 .choice.mod-row:has(input:checked) .mod-state.on{background:#fff;color:var(--ok)}
 
 /* --- Terminy i sprawy do załatwienia --- */
@@ -547,3 +550,13 @@ details.adv[open]>summary{margin-bottom:6px}
 .modal .card.more-below:not(:has(.btns))::after{content:"";position:sticky;display:block;bottom:-18px;height:18px;margin-top:-18px;background:linear-gradient(transparent,rgba(0,0,0,.18));pointer-events:none}
 .err:empty{display:none}
 @media(max-width:639px){.toast{top:64px;right:12px}}
+
+/* Cykl 7 */
+.meta dt,.meta dd{min-width:0}
+@media(max-width:639px){.meta{grid-template-columns:1fr;gap:0}.meta dt{margin-top:8px;font-size:13px}}
+.eval-chart{margin-top:6px}
+@media(min-width:640px){.eval-chart{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:center}.eval-chart .radar-box{display:contents}.eval-chart .radar-mob{display:block}.eval-chart .radar-mob .radar-scale{display:none}}
+.st-meta{font-size:13px;font-weight:400;color:var(--mu)}
+.goal-steps .st-t b{font-weight:600}
+.src-link{display:inline-block;padding:2px 4px}
+@media(max-width:759px){.prof-grid .prof-asst{order:5}}

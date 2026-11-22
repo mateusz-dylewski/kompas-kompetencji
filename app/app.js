@@ -101,7 +101,7 @@
     openModal(`
       <h2 id="kTitle">Rozmowa rozpoczynająca – ${first(emp ? emp.name : "")}</h2>
       <p>Ustal z pracownikiem obowiązki, oczekiwania i cele na ten okres. Pracownik potwierdzi zapoznanie w swoim panelu.</p>
-      ${list[0] && list[0].ackAt ? `<p class="muted">Ostatnia rozmowa: ${esc(list[0].date)} (zapoznano).</p>` : ""}
+      ${list[0] && list[0].ackAt ? `<p class="muted">Ostatnia rozmowa: ${esc(isoToPl(list[0].date))} (zapoznano).</p>` : ""}
       <details class="adv"><summary>Podstawa prawna</summary><p class="muted">Rozmowę rozpoczynającą przeprowadza się w terminie 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny. Rozporządzenie Prezesa Rady Ministrów z 4 kwietnia 2016 r. w sprawie przeprowadzania ocen okresowych członków korpusu służby cywilnej.</p></details>
       <form id="kForm" novalidate>
         <fieldset class="plain"><legend class="f">Rodzaj arkusza oceny</legend>
@@ -189,6 +189,8 @@
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
   const isoToPl = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || "") ? iso.split("-").reverse().join(".") : iso || "");
+  // Data z godziną: „dd.mm.rrrr gg:mm”; sama data: „dd.mm.rrrr”
+  const plDT = at => { const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}` : at || ""; };
   // Przyjmuje kolejne cyfry: dzień 01–31, miesiąc 01–12; „5” w dniu → „05.”, „2” w miesiącu → „02.”
   function maskDigits(raw) {
     let out = "";
@@ -248,7 +250,7 @@
     const state = g.done ? '<span class="tag ok">zrealizowany</span>' : rep ? `<span class="tag wr">${rep} do potwierdzenia</span>` : '<span class="tag info">w toku</span>';
     const stepBtn = (x, i) => {
       const st = goalStepState(x);
-      if (mode === "emp") return st === "confirmed" ? `<span class="muted">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
+      if (mode === "emp") return st === "confirmed" ? `<span class="st-meta">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
         : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}" aria-label="${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"} kroku „${esc(x.t)}” – ${esc(g.s)}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
       return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}" aria-label="${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"} krok „${esc(x.t)}” – ${esc(g.s)}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
     };
@@ -258,7 +260,7 @@
         <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
         <div class="trend" data-trend-goal="${g.id}"></div>
         <details class="goal-steps"${n <= 5 ? " open" : ""}><summary>Kroki</summary>
-          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><span class="st-meta">${label[goalStepState(x)]}</span></span>${stepBtn(x, i)}</li>`).join("")}</ul>
           ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
         </details>`
       : `<p class="muted">Cel sprzed zmian – bez kroków.</p><button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>`;
@@ -319,7 +321,13 @@
   }
   // Brief do rozmowy: tekst z odnośnikami do faktów + fakty (JSON „kto co robił”) zbudowane przez serwer
   const factLine = f => `<li id="fact-${esc(f.id.replace(/\./g, "-"))}"><b>[${esc(f.id)}]</b> <span class="muted">${esc(isoToPl(f.data))} · ${esc(f.rodzaj)}${f.kryterium ? " · " + esc(nameOf(f.kryterium)) : ""} · ${esc(f.kto_zapisal || f.kto || "")}${f.zrodlo ? " · źródło: " + esc(f.zrodlo) : ""}</span><br>${esc([f.sytuacja, f.dzialanie, f.rezultat, f.opis, f.co_zrobiono, f.co_wymaga_uwagi, f.krok ? `${f.cel}: ${f.krok}` : ""].filter(Boolean).join(" · "))}</li>`;
-  const briefInline = t => esc(t).replace(/\s*\[([IFCG][0-9.]+)\]/g, (m, id) => ` <a class="src-link" href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}" aria-label="źródło: fakt ${id}">źródło</a>`);
+  // Opis linku „źródło”: rodzaj i data faktu (z S.briefJson.fakty), np. „Źródło: informacja z 22.09.2026”
+  const srcTitle = id => {
+    const f = ((S.briefJson && S.briefJson.fakty) || []).find(x => x.id === id);
+    const kind = { I: "informacja", C: "rozmowa miesięczna", F: "informacja zwrotna", G: "krok celu" }[id[0]] || "fakt";
+    return f && f.data ? `Źródło: ${kind} z ${isoToPl(f.data)}` : `Źródło: ${kind} ${id}`;
+  };
+  const briefInline = t => esc(t).replace(/\s*\[([IFCG][0-9.]+)\]/g, (m, id) => ` <a class="src-link" href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}" aria-label="${esc(srcTitle(id))}" title="${esc(srcTitle(id))}">źródło</a>`);
   // Tekst wielowierszowy (brief, odpowiedzi AI, plan rozwoju): „Nagłówek:” -> h3, „- …” -> lista punktowana, „1. …” -> lista numerowana, reszta -> akapit
   function briefHtml(text, plain) {
     let out = "", open = "";
@@ -346,7 +354,7 @@
     const j = r.json;
     body.innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · ${r.source === "ai" ? "Przygotował asystent AI" : "Przygotowano bez modelu AI (reguły)"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
       <div class="ai-out brief-text">${briefHtml(String(r.brief).replace(/Kryteria bez informacji:\s*\n\s*[-*•]\s*brak\.?\s*$/i, "Wszystkie kryteria mają zebrane informacje."))}</div>
-      <h3 id="brFacts">Fakty, na które powołuje się brief</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
+      <h3 id="brFacts">Fakty, na które powołuje się brief</h3><p class="muted">Źródła: zapisane informacje (I…), rozmowy miesięczne (C…), informacje zwrotne (F…) i kroki celów (G…), na których opiera się brief.</p>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
       <details class="adv"><summary>Dla zaawansowanych: dane w formacie JSON</summary><pre class="json-out" tabindex="0" aria-label="Dane w formacie JSON">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></details>
       <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
     bindActs(body);
@@ -426,7 +434,7 @@
   }
   // Gdzie działa model AI: lokalnie (Ollama) albo na serwerze zewnętrznym (tryb zgodny z OpenAI, KK_AI_KEY)
   const aiWhere = () => (S.ai && S.ai.remote ? "zewnętrzny" : "lokalnie");
-  const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
+  const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id, ackAt: e.ack_at || null }));
 
   // ---------- Elementy wspólne ----------
   const pill = st => `<span class="tag ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
@@ -471,7 +479,7 @@
     const wrap = full => { const w = full.split(" "), L = [""]; w.forEach(x => { const l = L[L.length - 1]; if (l && (l + " " + x).length > 15 && L.length < 2) L.push(x); else L[L.length - 1] = l ? l + " " + x : x; }); return L.map((l, i) => (l.length > 17 && (i === L.length - 1)) ? l.slice(0, 16).trim() + "…" : l); };
     const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 14), full = nameOf(k), ls = wrap(shortName(k)), anc = x < C - 8 ? "end" : x > C + 8 ? "start" : "middle", y0 = y + (y < CY - 5 ? -(ls.length - 1) * 16 : 5);
       return `<text x="${x.toFixed(1)}" y="${y0.toFixed(1)}" font-size="15" text-anchor="${anc}" fill="var(--tx)"><title>${esc(full)}</title>${ls.map((l, n) => `<tspan x="${x.toFixed(1)}" dy="${n ? 16 : 0}">${esc(l)}</tspan>`).join("")}</text>`; }).join("");
-    const svg = `<svg class="radar" viewBox="0 0 460 360" role="img" aria-label="Profil kompetencji, skala 1 do 9 punktów, 5 punktów to poziom oczekiwań">${rings}${axes}${[3, 6, 9].map(p => `<text x="${C + 4}" y="${(CY - R * p / 9 - 2).toFixed(1)}" font-size="12" fill="var(--mu)">${p}</text>`).join("")}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg><p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań. Cyfry na wykresie to pierścienie: 3, 6 i 9 pkt.</p>`;
+    const svg = `<svg class="radar" viewBox="0 0 460 360" role="img" aria-label="Profil kompetencji, skala 1 do 9 punktów, 5 punktów to poziom oczekiwań">${rings}${axes}${[3, 6, 9].map(p => `<text x="${C + 5}" y="${(CY - R * p / 9 + 12).toFixed(1)}" font-size="12" font-weight="700" fill="var(--mu)" stroke="var(--card,#fff)" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${p}</text>`).join("")}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg><p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań. Cyfry na wykresie to pierścienie: 3, 6 i 9 pkt.</p>`;
     return withList ? `<div class="radar-box"><div class="radar-desk">${svg}</div><div class="radar-mob">${scoreBars(Object.fromEntries(Object.entries(scores).sort((a, b) => (a[1].avg ?? 99) - (b[1].avg ?? 99))))}<p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań.</p></div></div>` : svg;
   }
   const scoreBars = scores => Object.entries(scores).map(([k, v]) => `
@@ -839,7 +847,7 @@
       let next;
       if (!goals.length) next = { t: "Dodaj pierwszy cel SMART", s: "Cel pomoże Ci i przełożonemu zobaczyć, dokąd chcesz dojść.", btn: "Dodaj cel", go: "goals" };
       else if (last && last.status === "submitted") next = { t: "Twoja ocena jest złożona", s: "Przejrzyj ją przed rozmową z przełożonym.", btn: "Zobacz ocenę", go: "evals" };
-      else if (last && last.status === "discussed" && d.latestDev) next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Przełożony zapisał wnioski rozwojowe. Zamień je w cele z krokami.", btn: "Plan rozwoju", go: "profile" };
+      else if (last && last.status === "discussed" && d.latestDev) next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Przełożony zapisał wnioski rozwojowe. Zobacz plan i zaproponuj cele na rozmowie miesięcznej.", btn: "Plan rozwoju", go: "profile" };
       else if (last && last.status === "discussed") next = { t: "Ocena omówiona – ustal cele na kolejny okres", s: "Przełożony nie zapisał wniosków rozwojowych. Zaproponuj cel, który omówicie.", btn: "Otwórz cele", go: "goals" };
       else next = { t: "Sprawdź swoje cele", s: "Zaktualizuj postęp, zanim przyjdzie czas na ocenę.", btn: "Otwórz cele", go: "goals" };
       return `
@@ -855,7 +863,7 @@
           <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
           <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
         </div>
-        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(d.kickoff.date)})</h2>
+        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(isoToPl(d.kickoff.date))})</h2>
           <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
           <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
           <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
@@ -872,14 +880,12 @@
       const sc = d.latestScores || {};
       const items = Object.entries(sc).filter(([, x]) => x.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
       return `
-        <div class="grid two">
-          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im wyższy wynik, tym mocniejsza kompetencja.</p>${radar(sc, true)}</div>
-          <div class="card"><h2>Obszary do rozwoju</h2><p class="muted">Pokazujemy 5 kryteriów z najniższą oceną (od najniższej).</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
+        <div class="grid two prof-grid">
+          <div class="card prof-plan"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
+          <div class="card prof-areas"><h2>Obszary do rozwoju</h2><p class="muted">Pokazujemy 5 kryteriów z najniższą oceną (od najniższej).</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
             + `<p class="muted" style="margin:12px 0 8px">Omów to z przełożonym na rozmowie miesięcznej.</p><div class="btns" style="justify-content:flex-start;margin-top:0"><button class="btn" data-act="aiDev">${KK_ICON("spark")}<span>Zaplanuj działania z asystentem</span></button><button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button></div>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
-        </div>
-        <div class="grid two">
-          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
-          <div class="card"><h2>Asystent rozwoju</h2>
+          <div class="card prof-comp"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im wyższy wynik, tym mocniejsza kompetencja.</p>${radar(sc, true)}</div>
+          <div class="card prof-asst"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
             <div id="aiDevOut" aria-live="polite"></div></div>
@@ -900,10 +906,11 @@
     const rows = S.evals.map(e => {
       const edit = isMgr && e.status === "draft";
       return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
-        <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
+        <td>${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}</td><td>${pill(e.status)}</td>
+        ${isMgr ? `<td>${e.status === "draft" ? "—" : e.ackAt ? `zapoznano ${esc(plDT(e.ackAt).slice(0, 10))}` : "czeka na zapoznanie"}</td>` : ""}
         <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}" aria-label="Podgląd oceny – ${first(isMgr ? names[e.employeeId] : S.user.name)}"`)}</td></tr>`;
     }).join("");
-    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th>${isMgr ? "<th>Zapoznanie</th>" : ""}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   // ---------- Przełożony ----------
@@ -921,9 +928,9 @@
       const briefEmp = toDiscuss[0] || d.team.find(t => t.status !== "none") || d.team[0] || null;
       const rows = d.team.map(t => `
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}" aria-label="${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz"} rozmowę rozpoczynającą – ${first(t.name)}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(isoToPl(t.kickoff.date))} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}" aria-label="${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz"} rozmowę rozpoczynającą – ${first(t.name)}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
           <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}" aria-label="Cele – ${first(t.name)}${t.goalsToConfirm ? `, ${t.goalsToConfirm} do potwierdzenia` : ""}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
-          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
+          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(isoToPl(t.nextDue)) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(isoToPl(t.earliestNext))}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
             ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}" aria-label="Utwórz ocenę – ${first(t.name)}"`, "")
             : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}" aria-label="Dokończ ocenę – ${first(t.name)}"`)
@@ -947,7 +954,7 @@
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione<small>Oceny po rozmowie z pracownikiem.</small></span></div>
         </div>
         ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy).</p>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(x.lastEval) : "—"}</td><td>${x.due ? esc(x.due) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(isoToPl(x.lastEval)) : "—"}</td><td>${x.due ? esc(isoToPl(x.due)) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
@@ -982,9 +989,9 @@
   function evidenceTable(list, { editable, showEmp }) {
     if (!list.length) return `<p class="muted">Brak informacji dla wybranych filtrów.</p>`;
     return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Nr zadania i link do dokumentu</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
-      ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
+      ${list.map(e => `<tr><td style="white-space:nowrap">${esc(isoToPl(e.date))}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
         <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
-        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(e.date)} – ${esc(indShort(e.indicator))}"`)}</td>` : ""}</tr>`).join("")}
+        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(isoToPl(e.date))} – ${esc(indShort(e.indicator))}"`)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>`;
   }
   function evidencePage(isMgr) {
@@ -1008,8 +1015,8 @@
   const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
   function feedbackList(list, editable) {
     if (!list.length) return `<p class="muted">Brak informacji zwrotnej.</p>`;
-    return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(f.date)} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
-      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
+    return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(isoToPl(f.date))} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
+      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(isoToPl(f.date))}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
   const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
@@ -1063,8 +1070,8 @@
         <div class="card"><div class="row"><h2>Informacje z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Informacja", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
           <p class="muted">Pokazujemy tylko wskaźniki z nowymi informacjami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
-            <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
-              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(e.date)} – ${esc(indShort(e.indicator))}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
+            <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(isoToPl(e.date))}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
+              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(isoToPl(e.date))} – ${esc(indShort(e.indicator))}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
         <div class="card"><div class="row"><h2>Informacja zwrotna z miesiąca</h2>${actBtn("plus", "Informacja zwrotna", `data-act="addFeedback"`, "")}</div>
           <p class="muted">Informacja zwrotna dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
         <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
@@ -1121,7 +1128,7 @@
     const emp = pr ? pr.employeeId : S.month.employeeId;
     const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
     const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
-    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
+    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(isoToPl(e.date))}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
     openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
       <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jedną informację z kwartału.</p>
       <form id="pqForm" novalidate>
@@ -1196,7 +1203,7 @@
     const c = S.cur, list = (c.evidence || []).filter(e => e.indicator === indKey);
     const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}" aria-label="Dodaj informację – ${esc(indShort(indKey))}">+ Informacja</button>` : "";
     return `<div class="ev-mini"><div class="row"><span class="muted">Informacje z okresu oceny: <b>${list.length}</b></span>${add}</div>
-      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
+      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(isoToPl(e.date))}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
   }
   async function refreshWizardEvidence() {
     const c = S.cur; if (!c) return;
@@ -1234,9 +1241,9 @@
           <div class="kpi"><b>${s.feedbackTotal}</b><span>Informacja zwrotna<small>Ile wpisów informacji zwrotnej zebrano w okresie.</small></span></div>
           <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez zapisanych informacji w okresie<small>Warto uzupełnić przed oceną.</small></span></div></div>
         <div class="card"><h2>Wskaźniki z informacjami lub informacją zwrotną</h2>
-          <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
+          <p class="muted">Okres ${esc(isoToPl(s.from))} – ${esc(isoToPl(s.to))}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
           ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Rozmowy miesięczne z informacjami</th><th scope="col">Informacja zwrotna (poziomy)</th></tr></thead><tbody>
-            ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
+            ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(isoToPl(i.firstDate))} – ${esc(isoToPl(i.lastDate))}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
             </tbody></table></div>` : `<p class="muted">Brak informacji i informacji zwrotnej w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
@@ -1245,11 +1252,12 @@
     } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
 
+  const modState = on => on ? `${KK_ICON("check")}<span>Włączony</span>` : `<svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h8"/></svg><span>Wyłączony</span>`;
   function settingsPage() {
     const mods = S.moduleList || [];
     return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
       <p class="muted">Informacje, rozmowy miesięczne, informacja zwrotna, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
-      <form id="setForm">${mods.map(m => `<label class="choice mod-row"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span><span class="mod-state ${m.on ? "on" : "off"}" data-mod-state="${esc(m.key)}">${m.on ? "Włączony" : "Wyłączony"}</span></label>`).join("")}
+      <form id="setForm">${mods.map(m => `<label class="choice mod-row"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span><span class="mod-state ${m.on ? "on" : "off"}" data-mod-state="${esc(m.key)}">${modState(m.on)}</span></label>`).join("")}
       <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
       <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B – osoby kierujące zespołem, Arkusz C – pozostałe stanowiska), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
   }
@@ -1438,10 +1446,10 @@
   // Termin: reguła 6 miesięcy między ocenami okresowymi i cykl 24 miesięcy
   function timingNote(c) {
     const t = c.timing; if (!t) return "";
-    if (t.exception) return `<div class="note">Wyjątek od reguły ${t.earliest ? `6 miesięcy (najwcześniej ${esc(t.earliest)})` : "6 miesięcy"} zapisany ${esc(String(t.exception.at).slice(0, 10))}: ${esc(t.exception.reason)}</div>`;
-    if (!t.ok) return `<div class="note warn" role="alert"><b>Zbyt wczesna ocena.</b> Poprzednia ocena okresowa: ${esc(t.prevDate)}. Najwcześniejszy termin: ${esc(t.earliest)}. Złożenie będzie zablokowane bez wyjątku.
+    if (t.exception) return `<div class="note">Wyjątek od reguły ${t.earliest ? `6 miesięcy (najwcześniej ${esc(isoToPl(t.earliest))})` : "6 miesięcy"} zapisany ${esc(isoToPl(String(t.exception.at).slice(0, 10)))}: ${esc(t.exception.reason)}</div>`;
+    if (!t.ok) return `<div class="note warn" role="alert"><b>Zbyt wczesna ocena.</b> Poprzednia ocena okresowa: ${esc(isoToPl(t.prevDate))}. Najwcześniejszy termin: ${esc(isoToPl(t.earliest))}. Złożenie będzie zablokowane bez wyjątku.
       ${c.status === "draft" ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="earlyException">Zapisz wyjątek z uzasadnieniem</button></div>` : ""}</div>`;
-    return t.nextDue ? `<p class="muted">Termin cyklu (24 miesiące od poprzedniej oceny): ${esc(t.nextDue)}.</p>` : "";
+    return t.nextDue ? `<p class="muted">Termin cyklu (24 miesiące od poprzedniej oceny): ${esc(isoToPl(t.nextDue))}.</p>` : "";
   }
   function draftLinks(id) {
     const base = `/api/evals/${id}/document?variant=szkic`;
@@ -1478,13 +1486,13 @@
     const m = S.readMeta || {};
     const who = `<dl class="meta"><dt>Oceniany</dt><dd>${first(m.employee?.name)}${m.employee?.position ? ", " + esc(m.employee.position) : ""}</dd>
       <dt>Oceniający</dt><dd>${first(m.evaluator?.name)}${m.evaluator?.position ? ", " + esc(m.evaluator.position) : ""}</dd>
-      <dt>Utworzono</dt><dd>${esc((e.created || "").slice(0, 16).replace("T", " "))}</dd>
-      <dt>Ostatnia zmiana</dt><dd>${esc((e.updated || "").slice(0, 16).replace("T", " "))}</dd>
-      <dt>Zapoznanie ocenianego</dt><dd>${e.ack_at ? esc(e.ack_at.slice(0, 16).replace("T", " ")) : "jeszcze nie"}</dd>
-      <dt>Sprzeciw</dt><dd>${e.objection_at ? esc(e.objection_at.slice(0, 16).replace("T", " ")) + (e.objection_result ? " – " + esc(e.objection_result) : " – do rozpatrzenia") : "brak"}</dd></dl>`;
+      <dt>Utworzono</dt><dd>${esc(plDT(e.created))}</dd>
+      <dt>Ostatnia zmiana</dt><dd>${esc(plDT(e.updated))}</dd>
+      <dt>Zapoznanie ocenianego</dt><dd>${e.ack_at ? esc(plDT(e.ack_at)) : "jeszcze nie"}</dd>
+      <dt>Sprzeciw</dt><dd>${e.objection_at ? esc(plDT(e.objection_at)) + (e.objection_result ? " – " + esc(e.objection_result) : " – do rozpatrzenia") : "brak"}</dd></dl>`;
     return `<div class="card">${who}<div class="row"><h2>${esc(TYP[e.typ])}</h2>${pill(e.status)}</div>
-      <p class="muted">Okres ${esc(e.period_from || "")} – ${esc(e.period_to || "")}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11)" : ""}` : ""}</p>
-      <div class="grid two"><div>${radar(scores)}</div><div>${scoreBars(scores)}</div></div></div>
+      <p class="muted">Okres ${esc(isoToPl(e.period_from || ""))} – ${esc(isoToPl(e.period_to || ""))}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11 rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r.)" : ""}` : ""}</p>
+      <div class="eval-chart">${radar(scores, true)}</div></div>
       ${items}
       ${e.data.dev ? `<div class="card"><h2>Wnioski rozwojowe</h2><p>${esc(e.data.dev)}</p></div>` : ""}
       <div class="card" id="sigBox"><h2>Podpisy i zapoznanie</h2><p class="muted">Ładowanie…</p></div>
@@ -1564,7 +1572,27 @@
       animateIn(box);
     } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(errMsg(e))}</p>`; }
   }
-  const EVT = { login: "Logowanie", create_eval: "Utworzenie oceny", update_eval: "Zmiana oceny", submit_eval: "Złożenie oceny", create_evidence: "Dodanie informacji", update_evidence: "Zmiana informacji", create_kickoff: "Rozmowa rozpoczynająca", update_kickoff: "Zmiana rozmowy rozpoczynającej", create_goal: "Nowy cel", goal_step_confirm: "Potwierdzenie kroku celu", update_devplan: "Plan rozwoju", discuss_eval: "Omówienie oceny", create_checkin: "Rozmowa miesięczna", update_checkin: "Zmiana rozmowy miesięcznej", create_feedback: "Informacja zwrotna", update_feedback: "Zmiana informacji zwrotnej", create_partial: "Ocena cząstkowa", update_partial: "Zmiana oceny cząstkowej", login_fail: "Nieudane logowanie", setting: "Zmiana ustawienia" };
+  const EVT = { login: "Logowanie", login_fail: "Nieudane logowanie", login_blocked: "Logowanie zablokowane", password_change: "Zmiana hasła", password_change_fail: "Nieudana zmiana hasła", account_activated: "Aktywacja konta", activation_issued: "Wydanie linku aktywacyjnego", create_employee: "Dodanie pracownika",
+    create_eval: "Utworzenie oceny", update_eval: "Zmiana oceny", submit_eval: "Złożenie oceny", eval_early_exception: "Wyjątek od reguły 6 miesięcy", discuss_eval: "Omówienie oceny", sign_eval: "Podpis oceniającego", acknowledge_eval: "Zapoznanie z oceną", objection_eval: "Sprzeciw", objection_decision: "Rozpatrzenie sprzeciwu",
+    download_doc: "Pobranie dokumentu", download_draft: "Pobranie szkicu", create_evidence: "Dodanie informacji", update_evidence: "Zmiana informacji", create_kickoff: "Rozmowa rozpoczynająca", update_kickoff: "Zmiana rozmowy rozpoczynającej", acknowledge_kickoff: "Zapoznanie z rozmową rozpoczynającą",
+    create_goal: "Nowy cel", update_goal: "Zmiana celu", goal_step_confirm: "Potwierdzenie kroku celu", goal_step_report: "Zgłoszenie wykonania kroku celu", update_devplan: "Plan rozwoju pracownika", create_checkin: "Rozmowa miesięczna", update_checkin: "Zmiana rozmowy miesięcznej",
+    create_feedback: "Informacja zwrotna", update_feedback: "Zmiana informacji zwrotnej", create_partial: "Ocena cząstkowa", update_partial: "Zmiana oceny cząstkowej", view_summary: "Podgląd zestawienia", view_month: "Podgląd miesiąca", setting: "Zmiana ustawień",
+    ai_talk: "Podpowiedź AI: pytania do rozmowy", ai_formal: "Podpowiedź AI: uzasadnienie formalne", ai_development: "Podpowiedź AI: działania rozwojowe", ai_checkin: "Podpowiedź AI: rozmowa miesięczna", ai_brief: "Podpowiedź AI: brief do rozmowy", ai_prep: "Podpowiedź AI: przygotowanie do rozmowy", ai_criteria: "Podpowiedź AI: dobór kryteriów" };
+  const evtName = a => EVT[a] || (a ? String(a).replace(/_/g, " ").replace(/^./, c => c.toUpperCase()) : "");
+  // Czytelny cel wpisu dziennika (np. „5:pdf” → „Ocena nr 5 – PDF”)
+  function targetLabel(a) {
+    const t = String(a.target || ""), act = a.action || "";
+    let m;
+    if ((m = /^(evidence|goal|kickoff|devplan|checkin|feedback|partial):(\d+)$/.exec(t))) return { evidence: `Informacja nr ${m[2]}`, goal: `Cel nr ${m[2]}`, kickoff: `Rozmowa rozpoczynająca nr ${m[2]}`, devplan: `Plan rozwoju pracownika nr ${m[2]}`, checkin: `Rozmowa miesięczna nr ${m[2]}`, feedback: `Informacja zwrotna nr ${m[2]}`, partial: `Ocena cząstkowa nr ${m[2]}` }[m[1]];
+    if ((m = /^(\d+):(pdf|xml)$/i.exec(t))) return `Ocena nr ${m[1]} – ${m[2].toUpperCase()}`;
+    if ((m = /^(\d+):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, okres ${isoToPl(m[2])} – ${isoToPl(m[3])}`;
+    if ((m = /^(\d+):(\d{4})-(\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, miesiąc ${m[3]}.${m[2]}`;
+    if ((m = /^(\d+):(\w+)(?:: (.*))?$/.exec(t)) && act === "objection_decision") return `Ocena nr ${m[1]} – ${m[2]}${m[3] ? ": " + m[3] : ""}`;
+    if ((m = /^(\w+)=([01])$/.exec(t)) && act === "setting") return `${m[1]}: ${m[2] === "1" ? "włączony" : "wyłączony"}`;
+    if (t === "session_rotated") return "Nowa sesja";
+    if (/^\d+$/.test(t)) return /eval|download|^ai_(talk|formal)$/.test(act) ? `Ocena nr ${t}` : /employee|activat|password/.test(act) ? `Konto nr ${t}` : `Nr ${t}`;
+    return t;
+  }
   const plTime = at => { const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : at || ""; };
   // Dziennik: „pole: przed → po” z pól prev_value / new_value (JSON); długi opis trafia do <details>
   function auditChange(a) {
@@ -1585,9 +1613,9 @@
     try {
       const r = await api("GET", "/api/audit");
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
-        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(EVT[a.action] || a.action)}</td><td data-label="Czego dotyczy">${esc(a.target || "")}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
+        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(evtName(a.action))}</td><td data-label="Czego dotyczy">${esc(targetLabel(a))}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
-        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
     } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
@@ -1873,7 +1901,7 @@
 
   // Zdarzenia formularzy w kreatorze i celach
   document.addEventListener("change", async e => {
-    if (e.target.dataset && e.target.dataset.mod) { const st = document.querySelector(`[data-mod-state="${CSS.escape(e.target.dataset.mod)}"]`); if (st) { st.textContent = e.target.checked ? "Włączony" : "Wyłączony"; st.className = "mod-state " + (e.target.checked ? "on" : "off"); } }
+    if (e.target.dataset && e.target.dataset.mod) { const st = document.querySelector(`[data-mod-state="${CSS.escape(e.target.dataset.mod)}"]`); if (st) { st.innerHTML = modState(e.target.checked); st.className = "mod-state " + (e.target.checked ? "on" : "off"); } }
     const t = e.target;
     if (t.dataset.crit && S.cur) {
       const k = t.dataset.crit;
