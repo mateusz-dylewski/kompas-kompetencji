@@ -1460,7 +1460,7 @@ route('POST', '/api/ai/talk', async (req, res, u) => {
     'Pytania: Które działania chcesz powtarzać? Jakie warunki pomogą w obszarach do rozwoju? Jakie kompetencje rozwijać w kolejnym okresie?',
   ].join('\n');
   try {
-    const text = await llm(`Jesteś asystentem przełożonego w służbie cywilnej przygotowującego rozmowę oceniającą. ${RULES} Przygotuj: 1) 2 mocne strony z przykładami, 2) 2 obszary do rozwoju, 3) 3 pytania otwarte do rozmowy.`,
+    const text = await llm(`Jesteś asystentem przełożonego w urzędzie przygotowującego rozmowę oceniającą. ${RULES} Przygotuj: 1) 2 mocne strony z przykładami, 2) 2 obszary do rozwoju, 3) 3 pytania otwarte do rozmowy.`,
       `Wyniki oceny (kompetencja / wskaźnik: poziom):\n${evalSummaryForAI(ev)}`);
     audit(u.id, 'ai_talk', ev.id); aiLog(ev.id, u.id, 'talk', evalSummaryForAI(ev), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
@@ -1476,7 +1476,7 @@ route('POST', '/api/ai/formal', async (req, res, u) => {
   const miss = missingForSubmit(ev);
   const fallback = miss.length ? `Braki formalne (${miss.length}):\n- ${miss.slice(0, 10).join('\n- ')}` : 'Brak braków formalnych. Sprawdź jeszcze, czy uzasadnienia opisują zachowania, a nie cechy osoby.';
   try {
-    const text = await llm(`Jesteś asystentem formalnym oceny okresowej w służbie cywilnej. ${RULES} Sprawdź uzasadnienia i wskaż zdania oceniające osobę (np. „jest leniwy”) zamiast zachowania; zaproponuj przeformułowanie w języku obserwowalnych zachowań. Nie zmieniaj poziomów ocen.`,
+    const text = await llm(`Jesteś asystentem formalnym oceny okresowej w urzędzie. ${RULES} Sprawdź uzasadnienia i wskaż zdania oceniające osobę (np. „jest leniwy”) zamiast zachowania; zaproponuj przeformułowanie w języku obserwowalnych zachowań. Nie zmieniaj poziomów ocen.`,
       `Braki formalne: ${miss.join('; ') || 'brak'}\nUzasadnienia:\n${evalSummaryForAI(ev)}`);
     audit(u.id, 'ai_formal', ev.id); aiLog(ev.id, u.id, 'formal', evalSummaryForAI(ev), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
@@ -1493,7 +1493,7 @@ route('POST', '/api/ai/development', async (req, res, u) => {
     ? `Propozycja: rozwijaj ${weak.join(' i ')} – 2 godziny ćwiczeń tygodniowo przez 6 tygodni, z opiekunem.`
     : 'Dodaj cele SMART i poczekaj na omówioną ocenę, aby dostać propozycje rozwoju.';
   try {
-    const text = await llm(`Jesteś doradcą rozwoju zawodowego pracownika służby cywilnej. ${RULES} Zaproponuj 2–3 działania rozwojowe w formie SMART. Nie oceniaj osoby.`,
+    const text = await llm(`Jesteś doradcą rozwoju zawodowego pracownika urzędu. ${RULES} Zaproponuj 2–3 działania rozwojowe w formie SMART. Nie oceniaj osoby.`,
       `Obszary do rozwoju: ${weak.join(', ') || 'brak'}\nCele: ${goals.map(g => `${g.s} (postęp ${g.progress}%)`).join('; ') || 'brak'}`);
     audit(u.id, 'ai_development'); aiLog(null, u.id, 'development', weak.join(','), { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
@@ -1537,7 +1537,7 @@ function chatData(u) {
   const objections = evs.filter(e => e.objection_at && !e.objection_result).length;
   return `DANE PRZEŁOŻONEGO (liczby): pracowników w zespole: ${ids.length}; bez żadnej oceny: ${noEval}; oceny do przygotowania (szkic): ${draft}; złożone, do omówienia: ${submitted}; omówione: ${discussed}; sprzeciwy do rozpatrzenia: ${objections}.`;
 }
-const CHAT_SYSTEM = `Jesteś asystentem systemu Kompas Kompetencji w służbie cywilnej. Pomagasz wyłącznie w: obsłudze tego systemu, pojęciach z oceny, terminach i procedurach oceniania oraz zasadach służby cywilnej.
+const CHAT_SYSTEM = `Jesteś asystentem systemu Kompas Kompetencji w urzędzie. Pomagasz wyłącznie w: obsłudze tego systemu, pojęciach z oceny, terminach i procedurach oceniania oraz zasadach służby cywilnej.
 ZASADY ODPOWIEDZI:
 1. Odpowiadaj WYŁĄCZNIE na podstawie poniższych FAKTÓW. Nie wymyślaj modułów, sekcji, zadań, danych ani liczb.
 2. Jeśli odpowiedzi nie ma w faktach, napisz: „Tego nie znajduję w systemie. Zapytaj dział kadr.”
@@ -1587,7 +1587,7 @@ route('POST', '/api/ai/checkin', async (req, res, u) => {
     ? `Pytania do rozmowy (do 20 minut):\n- Co w ostatnim miesiącu poszło zgodnie z planem przy: ${rows.slice(0, 2).map(r => INDICATORS.get(r.indicator)?.k.toLowerCase()).join(', ')}?\n- Co utrudniało realizację zadań i czego potrzebujesz?\n- Jaki jeden cel ustalamy na kolejny miesiąc?`
     : 'Brak dowodów w tym miesiącu. Pytania: Jakie zadania zamknąłeś(-aś)? Co wymaga uwagi? Jaki jeden cel na kolejny miesiąc?';
   try {
-    const text = await llm(`Jesteś asystentem przełożonego w służbie cywilnej przed krótką (do 20 minut) rozmową miesięczną. ${RULES} Zaproponuj 3 pytania otwarte o rezultaty zadań i potrzebne wsparcie. Nie pytaj o czas pracy, obecność, stan zdrowia ani cechy osobowości. Nie proponuj ocen ani punktów.`,
+    const text = await llm(`Jesteś asystentem przełożonego w urzędzie przed krótką (do 20 minut) rozmową miesięczną. ${RULES} Zaproponuj 3 pytania otwarte o rezultaty zadań i potrzebne wsparcie. Nie pytaj o czas pracy, obecność, stan zdrowia ani cechy osobowości. Nie proponuj ocen ani punktów.`,
       `Wskaźniki z dowodami w miesiącu (liczba dowodów):\n${lines || 'brak'}`);
     audit(u.id, 'ai_checkin', `${emp.id}:${month}`); aiLog(null, u.id, 'checkin', lines, { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
