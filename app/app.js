@@ -3,7 +3,10 @@
   const $ = (s, r = document) => r.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pretty = s => s.toLowerCase().replace(/(^|\s)\S/g, m => m.toUpperCase());
-  const nameOf = k => (MODEL.find(c => c.k === k) || {}).n || pretty(k);
+  // Zwykła pisownia: pierwsza litera wielka, reszta małe; skróty (np. IPRZ) i samodzielne „i/oraz” zostają
+  const ACR = new Set(["IPRZ", "KPA", "RODO", "BHP", "UE", "AI", "PDF"]);
+  const sentence = s => { const t = String(s ?? ""); if (!/[A-ZĄĆĘŁŃÓŚŹŻ]{2,}/.test(t)) return t; const r = t.split(/(\s+|\/)/).map(x => ACR.has(x) ? x : x.toLowerCase()).join(""); return r.charAt(0).toUpperCase() + r.slice(1); };
+  const nameOf = k => sentence((MODEL.find(c => c.k === k) || {}).n || pretty(k));
   const avatar = (src, name, cls = "av") => src
     ? `<img class="${cls}" src="${esc(src)}" alt="" width="40" height="40" loading="lazy">`
     : `<span class="${cls} av-ph" aria-hidden="true">${esc(String(name || "?").split(" ").map(x => x[0]).slice(0, 2).join(""))}</span>`;
@@ -96,7 +99,10 @@
           <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>B – kierujący zespołem</span></label>
           <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>C – pozostałe stanowiska</span></label></fieldset>
         <label class="f" for="kDate">Data rozmowy</label><input id="kDate" type="date" required value="${esc(v.date)}">
-        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div></fieldset>
+        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div>
+          <div class="ai-crit"><button type="button" class="btn g" id="kAiBtn">${KK_ICON("star")}<span>Zaproponuj kryteria (AI)</span></button>
+            <div class="ai-crit-out" id="kAiOut" aria-live="polite"></div>
+            <p class="muted">AI proponuje tylko kryteria z rozporządzenia. Decyzja należy do Ciebie.</p></div></fieldset>
         <label class="f" for="kDuties">Obowiązki na stanowisku</label><textarea id="kDuties" required minlength="10" maxlength="2000">${esc(v.duties)}</textarea>
         <label class="f" for="kExp">Oczekiwania wobec realizacji kryteriów</label><textarea id="kExp" required minlength="10" maxlength="2000">${esc(v.expectations)}</textarea>
         <label class="f" for="kGoals">Cele na okres oceny</label><textarea id="kGoals" required minlength="10" maxlength="2000">${esc(v.goals)}</textarea>
@@ -104,6 +110,24 @@
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
       document.querySelectorAll('[name="kTyp"]').forEach(r => r.addEventListener("change", () => { v.typ = r.value; v.extraCriteria = []; $("#kExtras").innerHTML = extras(r.value); }));
+      $("#kAiBtn").addEventListener("click", async () => {
+        const b = $("#kAiBtn"), out = $("#kAiOut"); b.disabled = true;
+        out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} dobiera kryteria…`); const stop = startThinking(out);
+        try {
+          const r = await api("POST", "/api/ai/criteria", { employeeId: empId, typ: document.querySelector('[name="kTyp"]:checked').value, duties: $("#kDuties").value });
+          const pr = r.propozycje || [];
+          out.innerHTML = pr.length ? `<ul>${pr.map(p => `<li><b>${esc(nameOf(p.k))}</b>${esc(p.uzasadnienie || "")}</li>`).join("")}</ul>
+            <p class="ai-crit-src">Źródło: ${r.source === "ai" ? "model AI" : "reguły"}.</p>
+            <button type="button" class="btn" id="kAiApply">Zaznacz te kryteria</button>` : `<p class="muted">Brak propozycji dla podanych obowiązków. Wybierz kryteria samodzielnie.</p>`;
+          const ap = $("#kAiApply");
+          if (ap) ap.addEventListener("click", () => {
+            document.querySelectorAll("[data-extra]").forEach(x => { x.checked = false; });
+            pr.slice(0, S.maxExtra).forEach(p => { const x = document.querySelector(`[data-extra="${CSS.escape(p.k)}"]`); if (x) x.checked = true; });
+            out.insertAdjacentHTML("beforeend", `<p class="muted" role="status">Zaznaczono. Możesz to zmienić przed zapisem.</p>`); ap.disabled = true;
+          });
+        } catch (ex) { out.innerHTML = `<div class="err" role="alert">Nie udało się pobrać podpowiedzi: ${esc(ex.message)} Wybierz kryteria samodzielnie.</div>`; }
+        finally { stop(); b.disabled = false; }
+      });
       $("#kForm").addEventListener("submit", async e => {
         e.preventDefault();
         const extra = [...document.querySelectorAll("[data-extra]:checked")].map(x => x.dataset.extra);
@@ -410,8 +434,18 @@
   // ---------- Logowanie ----------
   function renderLogin(err = "") {
     $("#root").innerHTML = `
-      <div class="login"><div class="login-main"><div class="login-card">
-        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się, aby przejść do panelu</div></div></div>
+      <div class="login"><div class="login-main"><div class="login-grid">
+      <section class="login-val" aria-labelledby="valH">
+        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
+        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
+        <ol class="val-list">
+          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
+          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
+          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
+        </ol>
+      </section>
+      <div class="login-card">
+        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się albo wybierz konto demo</div></div></div>
         <div class="demo-row" role="group" aria-label="Konta testowe">
           <button type="button" class="demo-btn" data-demo="przelozony" title="Wypełnij danymi przełożonego (demo)"><span aria-hidden="true">${KK_ICON("star")}</span><span>Demo: przełożony</span></button>
           <button type="button" class="demo-btn" data-demo="pracownik" title="Wypełnij danymi pracownika (demo)"><span aria-hidden="true">${KK_ICON("user")}</span><span>Demo: pracownik</span></button>
@@ -425,7 +459,7 @@
           ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
         </form>
         <p class="note">Konta testowe są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
-      </div></div>${footer("foot-login")}</div>`;
+      </div></div></div>${footer("foot-login")}</div>`;
     // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
     const demoRow = $(".demo-row");
     fetch("/api/demo").then(r => r.json()).then(d => {
@@ -450,7 +484,17 @@
   // Karta jak przy logowaniu; formularz z dwoma polami nowego hasła (min. 12 znaków, sprawdza też serwer)
   const PASS_HINT = "Co najmniej 12 znaków, bez nazwy konta i popularnych haseł.";
   const authCard = (title, sub, body) => `
-      <div class="login"><div class="login-main"><div class="login-card">
+      <div class="login"><div class="login-main"><div class="login-grid">
+      <section class="login-val" aria-labelledby="valH">
+        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
+        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
+        <ol class="val-list">
+          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
+          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
+          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
+        </ol>
+      </section>
+      <div class="login-card">
         <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>${esc(title)}</h1><div class="muted">${esc(sub)}</div></div></div>
         ${body}
       </div></div>${footer("foot-login")}</div>`;
