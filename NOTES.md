@@ -32,6 +32,7 @@
 | Cykl | Godzina | 1 Ścieżki | 2 Konsola/stany | 3 Testy | 4 Wydajność | 5 WCAG | 6 Design gov | 7 AI | 8 Jury | Średnia | Persony |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 0 (start) | 04:30 | 6 | 6 | 7 | 8 | 6 | 5 | 7 | 6 | 6,4 | (persony haiku od cyklu 1) |
+| 1 | 04:37 | 6 | 8 | 8 | 8 | 7 | 5 | 8 | 6 | 7,0 | skrypty: desktop wszystkie kroki OK, mobile nadal pada (menu poza ekranem) |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -39,7 +40,22 @@
 - Persony używają własnej instancji serwera z atrapą modelu AI (nie prawdziwego API) i osobnej bazy w katalogu tymczasowym – nie dotykają `data/`.
 - Kierunek designu: rubryka wymaga stylu gov.pl / mObywatel. Projekt „Kompas” z Claude Design (papier, mosiądz, serif) NIE jest wdrażany – wybrano styl rządowy z rubryki.
 
+## Specyfikacja designu gov.pl / mObywatel (research 04:30, do cyklu 2)
+Źródła: księgi znaku instytucji rządowych (Open Sans jako krój podstawowy w materiałach elektronicznych – fundusze UE, CeZ), opis redesignu mObywatela (tokeny, grupowanie usług), kopia kodu mObywatela (codeberg.org/fajfer/mObywatel). Oficjalnej dokumentacji komponentów gov.pl w wynikach brak – styl przenoszony z obserwowalnych cech, BEZ godła i logotypów.
+- Krój: Open Sans (już w projekcie, self-hosted), nagłówki Open Sans 700 (zamiast Montserrat), tekst 16 px, interlinia 1.5, bez wersalików w treści.
+- Kolory: tło strony #F5F6F7, karty #FFFFFF z obramowaniem #DDE1E6, główny #0052A5 (hover #003F7D), tekst #1B1B1B, pomocniczy #5C6370, sukces #1E7A3C/#E7F4EC, ostrzeżenie #8A5300/#FFF4DB, błąd #B3261E/#FDECEA, fokus: 3 px #FFB703 + 1 px ciemny pierścień.
+- Komponenty: karty z zaokrągleniem 8 px (styl mObywatela), przyciski 4 px, wysokość ≥ 44 px, główny wypełniony niebieski, drugi obramowany; jeden główny przycisk na sekcję; tytuł strony ciemny (nie wyblakły niebieski).
+- Język: prosty, zdania zamiast żargonu, nazwy kompetencji zwykłą pisownią (bez WIELKICH LITER), daty dd.mm.rrrr lub słownie.
+
 ## Znane problemy
 - (uzupełniane w trakcie)
 
 ## Dziennik cykli
+
+### Cykl 1 (04:28–04:37)
+- Zmiany: `/api/session` (start bez 401 – konsola 0 błędów u person), `POST /api/ai/criteria` (ścieżka a: propozycje tylko z modelu, walidacja, fallback regułowy, 6 testów z atrapą), menu mobilne 4 + „Więcej”, h1 na telefonie, etykiety list wyboru, persony: tryb awarii AI (`PERSONA_AI=down|slow`), persona `awaria`, pomiar `interactiveMs`.
+- Dowody: `npm test` 127/127; persona awaria (AI down): komunikat regułowy widoczny dla briefu i pytań do rozmowy; desktop: żaden ekran > 2 s (maks. 1,5 s), konsola 0.
+- Znaleziony błąd: na 390 px `nav.bottom` (fixed) leży poza ekranem (top≈1283) – przodek z transformacją; przekazane frontendowi w cyklu 2.
+- Następne: design gov.pl + przycisk AI kryteriów w UI + logowanie (frontend, w toku), dane demo dla jury (backend, w toku), potem persony haiku (juror + krystyna + klawiatura).
+- Retro: równoległe zadania o rozłącznych plikach działają; agent bez dostępu do skryptu e2e zgadywał przyczynę – na przyszłość qa-perf od razu dostaje zadanie diagnozy UI razem z poprawką skryptu.
+
