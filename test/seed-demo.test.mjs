@@ -21,7 +21,7 @@ test('rozmowy rozpoczynające: zapoznane, czekające i jedno przypomnienie po te
 test('plan rozwoju pracownika1, ocena C ze schematem 2 i cele w różnych stanach', async () => {
   const emp = await asEmployee(srv, 1);
   const dp = (await emp.get('/api/devplan')).body.current;
-  assert.ok(dp && /\d{4}-\d{2}-\d{2}/.test(dp.plan) && dp.message.length > 10);
+  assert.ok(dp && /\b\d{2}\.\d{2}\.\d{4}\b/.test(dp.plan) && dp.message.length > 10, 'plan z terminami w formacie DD.MM.RRRR');
   const c = (await mgr.get('/api/evals')).body.evals.find(e => e.typ === 'C');
   assert.ok(c && c.data.partials && Object.keys(c.data.partials).length >= 5);
   const goals = (await emp.get('/api/goals')).body.goals;

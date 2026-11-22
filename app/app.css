@@ -564,3 +564,31 @@ details.adv[open]>summary{margin-bottom:6px}
 .goal-steps .steps span{font-size:inherit;font-weight:inherit;padding:0;border:0;border-radius:0;color:inherit;transition:none}
 .goal-steps .steps .st-meta{font-size:13px;font-weight:400;color:var(--mu)}
 .goal-steps .steps li{gap:12px}
+/* Telefon: podtytuł strony w nagłówku zawija się zamiast ucinać wielokropkiem */
+@media(max-width:639px){
+  .top .sub{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
+  .top>div:nth-child(2){overflow:visible}
+  .table thead th{display:block;width:1px;height:1px;padding:0;overflow:hidden;white-space:nowrap}
+}
+/* Stopka tekstowa (bez godła i logotypów urzędów – zasada projektu) */
+.foot-gov .foot-t{display:flex;flex-direction:column;gap:2px;color:var(--tx)}
+.foot-gov .foot-t b{font-size:14px;color:var(--navy)}
+/* Start: kolumna działań w tabeli zespołu i zwijane terminy */
+.team-acts{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:170px}
+.team-acts .act-btn{justify-content:flex-start;width:100%}
+.team-kick{margin-top:4px;font-size:13px}
+.team-pend{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+details.dl-card>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;cursor:pointer;list-style:none}
+details.dl-card>summary::-webkit-details-marker{display:none}
+details.dl-card>summary h2{margin:0}
+details.dl-card>summary::after{content:"Pokaż";margin-left:auto;color:var(--navy);font-weight:700;font-size:14px}
+details.dl-card[open]>summary::after{content:"Ukryj"}
+details.dl-card[open]>summary{margin-bottom:8px}
+@media(max-width:639px){.team-acts{min-width:0;margin-top:4px}}
+@media(max-width:639px){
+  .team-table td:first-child::before{display:none}
+  .team-table td:nth-child(2),.team-table td:nth-child(3){display:inline-block;width:auto;vertical-align:top;margin-right:18px}
+  .team-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .team-acts .act-btn:first-child{grid-column:1/-1;justify-content:center}
+  .team-acts .act-btn{justify-content:center}
+}

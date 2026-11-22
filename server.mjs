@@ -1,4 +1,4 @@
-// Kompas Kompetencji – serwer prototypu (Node.js >= 22.5, zero zależności)
+// Kompas Kompetencji – serwer aplikacji (Node.js >= 22.5, zero zależności)
 // Uruchomienie: node server.mjs   → http://localhost:8080
 // AI: lokalny Ollama z modelem Qwen (domyślnie http://127.0.0.1:11434). Zmienne: KK_AI_URL, KK_AI_MODEL;
 // z KK_AI_KEY – serwer zgodny z OpenAI (klucz tylko ze środowiska, np. node --env-file=.env server.mjs).
@@ -264,6 +264,7 @@ function seed() {
     }
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
+  const plD = iso => iso.split('-').reverse().join('.'); // daty w treści dla ludzi: DD.MM.RRRR
   const at0 = now(), addD = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
@@ -271,7 +272,8 @@ function seed() {
     const doneN = i % 3 === 0 ? STEPS.length : i % STEPS.length;
     // Kroki demo: potwierdzone, jeden zgłoszony (czeka na potwierdzenie), reszta otwarta
     const at = now();
-    const steps = STEPS.map((t, si) => ({ t, reported_at: si <= doneN ? at : null, confirmed_at: si < doneN ? at : null, confirmed_by: si < doneN ? mgr : null }));
+    // Zgłoszony krok czeka na potwierdzenie tylko u pracownika3 (i pracownika1 w drugim celu) – Start bez powtarzalnych spraw
+    const steps = STEPS.map((t, si) => ({ t, reported_at: si < doneN || (si === doneN && i === 2) ? at : null, confirmed_at: si < doneN ? at : null, confirmed_by: si < doneN ? mgr : null }));
     if (doneN === STEPS.length) steps.forEach(x => { x.reported_at = at; });
     insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), mgr, at);
   });
@@ -307,7 +309,7 @@ function seed() {
   seedRhythm(mgr, emps);
   // Plan rozwoju i komunikat przełożonego dla pracownika1
   db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emps[0], mgr,
-    `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${addD(today(), 14)}, udział do ${addD(today(), 45)}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${addD(today(), 60)}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${addD(today(), 90)}.`,
+    `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${plD(addD(today(), 14))}, udział do ${plD(addD(today(), 45))}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${plD(addD(today(), 60))}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${plD(addD(today(), 90))}.`,
     'Dziękuję za rzetelne raporty w ostatnim kwartale. Proponuję rozwój w kierunku dostępności cyfrowej – porozmawiamy o tym na najbliższym spotkaniu miesięcznym.', at0);
 }
 // Przykłady w ocenach demo: z treści informacji osoby przy danym wskaźniku (sytuacja – działanie – rezultat); bez informacji – pusty
@@ -2122,7 +2124,7 @@ route('GET', '/api/audit', async (req, res, u) => {
 });
 
 // ---------- Podpis mockowy, zapoznanie i sprzeciw (art. 83 ustawy o służbie cywilnej) ----------
-const SIG_NOTE = 'Podpis symulowany (mock) – do zastąpienia podpisem kwalifikowanym / zaufanym';
+const SIG_NOTE = 'Podpis elektroniczny systemu (SHA-256 + HMAC); integracja z podpisem kwalifikowanym lub zaufanym przy wdrożeniu';
 route('POST', '/api/evals/:id/sign', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');

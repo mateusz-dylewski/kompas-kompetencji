@@ -83,10 +83,10 @@
     console.warn(e);
     return "Coś poszło nie tak. Odśwież stronę i spróbuj ponownie.";
   };
-  // Link aktywacyjny: lokalnie pokazujemy go przełożonemu (demo); w produkcji trafia tylko na e-mail pracownika
+  // Link aktywacyjny: bez podłączonej poczty urzędu pokazujemy go przełożonemu; z pocztą trafia tylko na e-mail pracownika
   const activationInfo = a => openModal(`
       <h2>Link aktywacyjny</h2>
-      ${a.link ? `<p>Wersja lokalna (demo): przekaż pracownikowi ten link. W wersji produkcyjnej trafia wyłącznie na jego e-mail.</p>
+      ${a.link ? `<p>Przekaż pracownikowi ten link aktywacyjny. Po podłączeniu poczty urzędu system wysyła go automatycznie wyłącznie na e-mail pracownika.</p>
         <label class="f" for="actLink">Link (ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC)</label><input id="actLink" readonly value="${esc(a.link)}">`
         : `<p>Link wysłano na adres e-mail pracownika. Jest ważny do ${esc(a.expires.slice(0, 16).replace("T", " "))} UTC.</p>`}
       <div class="btns"><button type="button" class="btn" data-act="closeModal">Zamknij</button></div>`, () => { const i = $("#actLink"); if (i) i.select(); });
@@ -188,6 +188,9 @@
   // ---------- Data DD.MM.RRRR: same cyfry, kropki wstawiane automatycznie, niemożliwe cyfry odrzucane ----------
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  // Miesiąc „2026-10” → „październik 2026”
+  const MIES = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
+  const monthPl = ym => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ""); return m ? `${MIES[+m[2] - 1]} ${m[1]}` : ym || ""; };
   const isoToPl = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || "") ? iso.split("-").reverse().join(".") : iso || "");
   // Data z godziną: „dd.mm.rrrr gg:mm”; sama data: „dd.mm.rrrr”
   const plDT = at => { const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}` : at || ""; };
@@ -277,7 +280,7 @@
     let d = "";
     t.series.forEach((p, i) => { d += i ? ` H${x(i).toFixed(1)} V${y(p.confirmed).toFixed(1)}` : `M${x(0).toFixed(1)} ${y(p.confirmed).toFixed(1)}`; });
     const dots = t.series.map((p, i) => (t.talks.includes(p.month) ? `<circle cx="${x(i).toFixed(1)}" cy="${H - 4}" r="3"/>` : "")).join("");
-    const label = `Potwierdzone kroki w kolejnych miesiącach: ${t.series.map(p => `${p.month} – ${p.confirmed}`).join(", ")}. Kropki: rozmowy miesięczne.`;
+    const label = `Potwierdzone kroki w kolejnych miesiącach: ${t.series.map(p => `${monthPl(p.month)} – ${p.confirmed}`).join(", ")}. Kropki: rozmowy miesięczne.`;
     return `<svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><path d="${d}"/>${dots}</svg>`;
   }
   async function fillTrends(empId) {
@@ -406,7 +409,7 @@
     const areas = weak.length ? `<h3>Obszary z najniższą oceną</h3><ul class="c">${weak.map(k => `<li>${esc(nameOf(k))}</li>`).join("")}</ul><p class="muted">Cele ustala przełożony – zaproponuj cel z tych obszarów na rozmowie miesięcznej.</p>` : "";
     if (d.latestDev) {
       const e = d.latestDevEval;
-      return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
+      return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}` : ""}.</p>
         <div class="plan-text">${briefHtml(d.latestDev, true)}</div>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
@@ -528,10 +531,10 @@
         </ol>
       </section>
       <div class="login-card">
-        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się albo wybierz konto demo</div></div></div>
-        <div class="demo-row" role="group" aria-label="Konta testowe">
-          <button type="button" class="demo-btn" data-demo="przelozony" title="Wypełnij danymi przełożonego (demo)"><span aria-hidden="true">${KK_ICON("star")}</span><span>Demo: przełożony</span></button>
-          <button type="button" class="demo-btn" data-demo="pracownik" title="Wypełnij danymi pracownika (demo)"><span aria-hidden="true">${KK_ICON("user")}</span><span>Demo: pracownik</span></button>
+        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">System wspierający ocenę okresową w służbie cywilnej</div></div></div>
+        <div class="demo-row" role="group" aria-label="Szybkie logowanie na konto prezentacyjne">
+          <button type="button" class="demo-btn" data-demo="przelozony" title="Wypełnij dane logowania przełożonego"><span aria-hidden="true">${KK_ICON("star")}</span><span>Wejdź jako przełożony</span></button>
+          <button type="button" class="demo-btn" data-demo="pracownik" title="Wypełnij dane logowania pracownika"><span aria-hidden="true">${KK_ICON("user")}</span><span>Wejdź jako pracownik</span></button>
         </div>
         <form id="loginForm" novalidate>
           <label class="f" for="lEmail">Adres e-mail</label>
@@ -541,7 +544,7 @@
           <button class="btn w" style="margin-top:16px" type="submit">Zaloguj się</button>
           ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
         </form>
-        <p class="note">Wersja demonstracyjna na danych fikcyjnych. We wdrożeniu logowanie przez system tożsamości urzędu (SSO).</p>
+        <p class="note">Rozwiązanie gotowe do wdrożenia w urzędzie: logowanie przez system tożsamości urzędu (SSO) włączane przy instalacji. Prezentacja działa na przykładowych danych.</p>
       </div></div></div>${footer("foot-login")}</div>`;
     // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
     const demoRow = $(".demo-row");
@@ -629,8 +632,8 @@
     });
   }
   function footer(extra = "") {
-    return `<footer class="foot-gov ${extra}"><div class="logos">
-      <img src="app/assets/logo-mc.png" alt="Ministerstwo Cyfryzacji"></div>
+    return `<footer class="foot-gov ${extra}">
+      <div class="foot-t"><b>Kompas Kompetencji</b><small>Wsparcie oceny okresowej w służbie cywilnej · zgodnie z rozporządzeniem Prezesa Rady Ministrów z 4 kwietnia 2016 r.</small></div>
     </footer>`;
   }
 
@@ -870,7 +873,7 @@
           ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
             : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
-          <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
+          <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom ? isoToPl(u2.periodFrom) : "—")} – ${esc(u2.periodTo ? isoToPl(u2.periodTo) : "—")} · termin sporządzenia: <b>${esc(u2.terminOceny ? isoToPl(u2.terminOceny) : "nie ustalono")}</b></p>
           <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
           <p class="muted">Masz wgląd w kryteria i termin przed złożeniem oceny (§ 6 rozporządzenia). Poziomy zobaczysz po złożeniu.</p></div>`).join("")}
         <div class="card"><h2>Gdzie jesteś w procesie</h2>${last ? timeline(last.status) : `<p class="muted">Gdy przełożony przygotuje ocenę, zobaczysz tu jej postęp.</p>`}
@@ -926,16 +929,24 @@
       // „Ocena w 3 krokach”: krok 1 dla pierwszej osoby bez zapisanej rozmowy rozpoczynającej, krok 3 dla pierwszej z oceną do omówienia
       const kickEmp = d.team.find(t => !t.kickoff) || d.team[0] || null;
       const briefEmp = toDiscuss[0] || d.team.find(t => t.status !== "none") || d.team[0] || null;
-      const rows = d.team.map(t => `
-        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(isoToPl(t.kickoff.date))} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}" aria-label="${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz"} rozmowę rozpoczynającą – ${first(t.name)}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
-          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}" aria-label="Cele – ${first(t.name)}${t.goalsToConfirm ? `, ${t.goalsToConfirm} do potwierdzenia` : ""}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
+      // Zespół: w kolumnie osoby tylko informacje, wszystkie działania w jednej kolumnie (główne + kryteria + cele)
+      const rows = d.team.map(t => {
+        const main = t.status === "none"
+          ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}" aria-label="Utwórz ocenę – ${first(t.name)}"`, "")
+          : t.status === "draft" ? actBtn("edit", "Dokończ ocenę", `data-act="openEval" data-id="${t.evalId}" aria-label="Dokończ ocenę – ${first(t.name)}"`, "")
+          : t.status === "submitted" ? actBtn("msg", "Omów ocenę", `data-act="openEval" data-id="${t.evalId}" aria-label="Omów ocenę – ${first(t.name)}"`)
+          : actBtn("eye", "Otwórz ocenę", `data-act="openEval" data-id="${t.evalId}" aria-label="Otwórz ocenę – ${first(t.name)}"`);
+        const kickLbl = !t.kickoff ? "Ustal kryteria" : t.kickoff.ackAt ? "Kryteria" : "Edytuj kryteria";
+        const kick = actBtn("star", kickLbl, `data-act="kickoff" data-emp="${t.id}" aria-label="${kickLbl} – rozmowa rozpoczynająca – ${first(t.name)}"`);
+        const goals = actBtn("flag", t.goalsToConfirm ? `Cele (${t.goalsToConfirm} do potw.)` : "Cele", `data-act="mgrGoals" data-emp="${t.id}" aria-label="Cele – ${first(t.name)}${t.goalsToConfirm ? `, ${t.goalsToConfirm} do potwierdzenia` : ""}"`);
+        const kickTxt = t.kickoff ? `Rozmowa rozpoczynająca ${esc(isoToPl(t.kickoff.date))} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej";
+        return `
+        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>
+          ${t.pending ? `<div class="team-pend"><span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button></div>` : ""}
+          <div class="muted team-kick">${kickTxt}</div></div></div></td>
           <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(isoToPl(t.nextDue)) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(isoToPl(t.earliestNext))}</div>` : ""}</td>
-          <td style="text-align:right">${t.status === "none"
-            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}" aria-label="Utwórz ocenę – ${first(t.name)}"`, "")
-            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}" aria-label="Dokończ ocenę – ${first(t.name)}"`)
-            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}" aria-label="Omów ocenę – ${first(t.name)}"`)
-            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}" aria-label="Otwórz ocenę – ${first(t.name)}"`)}</td></tr>`).join("");
+          <td><div class="team-acts">${main}${kick}${goals}</div></td></tr>`;
+      }).join("");
       return `
         <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)} · zacznij od kroku 1, potem przejdź do kolejnych.</p>
           <ol class="s3-list">
@@ -953,10 +964,11 @@
           <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone<small>Oceny gotowe do rozmowy.</small></span></div>
           <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione<small>Oceny po rozmowie z pracownikiem.</small></span></div>
         </div>
-        ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy).</p>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(isoToPl(x.lastEval)) : "—"}</td><td>${x.due ? esc(isoToPl(x.due)) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
+        ${d.deadlines && d.deadlines.length ? (() => { const urgent = d.deadlines.filter(x => x.days !== null && x.days <= 60).length; const next = d.deadlines.filter(x => x.due).map(x => x.due).sort()[0];
+          return `<details class="card dl-card"${urgent ? " open" : ""}><summary><h2>Terminy ocen okresowych</h2><span class="muted">${urgent ? `${urgent} ${urgent === 1 ? "termin wymaga" : "terminy wymagają"} uwagi` : next ? `najbliższy termin: ${esc(isoToPl(next))}` : "brak terminów"}</span></summary><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy). Osoby po pierwszej ocenie dostają termin po pierwszej ocenie okresowej.</p>
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(isoToPl(x.lastEval)) : "—"}</td><td>${x.due ? esc(isoToPl(x.due)) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny okresowej" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></details>`; })() : ""}
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+          <div style="overflow-x:auto"><table class="table team-table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
     if (v === "results") {
       const agg = d.aggregate;
@@ -1018,7 +1030,7 @@
     return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(isoToPl(f.date))} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
       <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(isoToPl(f.date))}"`)}` : ""}</li>`).join("")}</ul>`;
   }
-  const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
+  const checkinText = c => `<b>${esc(monthPl(c.month))}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(isoToPl(c.date || ""))}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
   const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
   async function loadEmployeeExtras() {
     const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
@@ -1248,7 +1260,7 @@
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
             <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
-        <div class="card"><h2>Rozmowy miesięczne</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak rozmów miesięcznych w okresie.</p>`}</div>`;
+        <div class="card"><h2>Rozmowy miesięczne</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(monthPl(m.month))} (${esc(m.status)})`).join(" · ")}</p>` : `<p class="muted">Brak rozmów miesięcznych w okresie.</p>`}</div>`;
     } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
 
@@ -1275,7 +1287,7 @@
     const st = steps[idx];
     const pct = Math.round(idx / (steps.length - 1) * 100);
     const head = `<div class="card wiz-head">
-      <div class="row"><div class="who-row">${avatar(c.empAvatar, c.empName, "av av-lg")}<div><h2>${esc(TYP[c.typ])}</h2><div class="muted">${first(c.empName)} · ${esc(c.periodFrom || "")} – ${esc(c.periodTo || "")}</div></div></div>
+      <div class="row"><div class="who-row">${avatar(c.empAvatar, c.empName, "av av-lg")}<div><h2>${esc(TYP[c.typ])}</h2><div class="muted">${first(c.empName)} · okres ${esc(isoToPl(c.periodFrom || ""))} – ${esc(isoToPl(c.periodTo || ""))}</div></div></div>
         <div class="row">${pill(c.status)}<span class="saved" id="saved"></span></div></div>
       <div class="wiz-progress"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Postęp kreatora oceny"><i style="width:${pct}%"></i></div><small>Krok ${idx + 1} z ${steps.length} · ${esc(st.label)}</small></div></div>`;
     let body;
@@ -1525,6 +1537,7 @@
     S.view = "wizard"; render(); window.scrollTo(0, 0);
   }
   async function refreshMissing() { const r = await api("GET", `/api/evals/${S.cur.id}`); S.cur.missing = r.missing || []; S.cur.timing = r.timing || null; }
+  document.addEventListener("submit", e => { if (e.target?.id === "aiForm") e.preventDefault(); });
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target?.id === "aiQ") { e.preventDefault(); document.querySelector('[data-act="aiChat"]')?.click(); } });
   // Widoczny stan „model myśli”: animowane kropki i licznik sekund (aria-live dla czytników ekranu)
   function thinkingHtml(what) {
@@ -1636,7 +1649,7 @@
     return `<section class="chat" aria-labelledby="aiH">
       <h2 id="aiH" class="sr">Asystent AI</h2>
       <div class="chat-log" id="aiChatOut" role="log" aria-live="polite" aria-label="Rozmowa z asystentem">${msgs || empty}</div>
-      <form class="chat-bar" id="aiForm" onsubmit="return false">
+      <form class="chat-bar" id="aiForm">
         <label class="sr" for="aiQ">Napisz wiadomość</label>
         <input id="aiQ" type="text" maxlength="1000" autocomplete="off" placeholder="Napisz pytanie…">
         <button class="btn" type="button" data-act="aiChat">Wyślij</button>
