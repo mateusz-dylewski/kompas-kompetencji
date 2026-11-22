@@ -84,6 +84,7 @@ test('złożenie oceny okresowej wymaga dowodu albo „brak podstaw do oceny” 
   const lacking = Object.keys(ratings).filter(k => !counts[k]);
   assert.equal(lacking.length, 2);
   ratings[lacking[0]] = { lvl: 'none', ex: '' };
+  ratings[lacking[1]].ex = 'Przykład wpisany przez oceniającego.'; // seed zostawia puste ex tam, gdzie brak informacji
   assert.equal((await mgr.put(`/api/evals/${draft.id}`, { data: draft.data })).status, 200);
   assert.equal((await mgr.post('/api/evidence', { ...validEvidence(draft.employee_id), indicator: lacking[1], date: '2026-03-03' })).status, 201);
   // Dowód spoza okresu oceny się nie liczy – tu jest w okresie, więc ocena przechodzi

@@ -252,7 +252,7 @@ function seed() {
     const ratings = {};
     MODEL.filter(c => criteria.includes(c.k)).forEach(c => c.w.forEach((w, wi) => {
       const lvl = typ === 'pierwsza' ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 5);
-      ratings[`${c.k}|${wi}`] = { lvl, ex: 'Przykład z okresu oceny (dane demonstracyjne).' };
+      ratings[`${c.k}|${wi}`] = { lvl, ex: '' };
     }));
     const data = { criteria, ratings, dev: 'Szkolenie z analizy danych do końca kwartału.' };
     if (typ !== 'pierwsza') { // dane fikcyjne: oceny cząstkowe „przyznane” przez oceniającego w scenariuszu demo
@@ -263,6 +263,7 @@ function seed() {
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
   seedEvidence(mgr, emps, rnd);
+  seedExamples();
   seedRhythm(mgr, emps);
   const at0 = now(), addD = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
@@ -296,16 +297,30 @@ function seed() {
   // Ocena typu C (szkic) dla pracownika2 – oceny cząstkowe zgodne ze schematem 2
   const cCrit = MODEL.filter(c => MAND_C.some(m => c.k.startsWith(m))).map(c => c.k);
   const cRatings = {}; let ci = 0;
-  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: 2 + (ci++ % 3), ex: 'Przykład z okresu oceny (dane demonstracyjne).' }; }));
+  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: 2 + (ci++ % 3), ex: '' }; }));
   const cData = { criteria: cCrit, ratings: cRatings, dev: 'Szkolenie z zasad redagowania dokumentów urzędowych.', schema: EVAL_SCHEMA, partials: {} };
   cCrit.forEach((k, i) => { cData.partials[k] = { pts: PTS5[2 + (i % 3)] }; });
   const cId = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(emps[1], mgr, 'C', kd(-150), kd(-1), 'draft', JSON.stringify(cData), at0, '2026-01-02T08:00:00.000Z').lastInsertRowid;
   db.prepare('UPDATE kickoffs SET eval_id=? WHERE id=?').run(cId, kC);
+  seedExamples();
   // Plan rozwoju i komunikat przełożonego dla pracownika1
   db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emps[0], mgr,
     `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${addD(today(), 14)}, udział do ${addD(today(), 45)}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${addD(today(), 60)}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${addD(today(), 90)}.`,
     'Dziękuję za rzetelne raporty w ostatnim kwartale. Proponuję rozwój w kierunku dostępności cyfrowej – porozmawiamy o tym na najbliższym spotkaniu miesięcznym.', at0);
+}
+// Przykłady w ocenach demo: z treści informacji osoby przy danym wskaźniku (sytuacja – działanie – rezultat); bez informacji – pusty
+function seedExamples() {
+  const ev = db.prepare('SELECT indicator,situation,action,result FROM evidence WHERE employee_id=? ORDER BY date,id');
+  for (const e of db.prepare("SELECT id,employee_id,data FROM evals").all()) {
+    const d = JSON.parse(e.data || '{}'); let ch = false;
+    const byInd = new Map(); for (const x of ev.all(e.employee_id)) byInd.set(x.indicator, x);
+    for (const [k, r] of Object.entries(d.ratings || {})) {
+      const x = byInd.get(k);
+      if (x && !r.ex) { r.ex = `${x.situation} – ${x.action.charAt(0).toLowerCase() + x.action.slice(1)} – ${x.result.charAt(0).toLowerCase() + x.result.slice(1)}.`; ch = true; }
+    }
+    if (ch) db.prepare('UPDATE evals SET data=? WHERE id=?').run(JSON.stringify(d), e.id);
+  }
 }
 // Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
@@ -317,7 +332,14 @@ function seedEvidence(mgr, emps, rnd) {
     'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych'];
   const pick = a => a[Math.floor(rnd() * a.length)];
   const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
-  const add = (eid, date, ind) => ins.run(eid, mgr, date, ind, pick(SIT), pick(ACT), pick(RES), null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+  const used = new Set();
+  const add = (eid, date, ind) => {
+    let sit, act, res, key, n = 0;
+    do { sit = pick(SIT); act = pick(ACT); res = pick(RES); key = `${eid}|${sit}|${act}|${res}`; } while (used.has(key) && ++n < 200);
+    if (used.has(key)) return; // wyczerpane kombinacje – bez duplikatu
+    used.add(key);
+    return ins.run(eid, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+  };
   // Szkic oceny (ostatni pracownik): informacje do prawie wszystkich wskaźników – dwa celowo bez informacji (demo walidacji)
   const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
   if (draft) {
@@ -1672,7 +1694,15 @@ function briefFacts(empId, from, to) {
     facts.push({ id: `G${g.id}.${i + 1}`, rodzaj: 'krok celu', data: d, kryterium: null, cel: g.s, krok: x.t,
       kto: x.confirmed_at ? 'pracownik (zgłoszenie), przełożony (potwierdzenie)' : 'pracownik (zgłoszenie, bez potwierdzenia)' });
   });
-  return facts.sort((a, b) => (a.data < b.data ? -1 : 1));
+  // Scal fakty o identycznej treści (sytuacja, działanie, rezultat) – zostaje pierwszy id, reszta w „takze”
+  const seen = new Map(), out = [];
+  for (const f of facts) {
+    if (f.rodzaj !== 'informacja') { out.push(f); continue; }
+    const key = [f.sytuacja, f.dzialanie, f.rezultat].map(x => String(x ?? '').trim().toLowerCase()).join('\u0001');
+    const first = seen.get(key);
+    if (first) (first.takze ||= []).push(f.id); else { seen.set(key, f); out.push(f); }
+  }
+  return out.sort((a, b) => (a.data < b.data ? -1 : 1));
 }
 function briefContext(u, empId, b) {
   const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(empId, u.id);

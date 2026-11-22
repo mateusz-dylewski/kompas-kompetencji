@@ -92,3 +92,15 @@ test('format briefu: model z Markdownem → bez # i **, cztery nagłówki w kole
     assert.ok(r.brief.split('\n').every(l => !l.trim() || heads.includes(l) || l.startsWith('- ')));
   } finally { reply = saved; }
 });
+
+test('brief: dwie informacje o tej samej treści dają jeden fakt', async () => {
+  const emp = (await mgr.get('/api/dashboard')).body.team[0];
+  const ind = Object.keys((await mgr.get('/api/evals')).body.evals.find(e => e.employeeId === emp.id || e.employee_id === emp.id)?.data.ratings || {})[0] || 'MYŚLENIE ANALITYCZNE|0';
+  const body = { employeeId: emp.id, date: '2026-03-03', indicator: ind, situation: 'Sytuacja testowa X', action: 'Działanie testowe X', result: 'Rezultat testowy X' };
+  const a = await mgr.post('/api/evidence', body), b = await mgr.post('/api/evidence', body);
+  assert.equal(a.status, 201, a.text); assert.equal(b.status, 201, b.text);
+  const r = await mgr.post('/api/ai/brief', { employeeId: emp.id, from: '2026-01-01', to: '2026-12-31' });
+  const same = r.body.json.fakty.filter(f => f.sytuacja === 'Sytuacja testowa X');
+  assert.equal(same.length, 1);
+  assert.equal(same[0].takze?.length, 1);
+});

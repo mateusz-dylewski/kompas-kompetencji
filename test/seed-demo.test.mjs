@@ -29,3 +29,19 @@ test('plan rozwoju pracownika1, ocena C ze schematem 2 i cele w różnych stanac
   const steps = goals.flatMap(g => g.steps);
   assert.ok(steps.some(s => s.confirmed_at) && steps.some(s => s.reported_at && !s.confirmed_at) && steps.some(s => !s.reported_at));
 });
+
+test('seed: brak identycznych informacji u jednej osoby; przykłady w ocenach bez tekstu „demonstracyjne”', async () => {
+  const team = (await mgr.get('/api/dashboard')).body.team;
+  for (const m of team) {
+    const ev = (await mgr.get(`/api/evidence?employeeId=${m.id}`)).body.evidence;
+    const keys = ev.map(e => [e.situation, e.action, e.result].join('|'));
+    assert.equal(new Set(keys).size, keys.length, `duplikat informacji u osoby ${m.id}`);
+  }
+  const evals = (await mgr.get('/api/evals')).body.evals;
+  let withEx = 0;
+  for (const e of evals) for (const r of Object.values(e.data.ratings || {})) {
+    assert.ok(!/demonstracyjne/i.test(r.ex || ''), 'ex z tekstem demo');
+    if (r.ex) withEx++;
+  }
+  assert.ok(withEx > 0, 'część przykładów wynika z informacji');
+});
