@@ -526,7 +526,13 @@
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
     const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">AI ${aiWhere()}</span>` : `<span class="pill off" title="Model AI jest niedostępny">AI wyłączone</span>`;
-    const navBtns = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false).map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
+    const navItems = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false);
+    const mkBtn = ([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`;
+    const navBtns = navItems.map(mkBtn).join("");
+    const needMore = navItems.length > 4;
+    const mainItems = needMore ? navItems.slice(0, 4) : navItems, moreItems = needMore ? navItems.slice(4) : [];
+    const moreActive = moreItems.some(([v]) => v === navView);
+    const bottomNav = `<nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${mainItems.length + (needMore ? 1 : 0)},1fr)">${mainItems.map(mkBtn).join("")}${needMore ? `<button type="button" class="more-btn" id="moreBtn" aria-haspopup="true" aria-expanded="false" aria-controls="morePanel" ${moreActive ? 'aria-current="true"' : ""}><span class="ic" aria-hidden="true">⋯</span><span class="lbl">Więcej</span></button>` : ""}${needMore ? `<div class="more-panel" id="morePanel" role="group" aria-label="Pozostałe pozycje menu" hidden>${moreItems.map(mkBtn).join("")}</div>` : ""}</nav>`;
     return `
       <div class="app">
         <a class="skip" href="#view">Przejdź do treści</a>
@@ -551,7 +557,7 @@
             ${content}
           </main>
           ${footer()}
-          <nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${pages.length},1fr)">${navBtns}</nav>
+          ${bottomNav}
         </div>
       </div>`;
   }
@@ -610,7 +616,9 @@
       });
       w.appendChild(btn); w.appendChild(list);
       // etykieta wskazuje na przycisk (klik i czytnik ekranu trafiają w widoczny element)
-      if (sel.id) root.querySelectorAll(`label[for="${sel.id}"]`).forEach(l => l.htmlFor = btn.id);
+      if (sel.id) root.querySelectorAll(`label[for="${sel.id}"]`).forEach(l => { l.htmlFor = btn.id; if (!l.id) l.id = id + "-lbl"; btn.setAttribute("aria-labelledby", l.id); sel.setAttribute("aria-label", l.textContent.trim()); });
+      if (!btn.hasAttribute("aria-labelledby") && sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+      list.setAttribute("aria-label", sel.getAttribute("aria-label") || "Lista wyboru");
       btn.addEventListener("click", () => (list.hidden ? selOpen(w, sel) : selClose(w, true)));
       btn.addEventListener("keydown", e => {
         if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); selOpen(w, sel); }
@@ -686,6 +694,16 @@
   }
   function bindShell() {
     document.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => go(b.dataset.nav)));
+    const mb = document.getElementById("moreBtn"), mp = document.getElementById("morePanel");
+    if (mb && mp) {
+      const closeMore = focus => { mp.hidden = true; mb.setAttribute("aria-expanded", "false"); if (focus) mb.focus(); };
+      mb.addEventListener("click", () => { if (mp.hidden) { mp.hidden = false; mb.setAttribute("aria-expanded", "true"); mp.querySelector("button")?.focus(); } else closeMore(true); });
+      mp.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); closeMore(true); }
+        else if (e.key === "Tab") { const b = [...mp.querySelectorAll("button")]; if (e.shiftKey && document.activeElement === b[0]) { e.preventDefault(); closeMore(true); } else if (!e.shiftKey && document.activeElement === b[b.length - 1]) closeMore(false); }
+      });
+      document.addEventListener("click", e => { if (!mp.hidden && !mp.contains(e.target) && !mb.contains(e.target)) closeMore(false); });
+    }
     document.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
     document.querySelectorAll("[data-go-eval]").forEach(b => b.addEventListener("click", () => openWizard(+b.dataset.goEval).catch(e => toast(e.message))));
   }
@@ -1721,7 +1739,8 @@
     const act = /^#aktywacja=([a-f0-9]{64})$/.exec(location.hash);
     if (act) return renderActivation(act[1]);
     try {
-      const me = await api("GET", "/api/me");
+      const me = await fetch("/api/session", { credentials: "same-origin" }).then(r => r.json()).catch(() => ({ user: null }));
+      if (!me.user) return renderLogin();
       S.user = me.user; S.ai = me.ai;
       if (me.user.mustChange) return renderPasswordChange();
       await load(); render();
