@@ -160,12 +160,12 @@
   // Dobrowolna ankieta po złożeniu oceny: zapisywana anonimowo (tylko wartość i miesiąc), do metryk zbiorczych
   const surveyModal = evalId => openModal(`
       <p class="ok-banner" role="status">${KK_ICON("check")}<span>Ocena złożona. Pracownik zobaczy ją w swoim panelu.</span></p>
-      <h2>Jedno pytanie (dobrowolne)</h2>
+      <h2>Jedno pytanie – dobrowolne, możesz pominąć</h2>
       <p>Jak oceniasz swoje przygotowanie do rozmowy oceniającej z pomocą aplikacji?</p>
       <form id="svForm"><fieldset class="plain"><legend class="sr">Ocena od 1 do 5</legend>
         ${[1, 2, 3, 4, 5].map(n => `<label class="choice"><input type="radio" name="sv" value="${n}"><span>${n}${n === 1 ? " – słabo" : n === 5 ? " – bardzo dobrze" : ""}</span></label>`).join("")}</fieldset>
         <p class="muted">Odpowiedź jest anonimowa: zapisujemy tylko wartość i miesiąc, bez Twoich danych i bez oceny. Wyniki widać zbiorczo, od 5 przełożonych.</p>
-        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Pomiń</button><button class="btn" type="submit">Wyślij</button></div></form>`, () => {
+        <div class="btns"><button type="button" class="btn g" data-act="closeModal">Pomiń i zamknij</button><button class="btn" type="submit">Wyślij odpowiedź</button></div></form>`, () => {
       $("#svForm").addEventListener("submit", async e => {
         e.preventDefault();
         const r = document.querySelector('[name="sv"]:checked'); if (!r) return toast("Wybierz wartość albo pomiń.");
@@ -357,7 +357,7 @@
     const j = r.json;
     body.innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · ${r.source === "ai" ? "Przygotował asystent AI" : "Przygotowano bez modelu AI (reguły)"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
       <div class="ai-out brief-text">${briefHtml(String(r.brief).replace(/Kryteria bez informacji:\s*\n\s*[-*•]\s*brak\.?\s*$/i, "Wszystkie kryteria mają zebrane informacje."))}</div>
-      <h3 id="brFacts">Fakty, na które powołuje się brief</h3><p class="muted">Źródła: zapisane informacje (I…), rozmowy miesięczne (C…), informacje zwrotne (F…) i kroki celów (G…), na których opiera się brief.</p>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
+      <h3 id="brFacts" class="br-facts-h">Fakty, na które powołuje się brief</h3><p class="muted">Każdy link „źródło” w briefie prowadzi do jednego z faktów poniżej: zapisanej informacji, rozmowy miesięcznej, informacji zwrotnej albo kroku celu.</p>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
       <details class="adv"><summary>Dla zaawansowanych: dane w formacie JSON</summary><pre class="json-out" tabindex="0" aria-label="Dane w formacie JSON">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></details>
       <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
     bindActs(body);
@@ -682,7 +682,7 @@
             <div class="brandmark" aria-hidden="true">K</div>
             <div class="top-t"><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub)}</div></div>
             <span class="spacer"></span><span class="hdr-ai">${aiPill}</span>
-            <button class="btn sm g hdr-logout" data-act="logout" ><span aria-hidden="true">⎋</span> Wyloguj</button>
+            <button class="btn sm g hdr-logout${needMore ? " hdr-logout-more" : ""}" data-act="logout" ><span aria-hidden="true">⎋</span> Wyloguj</button>
           </header>
           <main class="view" id="view" tabindex="-1">
             ${opts.hidePageHead ? "" : `<div class="page-h"><h1 tabindex="-1">${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
@@ -1289,7 +1289,7 @@
     const head = `<div class="card wiz-head">
       <div class="row"><div class="who-row">${avatar(c.empAvatar, c.empName, "av av-lg")}<div><h2>${esc(TYP[c.typ])}</h2><div class="muted">${first(c.empName)} · okres ${esc(isoToPl(c.periodFrom || ""))} – ${esc(isoToPl(c.periodTo || ""))}</div></div></div>
         <div class="row">${pill(c.status)}<span class="saved" id="saved"></span></div></div>
-      <div class="wiz-progress"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Postęp kreatora oceny"><i style="width:${pct}%"></i></div><small>Krok ${idx + 1} z ${steps.length} · ${esc(st.label)}</small></div></div>`;
+      <div class="wiz-progress"><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Postęp kreatora oceny"><i style="width:${pct}%"></i></div><small>Część ${idx + 1} z ${steps.length} · ${esc(st.label)}</small></div></div>`;
     let body;
     if (st.id === "crit") body = critStep();
     else if (st.id === "talk") body = talkStep();

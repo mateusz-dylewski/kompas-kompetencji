@@ -592,3 +592,13 @@ details.dl-card[open]>summary{margin-bottom:8px}
   .team-acts .act-btn:first-child{grid-column:1/-1;justify-content:center}
   .team-acts .act-btn{justify-content:center}
 }
+.br-facts-h{margin-top:22px}
+/* Stopka zawsze na dole ekranu, także na krótkich stronach */
+.app>.col{display:flex;flex-direction:column;min-height:100vh;min-width:0}
+.app>.col>main.view{flex:1 0 auto}
+/* Pola formularza: białe tło i ramka o kontraście ≥ 3:1 (WCAG 1.4.11) – nie wyglądają na wyłączone */
+input:not([type="checkbox"]):not([type="radio"]),textarea{background:#fff;border-color:#757b85}
+select{border-color:#757b85}
+input:disabled,textarea:disabled,input[readonly],textarea[readonly]{background:var(--bg);border-color:var(--ln);color:var(--mu);cursor:not-allowed}
+/* Telefon: wylogowanie w menu „Więcej” – nagłówek bez powielonego przycisku (więcej miejsca na treść) */
+@media(max-width:959px){.hdr-logout-more{display:none}}
