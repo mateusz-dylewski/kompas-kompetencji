@@ -17,6 +17,7 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 - Faza 2 (podsumowanie dla Janka) nie wykonana w pełnej formie – ten wpis ją zastępuje.
 
 ## Czas
+- WZNOWIENIE: 2026-11-22 06:51:39 · twardy koniec pętli 08:41:39 · podsumowanie do 08:51:39
 - Start: 2026-11-22 04:13:17 (epoch 1795317197)
 - Twardy koniec pętli: 06:03:17 · podsumowanie do 06:13:17
 - Gałąź: `nocna-iteracja` (z `main` @ d4c19cf). Nie pushować, nie dotykać main.
@@ -50,6 +51,7 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 | 0 (start) | 04:30 | 6 | 6 | 7 | 8 | 6 | 5 | 7 | 6 | 6,4 | (persony haiku od cyklu 1) |
 | 1 | 04:37 | 6 | 8 | 8 | 8 | 7 | 5 | 8 | 6 | 7,0 | skrypty: desktop wszystkie kroki OK, mobile nadal pada (menu poza ekranem) |
 | 2 | 04:47 | 7 | 6 | 9 | 8 | 7 | 7 | 8 | 6 | 7,3 | juror 6, Krystyna 5, klawiatura 6 |
+| 3 | 07:05 | 7 | 8 | 9 | 9 | 7 | 7 | 8 | 6 | 7,6 | juror 5, Michał 6, Ewa 6, Krystyna 6, klawiatura 6 |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -83,4 +85,11 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 - Pkt 2 obniżony do 6: surowy błąd JS widoczny dla użytkownika (toast). 
 - Retro: backend zrobił `git stash` w trakcie pracy frontendu – dopisano zakaz w rolach. Persony haiku dają konkretne, użyteczne uwagi; log fokusu w skrypcie trzeba poprawić (nazwa dostępna zamiast textContent).
 - Następne (cykl 3): frontend – błąd JS, animacje wejścia, przewodnik „3 kroki” na Start, prosty język, nazwy przycisków w wierszach, wylogowanie na mobile, opis briefu; qa – log nazwy dostępnej, skip link, oczekiwanie na AI, wylogowanie w skrypcie.
+
+### Cykl 3 (wznowienie 06:51–07:05)
+- Naprawa commita WIP b97e900: uszkodzona zamiana wycięła fragment od strony startowej pracownika do początku mgrPage, a karta przełożonego trafiła do strony pracownika (ReferenceError `kickEmp` blokował logowanie). Plik odtworzony z 6b4525c + 41/42 poprawnych fragmentów WIP; karta „Ocena w 3 krokach” wstawiona do mgrPage. Commit d45f8b3.
+- Błąd sprzed nocy: strona „Dziennik” nie rysowała `#logBody` (pokazywała listę ocen) – naprawione.
+- Dowody: `npm test` 133/133; skrypty person: juror 9/9 desktop i mobile (wcześniej mobile 6/9), michal 8/8, krystyna 13/13, ewa 8/8, klawiatura 6/6; konsola 0, kontrast 0, skip link na każdym ekranie, żaden ekran > 2 s.
+- Persony: juror 5 (brief: „(bez źródła)” i zdublowane fakty I41/I43 z seedu; AI w doborze kryteriów słabo widoczne; brief jako surowy tekst; sticky pasek kreatora zasłania treść; kryteria obowiązkowe wyglądają na wyłączone), Michał 6 (karta „Przygotuj się do rozmowy” niewidoczna bez oceny w przygotowaniu; na telefonie „Oceny” pod „Więcej”, ucięte tytuły przez znacznik AI, tabele ucięte; skala punktów bez opisu), Ewa 6 (dziennik – naprawione; brak domyślnego wyboru arkusza wymusza decyzję – teraz domyślnie C; przełączniki ustawień nieczytelne; powtórzone „Podgląd”), Krystyna 6 (żargon, skala 1–9 bez wskazówki, pole „Przykład z okresu” wypełnione tekstem demo z seedu, kreator otwiera inną osobę niż oczekiwała, JSON w briefie), klawiatura 6 (przyciski „Potwierdź” bez nazwy, fokus na main bez obrysu, tabela zespołu ucięta na telefonie).
+- Retro: agent front-endu zatrzymany w trakcie zostawił uszkodzony plik – na przyszłość po każdym zadaniu front-endu od razu `node --check` + persona juror przed commitem (orkiestrator robi to sam, nie ufa raportowi).
 
