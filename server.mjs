@@ -1693,10 +1693,50 @@ function checkBriefRefs(text, ids) {
   let section = '';
   return String(text).split('\n').map(line => {
     if (/^\s*(#+|\*\*|[A-ZĄĆĘŁŃÓŚŹŻ][^.:]{2,40}:?\s*$)/.test(line)) section = line;
-    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : ''));
+    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : '')).replace(/(\S) {2,}/g, '$1 ').trimEnd();
     if (/przykład/i.test(section) && /^\s*([-*•]|\d+[.)])\s+\S/.test(l) && !/\[[IFCG][0-9.]+\]/.test(l)) l += ' (bez źródła)';
     return l;
   }).join('\n');
+}
+// Po modelu: ujednolicenie formatu – bez Markdown, cztery sekcje w stałej kolejności z dokładnymi nagłówkami
+const BRIEF_HEADS = [['t', 'Tematy do omówienia:'], ['p', 'Przykłady z okresu:'], ['q', 'Pytania otwarte:'], ['b', 'Kryteria bez informacji:']];
+function briefSectionOf(s) {
+  if (/kryteri|brak(i|ujące)?\b|bez informacji/i.test(s) && !/przykład|pytani/i.test(s)) return 'b';
+  if (/przykład/i.test(s)) return 'p';
+  if (/pytani/i.test(s)) return 'q';
+  if (/temat/i.test(s)) return 't';
+  return null;
+}
+function normalizeBrief(text, json) {
+  const sec = { t: [], p: [], q: [], b: [] };
+  let cur = 't';
+  for (const raw of String(text).replace(/\r/g, '').split('\n')) {
+    const mdHead = /^\s*#{1,6}\s/.test(raw) || /^\s*(\*\*|__)[^*_]+(\*\*|__):?\s*$/.test(raw);
+    let l = raw.replace(/^\s*#{1,6}\s*/, '').replace(/(\*\*|__)/g, '').replace(/`/g, '').trim();
+    if (!l) continue;
+    const bullet = /^([-*•]|\d+[.)])\s+(.*)$/.exec(l);
+    const body = bullet ? bullet[2].trim() : l;
+    const m = /^(.{2,70}?):\s*(.*)$/.exec(body);
+    const headLike = mdHead || !bullet || /:$/.test(body);
+    const headPart = m ? m[1] : body;
+    const s = headLike && headPart.length <= 70 ? briefSectionOf(headPart) : null;
+    if (s && (!bullet || mdHead || /:$/.test(body)) && !/^[-*•]\s/.test(l)) {
+      cur = s;
+      if (m && m[2].trim()) sec[cur].push(m[2].trim());
+      continue;
+    }
+    if (mdHead && !bullet) { if (!/^brief\b/i.test(body)) sec[cur].push(body.replace(/:$/, '')); continue; }
+    sec[cur].push(body);
+  }
+  if (!sec.p.length) {
+    const by = (json.pokrycie || []).filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty).slice(0, 3);
+    sec.p = by.map(p => { const f = json.fakty.find(x => x.kryterium === p.kryterium); return `${p.kryterium.toLowerCase()}: ${f.sytuacja || f.opis || ''} [${f.id}]`; });
+    if (!sec.p.length) sec.p = ['brak wpisów w okresie'];
+  }
+  if (!sec.b.length) sec.b = (json.braki || []).length ? json.braki.map(k => k.toLowerCase()) : ['brak'];
+  if (!sec.t.length) sec.t = ['brak'];
+  if (!sec.q.length) sec.q = ['brak'];
+  return BRIEF_HEADS.map(([k, h]) => [h, ...sec[k].map(x => `- ${x}`)].join('\n')).join('\n\n');
 }
 function rulesBrief(json) {
   const by = json.pokrycie.filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty);
@@ -1721,7 +1761,7 @@ route('POST', '/api/ai/brief', async (req, res, u) => {
 Sekcje (nagłówki dokładnie tak): „Tematy do omówienia:”, „Przykłady z okresu:”, „Pytania otwarte:”, „Kryteria bez informacji:”.
 W „Przykładach” każde zdanie kończ odnośnikiem do faktu w nawiasie kwadratowym, np. [I12]. Używaj tylko identyfikatorów z pola "id".
 Nie podawaj poziomów, punktów ani wyniku. Nie oceniaj osoby. Nie dodawaj niczego spoza faktów.`, `FAKTY (JSON):\n${input}`);
-    const brief = checkBriefRefs(raw, ids);
+    const brief = checkBriefRefs(normalizeBrief(raw, json), ids);
     aiLog(null, u.id, 'brief', input, { text: brief, source: 'ai' });
     send(res, 200, { brief, json, source: 'ai', model: AI_MODEL });
   } catch {
