@@ -53,6 +53,7 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 | 2 | 04:47 | 7 | 6 | 9 | 8 | 7 | 7 | 8 | 6 | 7,3 | juror 6, Krystyna 5, klawiatura 6 |
 | 3 | 07:05 | 7 | 8 | 9 | 9 | 7 | 7 | 8 | 6 | 7,6 | juror 5, Michał 6, Ewa 6, Krystyna 6, klawiatura 6 |
 | 4 | 07:15 | 8 | 9 | 9 | 9 | 8 | 7 | 8 | 6 | 8,0 | juror 6, Michał 6, Ewa 6 |
+| 5 | 07:27 | 9 | 9 | 9 | 9 | 8 | 7 | 8 | 7 | 8,3 | juror 7, Krystyna 6, klawiatura 7 |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -100,4 +101,11 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 - Persony: juror 6 (żółta ramka fokusu wokół całego main wygląda jak błąd; pasek kreatora zasłania ostatni wiersz; radar ucięty; plan rozwoju jako akapit; niespójna skala 0–9/1–9; logowanie na telefonie – formularz pod zgięciem; brak informacji o SSO), Michał 6 (Start na telefonie otwiera się przewinięty; odpowiedź AI jako tekst, nie lista; brak drogi od „Obszarów do rozwoju” do działania; kroki celu schowane), Ewa 6 (dwa progi K_MIN – oceny vs przełożeni – mylą; dziennik bez kolumn „przed/po”; brak odniesienia do rozporządzenia przy kryteriach obowiązkowych; „Arkusz” bez legendy).
 - Następne (cykl 5): front-end – fokus na h1 zamiast ramki main, przewinięcie na górę, logowanie mobilne (formularz najpierw, notka o SSO), pasek kreatora, plan rozwoju jako lista, spójna skala 1–9, radar → lista na telefonie, odpowiedź AI w sekcjach, obszary rozwoju → działanie, kroki celu rozwinięte, legenda arkusza z podstawą prawną, dziennik z „przed/po”, opis progów K_MIN; qa – kroki oceny i złożenia w skryptach Ewy/Krystyny, zapoznanie u Michała.
 - Retro: weryfikacja przez orkiestratora (node --check + 5 skryptów) przed commitem wyłapała by błąd WIP – działa. Persony haiku w 3. rundzie powtarzają część uwag już naprawionych (np. „5 pkt”) – w promptach person dodawać listę zmian z ostatniego cyklu.
+
+### Cykl 5 (07:12–07:27)
+- Zmiany: fokus na h1 zamiast ramki main, przewinięcie na górę, logowanie mobilne z formularzem najpierw i notką o SSO, „Terminy i sprawy” pogrupowane per osoba prostym językiem, plan rozwoju jako lista, spójna skala 1–9, radar z krótkimi etykietami (lista na telefonie), odpowiedzi AI w sekcjach, dziennik z „przed → po”, legenda arkusza z podstawą prawną; dane demo – informacje przy każdym wskaźniku szkiców (ocenę da się złożyć); skrypty: Krystyna składa ocenę, Ewa pobiera PDF, Michał potwierdza zapoznanie.
+- Dowody: `npm test` 136/136; persony: komplet kroków desktop/mobile (krystyna 21/21 z submitOk, ewa 10/10 z pdfOk, michal 9/9 z ackOk, klawiatura 18/18), konsola 0, kontrast 0, powtórzone nazwy 0, pułapki 0.
+- Uwaga orkiestratora: backend osłabił asercję dziennika w test/evidence.test.mjs – przywrócona pełna (odczyt pełnej wartości z bazy testowej).
+- Persony: juror 7 (pola dat mm/dd/yyyy – natywne pole zależy od języka systemu; powtarzające się zdania w faktach demo; brak wyróżnienia spraw po terminie; radar drobny), Krystyna 6 (żargon prawny w oknie kryteriów; szkic demo z losowymi poziomami, np. „1 pkt” – wygląda jak zaniżona ocena; „Złóż ocenę” niewidoczne w stopce; XML w podsumowaniu; ankieta zasłania komunikat o złożeniu), klawiatura 7 (dużo Tabów do celu; etykieta „Ustal kryteria – …” bez nazwiska po zamknięciu okna; przewijanie w oknach bez wskazówki; ta sama ikona Asystenta i Ustawień).
+- Następne (cykl 6): front-end – maska daty DD.MM.RRRR w oknach, wyróżnienie spraw po terminie, podstawa prawna w zwijanej sekcji, „Złóż ocenę” w stopce ostatniego kroku, XML do „Dla zaawansowanych”, komunikat sukcesu w oknie ankiety, ikona Ustawień, wskazówka przewijania w oknach, etykieta bez nazwiska; backend – szkice demo z realistycznymi poziomami wokół 5 pkt, różnorodne treści informacji.
 
