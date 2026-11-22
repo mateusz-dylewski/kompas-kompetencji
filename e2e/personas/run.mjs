@@ -54,11 +54,11 @@ const closeModal = async p => {
   }
   return { modalClosed: !(await p.locator('#modal').count()) };
 };
-const waitAI = async p => { await p.waitForFunction(() => !document.querySelector('.ai-thinking, .thinking'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300); };
+const waitAI = async p => { await p.waitForFunction(() => !document.querySelector('.ai-think'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300); };
 
 // Czy w widoku/modalu jest czytelny komunikat zamiast pustki lub wiszącego ładowania
 const aiFallbackCheck = async p => {
-  await p.waitForFunction(() => !document.querySelector('.ai-thinking, .thinking'), null, { timeout: 12000 }).catch(() => {});
+  await p.waitForFunction(() => !document.querySelector('.ai-think'), null, { timeout: 12000 }).catch(() => {});
   await p.waitForTimeout(500);
   return p.evaluate(() => {
     const txt = (document.querySelector('#modal') || document.querySelector('#view') || document.body).innerText || '';
@@ -133,7 +133,7 @@ const SCENARIOS = {
     ['b-kreator-oceny', async (p, vp) => { await nav('evals')(p, vp); await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
     ['c-brief', async (p, vp) => { await nav('month')(p, vp); await clickAct('aiBrief', { wait: 300 })(p); await waitAI(p); }],
     ['c-zamknij', closeModal],
-    ['pracownik-start', async p => { await p.locator('[data-act="logout"]').first().click(); await p.waitForTimeout(600); await login('pracownik1@demo.kk')(p); }],
+    ['pracownik-start', async p => { const lo = p.locator('[data-act="logout"]:visible'); if (!(await lo.count()) && await p.locator('#moreBtn').count()) { if ((await p.locator('#moreBtn').getAttribute('aria-expanded')) !== 'true') await p.locator('#moreBtn').click(); await p.waitForTimeout(300); } await lo.first().click(); await p.waitForTimeout(600); await login('pracownik1@demo.kk')(p); }],
     ['c-pracownik-profil', nav('profile')],
   ],
   // Tylko klawiatura (i czytnik ekranu): logowanie i nawigacja bez myszy
@@ -151,18 +151,68 @@ const SCENARIOS = {
 const a11yCheck = p => p.evaluate(() => {
   const out = [];
   const vis = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const accName = el => {
+    const al = el.getAttribute('aria-label'); if (al && al.trim()) return al.trim();
+    const lb = el.getAttribute('aria-labelledby');
+    if (lb) { const t = lb.split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ').trim(); if (t) return t; }
+    if (el.labels?.length) { const t = [...el.labels].map(l => l.textContent).join(' ').trim(); if (t) return t; }
+    const tc = (el.textContent || '').replace(/\s+/g, ' ').trim(); if (tc) return tc;
+    return (el.title || el.getAttribute('placeholder') || '').trim();
+  };
   document.querySelectorAll('img').forEach(i => { if (!i.hasAttribute('alt')) out.push(`img bez alt: ${i.src.slice(-40)}`); });
   document.querySelectorAll('input, select, textarea').forEach(i => {
     if (i.type === 'hidden' || !vis(i)) return;
     const named = i.labels?.length || i.getAttribute('aria-label') || i.getAttribute('aria-labelledby') || i.title;
     if (!named) out.push(`pole bez etykiety: ${i.outerHTML.slice(0, 80)}`);
   });
-  document.querySelectorAll('button, a[href]').forEach(b => { if (vis(b) && !(b.textContent.trim() || b.getAttribute('aria-label') || b.title)) out.push(`przycisk/link bez nazwy: ${b.outerHTML.slice(0, 80)}`); });
+  document.querySelectorAll('button, a[href]').forEach(b => { if (vis(b) && !accName(b)) out.push(`przycisk/link bez nazwy: ${b.outerHTML.slice(0, 80)}`); });
   const h1 = [...document.querySelectorAll('h1')].filter(vis).length;
   if (h1 !== 1) out.push(`liczba widocznych h1: ${h1}`);
+  // (a) skip link – tylko na ekranach po zalogowaniu
+  const loggedIn = !!document.querySelector('#view');
+  const skipLinkMissing = loggedIn && !document.querySelector('a.skip, a[href="#view"]');
+  if (skipLinkMissing) out.push('brak linku „Przejdź do treści”');
+  // (b) powtórzone nazwy przycisków
+  const counts = {};
+  document.querySelectorAll('button, [role="button"]').forEach(b => { if (!vis(b)) return; const n = accName(b).slice(0, 50); if (n) counts[n] = (counts[n] || 0) + 1; });
+  const dups = Object.entries(counts).filter(([, c]) => c > 2).map(([n, c]) => `${n}×${c}`);
+  if (dups.length) out.push(`powtórzone nazwy przycisków: ${dups.join(', ')}`);
+  // (c) kontrast
+  const parse = s => { const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return null; const v = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: v[0], g: v[1], b: v[2], a: v.length > 3 ? v[3] : 1 }; };
+  const lum = c => { const f = x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+  const blend = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+  const bgOf = el => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if (c && c.a > 0) { layers.push(c); if (c.a >= 1) break; } }
+    let base = { r: 255, g: 255, b: 255, a: 1 };
+    for (let i = layers.length - 1; i >= 0; i--) base = blend(layers[i], base);
+    return base;
+  };
+  const hex = c => '#' + [c.r, c.g, c.b].map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
+  const sel = el => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+  const contrast = [];
+  let n = 0;
+  for (const el of document.querySelectorAll('p, span, a, button, td, label, small, li')) {
+    if (n >= 300) break;
+    if (!vis(el)) continue;
+    const own = [...el.childNodes].filter(x => x.nodeType === 3).map(x => x.textContent).join('').trim();
+    if (!own) continue;
+    n++;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+    const fg0 = parse(cs.color); if (!fg0) continue;
+    const bg = bgOf(el);
+    const fg = blend({ ...fg0, a: fg0.a * (+cs.opacity || 1) }, bg);
+    const l1 = lum(fg), l2 = lum(bg);
+    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    const px = parseFloat(cs.fontSize), bold = parseInt(cs.fontWeight, 10) >= 700;
+    const need = (px >= 24 || (px >= 18.66 && bold)) ? 3 : 4.5;
+    if (ratio < need) contrast.push({ sel: sel(el), text: own.slice(0, 30), fg: hex(fg), bg: hex(bg), ratio: Math.round(ratio * 100) / 100, need });
+  }
+  contrast.slice(0, 10).forEach(c => out.push(`kontrast ${c.ratio}:1 (<${c.need}) ${c.sel} „${c.text}” ${c.fg} na ${c.bg}`));
   const a = document.activeElement;
-  const focus = a && a !== document.body ? `${a.tagName.toLowerCase()} „${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 40)}” outline=${getComputedStyle(a).outlineStyle}/${getComputedStyle(a).outlineWidth}` : 'body';
-  return { issues: out, focus };
+  const focus = a && a !== document.body ? `${a.tagName.toLowerCase()} „${accName(a).slice(0, 40)}” outline=${getComputedStyle(a).outlineStyle}/${getComputedStyle(a).outlineWidth}` : 'body';
+  return { issues: out, focus, contrastFails: contrast.length, contrastSamples: contrast.slice(0, 10), duplicateNames: dups, skipLinkMissing };
 });
 
 async function runPersona(name) {
@@ -200,11 +250,14 @@ async function runPersona(name) {
         }
         catch (e) { st.ok = false; st.error = String(e.message || e).split('\n')[0].slice(0, 200); }
         st.ms = Date.now() - t;
+        await p.waitForTimeout(250);
+        await p.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running'), null, { timeout: 1500 }).catch(() => {});
         const file = `${String(i).padStart(2, '0')}-${stepName}-${vpName}.png`;
         await p.screenshot({ path: path.join(outDir, file), fullPage: vpName === 'desktop' ? false : false }).catch(() => {});
         st.screenshot = file;
         const a = await a11yCheck(p).catch(() => ({ issues: ['a11y: nie udało się sprawdzić'], focus: '' }));
         st.a11y = a.issues; st.focus = a.focus;
+        st.contrastFails = a.contrastFails || 0; st.contrastSamples = a.contrastSamples || []; st.duplicateNames = a.duplicateNames || []; st.skipLinkMissing = !!a.skipLinkMissing;
         run.steps.push(st);
       }
       log.runs[vpName] = run;
@@ -219,6 +272,9 @@ async function runPersona(name) {
     slowestStep: r.steps.reduce((a, s) => (s.ms > (a?.ms || 0) ? s : a), null)?.step, maxStepMs: Math.max(...r.steps.map(s => s.ms)),
     screensOver2s: r.steps.filter(s => !s.ai && s.interactiveMs > 2000).map(s => `${s.step}: ${s.interactiveMs} ms`),
     aiFallbackVisible: r.steps.filter(s => 'aiFallbackVisible' in s).map(s => `${s.step}: ${s.aiFallbackVisible}`),
+    contrastFails: r.steps.reduce((a, s) => a + (s.contrastFails || 0), 0),
+    duplicateNames: r.steps.filter(s => s.duplicateNames?.length).map(s => `${s.step}: ${s.duplicateNames.join(', ')}`),
+    skipLinkMissing: r.steps.filter(s => s.skipLinkMissing).length,
     a11yIssues: [...new Set(r.steps.flatMap(s => s.a11y))].slice(0, 15),
   }]));
   log.summary = sum; log.aiMode = AI_MODE;
