@@ -33,6 +33,7 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 0 (start) | 04:30 | 6 | 6 | 7 | 8 | 6 | 5 | 7 | 6 | 6,4 | (persony haiku od cyklu 1) |
 | 1 | 04:37 | 6 | 8 | 8 | 8 | 7 | 5 | 8 | 6 | 7,0 | skrypty: desktop wszystkie kroki OK, mobile nadal pada (menu poza ekranem) |
+| 2 | 04:47 | 7 | 6 | 9 | 8 | 7 | 7 | 8 | 6 | 7,3 | juror 6, Krystyna 5, klawiatura 6 |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -58,4 +59,12 @@
 - Znaleziony błąd: na 390 px `nav.bottom` (fixed) leży poza ekranem (top≈1283) – przodek z transformacją; przekazane frontendowi w cyklu 2.
 - Następne: design gov.pl + przycisk AI kryteriów w UI + logowanie (frontend, w toku), dane demo dla jury (backend, w toku), potem persony haiku (juror + krystyna + klawiatura).
 - Retro: równoległe zadania o rozłącznych plikach działają; agent bez dostępu do skryptu e2e zgadywał przyczynę – na przyszłość qa-perf od razu dostaje zadanie diagnozy UI razem z poprawką skryptu.
+
+### Cykl 2 (04:37–04:47)
+- Zmiany: design gov.pl/mObywatel (tokeny, Open Sans, karty 8 px, ciemny tytuł, fokus), „Zaproponuj kryteria (AI)” w rozmowie rozpoczynającej, logowanie z wartością produktu (a/b/c), naprawa menu mobilnego (`.sr` rozpychał układ do 627 px), dane demo dla jury (rozmowy rozpoczynające, plan rozwoju, ocena C, cele w 3 stanach).
+- Dowody: `npm test` 129/129; krystyna mobile 13/13 (wcześniej 8/13); konsola 0 u wszystkich person.
+- Persony: juror 6 (błąd JS w toaście na profilu pracownika, brief „0 s” wygląda na zawieszony, mobile bez wylogowania, pusty Start w trakcie animacji), Krystyna 5 (żargon: check-iny, feedback, artefakt, arkusz B; brak wskazania pierwszego kroku; „Zamknij” w kreatorze), klawiatura 6 (identyczne nazwy przycisków w wierszach; skrypt błędnie raportował pola bez nazwy – fałszywy alarm).
+- Pkt 2 obniżony do 6: surowy błąd JS widoczny dla użytkownika (toast). 
+- Retro: backend zrobił `git stash` w trakcie pracy frontendu – dopisano zakaz w rolach. Persony haiku dają konkretne, użyteczne uwagi; log fokusu w skrypcie trzeba poprawić (nazwa dostępna zamiast textContent).
+- Następne (cykl 3): frontend – błąd JS, animacje wejścia, przewodnik „3 kroki” na Start, prosty język, nazwy przycisków w wierszach, wylogowanie na mobile, opis briefu; qa – log nazwy dostępnej, skip link, oczekiwanie na AI, wylogowanie w skrypcie.
 
