@@ -31,7 +31,7 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Informacje i informacja zwrotna", "book", "Obserwacje, informacja zwrotna i rozmowy miesięczne – Twój wgląd"],
+      ["evidence", "Informacje i opinie", "book", "Obserwacje, informacja zwrotna i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
@@ -773,7 +773,92 @@
       else if (last && last.status === "discussed") next = { t: "Ocena omówiona – ustal cele na kolejny okres", s: "Przełożony nie zapisał wniosków rozwojowych. Zaproponuj cel, który omówicie.", btn: "Otwórz cele", go: "goals" };
       else next = { t: "Sprawdź swoje cele", s: "Zaktualizuj postęp, zanim przyjdzie czas na ocenę.", btn: "Otwórz cele", go: "goals" };
       return `
-        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)}. Zacznij od kroku 1 – kolejne odblokują się same, gdy zbierzesz informacje.</p>
+        <section class="next card anim">
+          <div><h2>${esc(next.t)}</h2><p class="muted">${esc(next.s)}</p></div>
+          <button class="btn btn-next" data-nav="${next.go}"><span>${esc(next.btn)}</span>${KK_ICON("arrow")}</button></section>
+        <div class="kpis">
+          <div class="kpi"><b data-to="${d.evals.length}" data-dec="0">0</b><span>Złożone oceny</span></div>
+          <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
+          <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
+        </div>
+        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(d.kickoff.date)})</h2>
+          <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
+          <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
+          <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
+          ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
+            : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
+        ${(d.upcoming || []).length || d.kickoff ? `<div class="card"><h2>Przygotuj się do rozmowy</h2>
+          <p class="muted">Asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
+          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
+          <div id="aiPrepOut" aria-live="polite"></div></div>` : ""}
+        ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
+          <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
+          <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
+          <p class="muted">Masz wgląd w kryteria i termin przed złożeniem oceny (§ 6 rozporządzenia). Poziomy zobaczysz po złożeniu.</p></div>`).join("")}
+        <div class="card"><h2>Gdzie jesteś w procesie</h2>${last ? timeline(last.status) : `<p class="muted">Gdy przełożony przygotuje ocenę, zobaczysz tu jej postęp.</p>`}
+          <p class="muted">Ocena opisuje zachowania z okresu, a nie Twoją osobę. Masz prawo zapoznać się z nią przed rozmową.</p></div>`;
+    }
+    if (v === "profile") {
+      const sc = d.latestScores || {};
+      const items = Object.entries(sc).filter(([, x]) => x.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
+      return `
+        <div class="grid two">
+          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
+          <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
+            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+        </div>
+        <div class="grid two">
+          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
+          <div class="card"><h2>Asystent rozwoju</h2>
+            <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
+            <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
+            <div id="aiDevOut"></div></div>
+        </div>
+        <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
+    }
+    if (v === "goals") {
+      return `<p class="muted" style="margin:0 0 12px">Cele ustala przełożony. Gdy wykonasz krok, zgłoś to – przełożony potwierdzi. Postęp liczy tylko potwierdzone kroki.</p>
+        ${goalTiles(S.goals, "emp")}`;
+    }
+    if (v === "evidence") return evidencePage(false);
+    // evals
+    return evalsList(false);
+  }
+  function evalsList(isMgr) {
+    const names = Object.fromEntries((S.dash.team || []).map(t => [t.id, t.name]));
+    if (!S.evals.length) return `<div class="card"><p class="muted">Brak ocen do wyświetlenia.</p></div>`;
+    const rows = S.evals.map(e => {
+      const edit = isMgr && e.status === "draft";
+      return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
+        <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
+        <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}"`)}</td></tr>`;
+    }).join("");
+    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+
+  // ---------- Przełożony ----------
+  function mgrPage(v) {
+    if (v === "settings") return settingsPage();
+    const d = S.dash, c = d.counts;
+    if (v === "home") {
+      const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
+      const toDiscuss = d.team.filter(t => t.status === "submitted");
+      const status = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
+      // „Ocena w 3 krokach”: krok 1 dla pierwszej osoby bez zapisanej rozmowy rozpoczynającej, krok 3 dla pierwszej z oceną do omówienia
+      const kickEmp = d.team.find(t => !t.kickoff) || d.team[0] || null;
+      const briefEmp = toDiscuss[0] || d.team.find(t => t.status !== "none") || d.team[0] || null;
+      const rows = d.team.map(t => `
+        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}" aria-label="${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz"} rozmowę rozpoczynającą – ${first(t.name)}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
+          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}" aria-label="Cele – ${first(t.name)}${t.goalsToConfirm ? `, ${t.goalsToConfirm} do potwierdzenia` : ""}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
+          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
+          <td style="text-align:right">${t.status === "none"
+            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}" aria-label="Utwórz ocenę – ${first(t.name)}"`, "")
+            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}" aria-label="Dokończ ocenę – ${first(t.name)}"`)
+            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}" aria-label="Omów ocenę – ${first(t.name)}"`)
+            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}" aria-label="Otwórz ocenę – ${first(t.name)}"`)}</td></tr>`).join("");
+      return `
+        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)}. Zacznij od kroku 1, potem przejdź do kolejnych.</p>
           <ol class="s3-list">
             <li><span class="vn" aria-hidden="true">1</span><div><b>Ustal kryteria</b><span class="t">Rozmowa rozpoczynająca z pracownikiem. Asystent AI podpowie kryteria dla jego stanowiska.</span>
               ${kickEmp ? `<button class="btn" data-act="kickoff" data-emp="${kickEmp.id}" aria-label="Ustal kryteria – rozmowa rozpoczynająca – ${first(kickEmp.name)}">${KK_ICON("star")}<span>Ustal kryteria</span></button>` : ""}</div></li>
@@ -1010,7 +1095,7 @@
         <label class="f" for="eSit">Sytuacja</label><textarea id="eSit" required maxlength="1000">${esc(v.situation)}</textarea>
         <label class="f" for="eAct">Działanie</label><textarea id="eAct" required maxlength="1000">${esc(v.action)}</textarea>
         <label class="f" for="eRes">Rezultat</label><textarea id="eRes" required maxlength="1000">${esc(v.result)}</textarea>
-        <label class="f" for="eLink">Link do artefaktu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
+        <label class="f" for="eLink">Link do dokumentu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
         <label class="f" for="eTask">Nr zadania lub link do dokumentu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
         <div id="evErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
