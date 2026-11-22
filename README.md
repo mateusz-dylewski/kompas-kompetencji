@@ -2,6 +2,9 @@
 
 Wsparcie przełożonego w pierwszej i okresowej ocenie pracownika urzędu (model kompetencyjny, formularze, asystent rozmowy, plan rozwoju). Widok pracownika i przełożonego.
 
+> **Wersja pokazowa dla jury:** **https://kompas-kompetencji-iota.vercel.app**
+> Cały proces przełożonego krok po kroku (opis stanowiska → kryteria → ocena z modelem kompetencji → asystent formalny → asystent rozmowy → plan rozwoju → dokument). Odtwarza się sam albo klikasz sam. Dane przykładowe, kod pokazu w [`demo/`](demo/).
+
 ## Uruchomienie
 
 Wymagania: Node.js 22.13+ (wbudowany `node:sqlite` bez flagi). Serwer nie ma zależności npm. Generator PDF używa `pdf-lib` i fontów z `package.json` (`npm install`).
