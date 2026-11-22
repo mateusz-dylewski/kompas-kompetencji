@@ -1,0 +1,183 @@
+// Skrypty person (symulacja użytkowników) – Playwright.
+// Uruchomienie: node e2e/personas/run.mjs <persona|all>   persony: krystyna, michal, ewa, juror, klawiatura
+// Każda persona dostaje własny serwer (losowy port, osobny katalog danych, atrapa modelu AI – bez prawdziwego API),
+// przechodzi swoją ścieżkę w dwóch rozmiarach (desktop 1440 px, mobile 390 px), robi zrzut po każdym kroku
+// i zapisuje do e2e/personas/out/<persona>/: *.png oraz log.json (kroki, czasy, błędy konsoli, problemy a11y).
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+import { startServer } from '../../test/helpers.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PASS = 'Demo-kompas-2026!';
+const VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844, isMobile: true, hasTouch: true } };
+
+// Atrapa modelu AI (API Ollama): odpowiada po polsku po 800 ms, żeby widać było stan „model myśli”
+function startMockAI() {
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', c => { b += c; }); req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'qwen2.5:14b' }] }));
+      setTimeout(() => res.end(JSON.stringify({ message: { content: 'Tematy do omówienia:\n- współpraca w zespole\n\nPrzykłady z okresu:\n- Uzgodnienie harmonogramu z wykonawcą.\n\nPytania otwarte:\n- Co pomogło w osiągnięciu rezultatu?\n- Czego potrzebujesz w kolejnym okresie?' } })), 800);
+    });
+  }).listen(0, '127.0.0.1');
+  return new Promise(ok => srv.once('listening', () => ok(srv)));
+}
+
+// Wspólne kroki
+const login = email => async p => {
+  await p.fill('#lEmail', email); await p.fill('#lPass', PASS);
+  await p.click('#loginForm button[type=submit]');
+  await p.waitForSelector('#view, main', { timeout: 8000 });
+};
+const nav = view => async (p, vp) => {
+  const sel = vp === 'mobile' ? `.bottom [data-nav="${view}"]` : `.side [data-nav="${view}"]`;
+  const loc = p.locator(sel);
+  if (await loc.count()) await loc.first().click(); else await p.locator(`[data-nav="${view}"]`).first().click();
+  await p.waitForTimeout(400);
+};
+const clickAct = (act, opts = {}) => async p => { await p.locator(`[data-act="${act}"]${opts.id ? `[data-id="${opts.id}"]` : ''}`).first().click(); await p.waitForTimeout(opts.wait ?? 500); };
+const closeModal = async p => { if (await p.locator('#modal').count()) { await p.keyboard.press('Escape'); await p.waitForTimeout(200); if (await p.locator('#modal').count()) await p.locator('#modal [data-act="closeModal"]').first().click(); } };
+const waitAI = async p => { await p.waitForFunction(() => !document.querySelector('.ai-thinking, .thinking'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300); };
+
+// Scenariusze person: lista [nazwa kroku, funkcja]
+const SCENARIOS = {
+  // Pani Krystyna – naczelniczka, ocena okresowa w 20 minut (a) kryteria, (b) ocena, (c) rozmowa
+  krystyna: [
+    ['logowanie-ekran', async () => {}],
+    ['logowanie', login('przelozony@demo.kk')],
+    ['start', async () => {}],
+    ['a-kryteria-rozmowa-rozpoczynajaca', clickAct('kickoff', { wait: 800 })],
+    ['a-zamknij', closeModal],
+    ['b-oceny', nav('evals')],
+    ['b-kreator-otworz', async p => { await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
+    ['b-kreator-krok-2', async p => { await p.locator('[data-wiz="next"]').first().click(); await p.waitForTimeout(500); }],
+    ['b-kreator-krok-3', async p => { await p.locator('[data-wiz="next"]').first().click(); await p.waitForTimeout(500); }],
+    ['b-informacje', nav('evidence')],
+    ['b-zestawienie', nav('summary')],
+    ['c-miesiac', nav('month')],
+    ['c-brief-rozmowy', async p => { await clickAct('aiBrief', { wait: 300 })(p); await waitAI(p); }],
+  ],
+  // Michał – specjalista, telefon: wyniki i rozwój (c)
+  michal: [
+    ['logowanie', login('pracownik1@demo.kk')],
+    ['start', async () => {}],
+    ['c-przygotuj-sie-do-rozmowy', async p => { if (await p.locator('[data-act="aiPrep"]').count()) { await clickAct('aiPrep', { wait: 300 })(p); await waitAI(p); } }],
+    ['c-cele', nav('goals')],
+    ['c-profil-plan-rozwoju', nav('profile')],
+    ['b-oceny', nav('evals')],
+    ['b-podglad-oceny', async p => { if (await p.locator('[data-act="readEval"]').count()) { await p.locator('[data-act="readEval"]').first().click(); await p.waitForTimeout(800); } }],
+    ['b-szczegoly-kryterium', async p => { const d = p.locator('details.comp summary').first(); if (await d.count()) { await d.click(); await p.waitForTimeout(500); } }],
+  ],
+  // Ewa z kadr / BDG – kryteria i zgodność z procedurą (a), (b)
+  ewa: [
+    ['logowanie', login('przelozony@demo.kk')],
+    ['a-rozmowa-rozpoczynajaca-kryteria', clickAct('kickoff', { wait: 800 })],
+    ['a-zamknij', closeModal],
+    ['b-oceny', nav('evals')],
+    ['b-kreator-kryteria', async p => { await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
+    ['b-dziennik-zdarzen', nav('log')],
+    ['ustawienia-modulow', nav('settings')],
+    ['b-wyniki-zespolu', nav('results')],
+  ],
+  // Juror – 3 minuty: pierwsze wrażenie, przełożony, pracownik
+  juror: [
+    ['pierwsze-wrazenie-logowanie', async () => {}],
+    ['przelozony-start', login('przelozony@demo.kk')],
+    ['a-kryteria', clickAct('kickoff', { wait: 800 })],
+    ['a-zamknij', closeModal],
+    ['b-kreator-oceny', async p => { await nav('evals')(p, 'desktop').catch(() => {}); await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
+    ['c-brief', async p => { await nav('month')(p, 'desktop').catch(() => {}); await clickAct('aiBrief', { wait: 300 })(p); await waitAI(p); }],
+    ['c-zamknij', closeModal],
+    ['pracownik-start', async p => { await p.locator('[data-act="logout"]').first().click(); await p.waitForTimeout(600); await login('pracownik1@demo.kk')(p); }],
+    ['c-pracownik-profil', nav('profile')],
+  ],
+  // Tylko klawiatura (i czytnik ekranu): logowanie i nawigacja bez myszy
+  klawiatura: [
+    ['logowanie-tab', async p => { await p.keyboard.press('Tab'); await p.keyboard.press('Tab'); await p.keyboard.press('Tab'); }],
+    ['logowanie-klawiatura', async p => { await p.focus('#lEmail'); await p.keyboard.type('przelozony@demo.kk'); await p.keyboard.press('Tab'); await p.keyboard.type(PASS); await p.keyboard.press('Enter'); await p.waitForSelector('#view, main', { timeout: 8000 }); }],
+    ['start-tab-x8', async p => { for (let i = 0; i < 8; i++) await p.keyboard.press('Tab'); }],
+    ['enter-na-fokusie', async p => { await p.keyboard.press('Enter'); await p.waitForTimeout(600); }],
+    ['escape', async p => { await p.keyboard.press('Escape'); await p.waitForTimeout(300); }],
+    ['tab-x6', async p => { for (let i = 0; i < 6; i++) await p.keyboard.press('Tab'); }],
+  ],
+};
+
+// Proste kontrole dostępności na bieżącym ekranie
+const a11yCheck = p => p.evaluate(() => {
+  const out = [];
+  const vis = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  document.querySelectorAll('img').forEach(i => { if (!i.hasAttribute('alt')) out.push(`img bez alt: ${i.src.slice(-40)}`); });
+  document.querySelectorAll('input, select, textarea').forEach(i => {
+    if (i.type === 'hidden' || !vis(i)) return;
+    const named = i.labels?.length || i.getAttribute('aria-label') || i.getAttribute('aria-labelledby') || i.title;
+    if (!named) out.push(`pole bez etykiety: ${i.outerHTML.slice(0, 80)}`);
+  });
+  document.querySelectorAll('button, a[href]').forEach(b => { if (vis(b) && !(b.textContent.trim() || b.getAttribute('aria-label') || b.title)) out.push(`przycisk/link bez nazwy: ${b.outerHTML.slice(0, 80)}`); });
+  const h1 = [...document.querySelectorAll('h1')].filter(vis).length;
+  if (h1 !== 1) out.push(`liczba widocznych h1: ${h1}`);
+  const a = document.activeElement;
+  const focus = a && a !== document.body ? `${a.tagName.toLowerCase()} „${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 40)}” outline=${getComputedStyle(a).outlineStyle}/${getComputedStyle(a).outlineWidth}` : 'body';
+  return { issues: out, focus };
+});
+
+async function runPersona(name) {
+  const steps = SCENARIOS[name];
+  if (!steps) throw new Error(`Nieznana persona: ${name}`);
+  const outDir = path.join(HERE, 'out', name);
+  fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recursive: true });
+  const mock = await startMockAI();
+  const srv = await startServer({ KK_AI_URL: `http://127.0.0.1:${mock.address().port}` });
+  const browser = await chromium.launch();
+  const log = { persona: name, started: new Date().toISOString(), runs: {} };
+  try {
+    for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
+      const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: !!vp.isMobile, hasTouch: !!vp.hasTouch, locale: 'pl-PL' });
+      const p = await ctx.newPage();
+      const run = { consoleErrors: [], pageErrors: [], failedRequests: [], steps: [] };
+      p.on('console', m => { if (m.type() === 'error') run.consoleErrors.push(m.text().slice(0, 300)); });
+      p.on('pageerror', e => run.pageErrors.push(String(e).slice(0, 300)));
+      p.on('response', r => { if (r.status() >= 500) run.failedRequests.push(`${r.status()} ${r.url().replace(srv.base, '')}`); });
+      const t0 = Date.now();
+      await p.goto(srv.base, { waitUntil: 'networkidle' });
+      run.initialLoadMs = Date.now() - t0;
+      let i = 0;
+      for (const [stepName, fn] of steps) {
+        i++;
+        const st = { step: stepName, ok: true };
+        const t = Date.now();
+        try { await fn(p, vpName); await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}); }
+        catch (e) { st.ok = false; st.error = String(e.message || e).split('\n')[0].slice(0, 200); }
+        st.ms = Date.now() - t;
+        const file = `${String(i).padStart(2, '0')}-${stepName}-${vpName}.png`;
+        await p.screenshot({ path: path.join(outDir, file), fullPage: vpName === 'desktop' ? false : false }).catch(() => {});
+        st.screenshot = file;
+        const a = await a11yCheck(p).catch(() => ({ issues: ['a11y: nie udało się sprawdzić'], focus: '' }));
+        st.a11y = a.issues; st.focus = a.focus;
+        run.steps.push(st);
+      }
+      log.runs[vpName] = run;
+      await ctx.close();
+    }
+  } finally {
+    await browser.close(); await srv.stop(); mock.close();
+  }
+  const sum = Object.fromEntries(Object.entries(log.runs).map(([k, r]) => [k, {
+    stepsOk: `${r.steps.filter(s => s.ok).length}/${r.steps.length}`, failed: r.steps.filter(s => !s.ok).map(s => `${s.step}: ${s.error}`),
+    consoleErrors: r.consoleErrors.length + r.pageErrors.length, http5xx: r.failedRequests.length, initialLoadMs: r.initialLoadMs,
+    slowestStep: r.steps.reduce((a, s) => (s.ms > (a?.ms || 0) ? s : a), null)?.step, maxStepMs: Math.max(...r.steps.map(s => s.ms)),
+    a11yIssues: [...new Set(r.steps.flatMap(s => s.a11y))].slice(0, 15),
+  }]));
+  log.summary = sum;
+  fs.writeFileSync(path.join(outDir, 'log.json'), JSON.stringify(log, null, 2));
+  return sum;
+}
+
+const arg = process.argv[2] || 'all';
+const names = arg === 'all' ? Object.keys(SCENARIOS) : [arg];
+for (const n of names) {
+  const s = await runPersona(n);
+  console.log(`== ${n}`); console.log(JSON.stringify(s, null, 1));
+}

@@ -7,3 +7,4 @@ data/
 .claude/launch.json
 .env
 .env.*
+e2e/personas/out/
