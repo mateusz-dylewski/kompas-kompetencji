@@ -117,6 +117,51 @@ const kbNav = view => async (p, vp) => {
   return r;
 };
 
+// Kreator oceny: na bieżącym kroku wybierz 5 pkt dla każdego wskaźnika, uzupełnij puste przykłady i ocenę cząstkową
+const wizFill = async p => {
+  const info = { rated: 0, examples: 0, partial: 0 };
+  const names = await p.evaluate(() => [...new Set([...document.querySelectorAll('input[type=radio][data-rate]')].map(i => i.name))]);
+  for (const n of names) {
+    await p.locator(`input[data-rate][name="${n}"][value="2"]`).first().check({ force: true }).catch(() => {}); info.rated++; await p.waitForTimeout(120);
+  }
+  const tas = p.locator('textarea[data-ex]'); const nt = await tas.count();
+  for (let i = 0; i < nt; i++) { const t = tas.nth(i); if (!(await t.inputValue()) && await t.isEditable()) { await t.fill('Terminowo przygotowano dokument i uzgodniono go z zespołem.'); info.examples++; } }
+  const parts = await p.evaluate(() => [...new Set([...document.querySelectorAll('input[type=radio][data-partial]:not(:disabled)')].map(i => i.name))]);
+  for (const n of parts) { await p.locator(`input[data-partial][name="${n}"][value="5"]`).first().check({ force: true }).catch(() => {}); info.partial++; }
+  await p.waitForTimeout(400);
+  return info;
+};
+const wizStepNext = async p => {
+  const info = await wizFill(p);
+  const n = p.locator('[data-wiz="next"]:not([disabled])');
+  info.advanced = false;
+  if (await n.count()) { await n.first().click(); await p.waitForTimeout(500); info.advanced = true; }
+  info.label = (await p.locator('.wiz-progress small').first().innerText().catch(() => '')).trim();
+  return info;
+};
+const ratingSteps = Array.from({ length: 8 }, (_, k) => [`b-kreator-krok-${k + 2}`, wizStepNext]);
+const submitStep = async p => {
+  for (let i = 0; i < 12 && await p.locator('[data-wiz="next"]:not([disabled])').count(); i++) await wizStepNext(p);
+  if (!(await p.locator('[data-act="submitEval"]').count())) return { submitOk: null, missing: [], note: 'brak przycisku „Złóż ocenę” (ocena już złożona lub brak szkicu)' };
+  const dis = await p.locator('[data-act="submitEval"]').first().isDisabled();
+  if (dis) { const miss = await p.evaluate(() => [...document.querySelectorAll('#view .note, #view .warn, #view li')].map(x => x.innerText.replace(/\s+/g, ' ').slice(0, 120)).filter(t => /brak|uzupełnij|wymagan/i.test(t)).slice(0, 15)); return { submitOk: false, submitDisabled: true, missing: miss }; }
+  p.once('dialog', d => d.accept());
+  await p.locator('[data-act="submitEval"]').first().click();
+  await p.waitForTimeout(1200);
+  const left = await p.locator('[data-act="submitEval"]').count();
+  const toast = await p.evaluate(() => (document.querySelector('.toast, [role=status], [role=alert]')?.innerText || '').slice(0, 200));
+  const missing = await p.evaluate(() => [...document.querySelectorAll('#view .missing li, #view [class*=miss] li, #view .note.warn li, .note.warn')].map(x => x.innerText.replace(/\s+/g, ' ').slice(0, 120)).slice(0, 15));
+  const submitted = !left || /złożon/i.test(toast);
+  return { submitOk: submitted, missing: submitted ? [] : missing, toast };
+};
+const ewaPdf = async p => {
+  const href = await p.evaluate(() => [...document.querySelectorAll('a[href*="format=pdf"]')].map(a => a.href)[0] || null);
+  if (!href) return { pdfOk: false, pdfNote: 'brak linku PDF' };
+  const r = await p.request.get(href);
+  const ct = r.headers()['content-type'] || '';
+  return { pdfOk: r.status() === 200 && /pdf/i.test(ct), pdfStatus: r.status(), pdfType: ct, pdfBytes: (await r.body()).length };
+};
+
 // Scenariusze person: lista [nazwa kroku, funkcja]
 const SCENARIOS = {
   // Awaria AI (uruchamiać z PERSONA_AI=down): czy użytkownik widzi komunikat zamiast pustki
@@ -146,8 +191,9 @@ const SCENARIOS = {
     ['a-zamknij', closeModal],
     ['b-oceny', nav('evals')],
     ['b-kreator-otworz', async p => { await p.locator('[data-act="openEval"]').first().click(); await p.waitForTimeout(800); }],
-    ['b-kreator-krok-2', async p => { await p.locator('[data-wiz="next"]').first().click(); await p.waitForTimeout(500); }],
-    ['b-kreator-krok-3', async p => { await p.locator('[data-wiz="next"]').first().click(); await p.waitForTimeout(500); }],
+    ...ratingSteps,
+    ['b-zloz-ocene', submitStep],
+    ['b-zamknij-ankiete', closeModal],
     ['b-informacje', nav('evidence')],
     ['b-zestawienie', nav('summary')],
     ['c-miesiac', nav('month')],
@@ -163,6 +209,13 @@ const SCENARIOS = {
     ['b-oceny', nav('evals')],
     ['b-podglad-oceny', async p => { if (await p.locator('[data-act="readEval"]').count()) { await p.locator('[data-act="readEval"]').first().click(); await p.waitForTimeout(800); } }],
     ['b-szczegoly-kryterium', async p => { const d = p.locator('details.comp summary').first(); if (await d.count()) { await d.click(); await p.waitForTimeout(500); } }],
+    ['b-zapoznalem-sie', async p => {
+      const b = p.locator('[data-act="ackEval"]');
+      if (!(await b.count())) return { ackOk: null, note: 'brak przycisku zapoznania (już potwierdzone lub brak złożonej oceny)', sigBox: await p.locator('#sigBox').count() };
+      await b.first().click(); await p.waitForTimeout(1000);
+      const txt = await p.locator('#sigBox').innerText().catch(() => '');
+      return { ackOk: !(await p.locator('[data-act="ackEval"]').count()) && /Zapoznanie:\s*\d{4}/.test(txt), sigText: txt.replace(/\s+/g, ' ').slice(0, 160) };
+    }],
   ],
   // Ewa z kadr / BDG – kryteria i zgodność z procedurą (a), (b)
   ewa: [
@@ -174,6 +227,15 @@ const SCENARIOS = {
     ['b-dziennik-zdarzen', nav('log')],
     ['ustawienia-modulow', nav('settings')],
     ['b-wyniki-zespolu', nav('results')],
+    ['b-podglad-zlozonej-oceny', async (p, vp) => {
+      await nav('evals')(p, vp);
+      const b = p.locator('[data-act="readEval"]');
+      if (!(await b.count())) return { sigVisible: false, note: 'brak złożonej oceny do podglądu' };
+      await b.first().click(); await p.waitForTimeout(900);
+      await p.locator('#sigBox').waitFor({ timeout: 4000 }).catch(() => {});
+      return { sigVisible: /Podpisy i zapoznanie/.test(await p.locator('#sigBox').innerText().catch(() => '')) };
+    }],
+    ['b-pobierz-pdf', ewaPdf],
   ],
   // Juror – 3 minuty: pierwsze wrażenie, przełożony, pracownik
   juror: [
