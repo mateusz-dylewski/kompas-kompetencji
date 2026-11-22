@@ -90,6 +90,8 @@ const nav = v => async (p, vp) => {
   await p.locator(`[data-nav="${v}"]:visible`).first().click();
 };
 const act = (a, extra = '') => async p => { await p.locator(`[data-act="${a}"]${extra}:visible`).first().click(); await p.waitForTimeout(700); };
+// Krok opcjonalny: stan mógł zostać zmieniony w poprzednim przebiegu (ta sama baza dla desktopu i telefonu)
+const actIf = a => async p => { const b = p.locator(`[data-act="${a}"]:visible`); if (await b.count()) { await b.first().click(); await p.waitForTimeout(700); } };
 const close = async p => { await p.keyboard.press('Escape'); await p.waitForTimeout(250); };
 
 const MGR = [
@@ -106,6 +108,9 @@ const MGR = [
   ['oceny', nav('evals')],
   ['kreator-krok-1', act('openEval')],
   ...[2, 3, 4, 5, 6, 7, 8].map(n => [`kreator-krok-${n}`, async p => { const b = p.locator('[data-wiz="next"]:visible'); if (await b.count()) await b.first().click(); }]),
+  ['oceny-po-zlozeniu', nav('evals')],
+  ['podglad-oceny-z-podpisami', act('readEval')],
+  ['podpisz-ocene', actIf('signEval')],
   ['miesiac', nav('month')],
   ['okno-brief', act('aiBrief')],
   ['zamknij-4', close],
@@ -126,6 +131,7 @@ const EMP = [
   ['informacje-i-opinie', nav('evidence')],
   ['oceny', nav('evals')],
   ['podglad-oceny', act('readEval')],
+  ['zapoznanie-z-ocena', actIf('ackEval')],
   ['asystent-ai', nav('ai')],
 ];
 

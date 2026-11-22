@@ -223,6 +223,7 @@ const docHash = ev => {
   return crypto.createHash('sha256').update(`${ev.id}|${ev.typ}|${ev.period_from}|${ev.period_to}|${data}`).digest('hex');
 };
 const sigValue = (hash, signerId, role, at) => crypto.createHmac('sha256', SIGN_KEY).update(`${hash}|${signerId}|${role}|${at}`).digest('hex');
+const SIG_NOTE = 'Podpis elektroniczny systemu (SHA-256 + HMAC); integracja z podpisem kwalifikowanym lub zaufanym przy wdrożeniu';
 const aiLog = (evalId, uid, action, input, out) => db.prepare('INSERT INTO ai_log(eval_id,user_id,action,model,input_sha256,output_text,source,at) VALUES(?,?,?,?,?,?,?,?)')
   .run(evalId ?? null, uid, action, AI_MODEL, crypto.createHash('sha256').update(String(input)).digest('hex'), String(out.text || ''), out.source || '', now());
 
@@ -2123,8 +2124,7 @@ route('GET', '/api/audit', async (req, res, u) => {
   send(res, 200, { audit: rows, chainOk: broken === null, brokenAt: broken, ai: aiRows });
 });
 
-// ---------- Podpis mockowy, zapoznanie i sprzeciw (art. 83 ustawy o służbie cywilnej) ----------
-const SIG_NOTE = 'Podpis elektroniczny systemu (SHA-256 + HMAC); integracja z podpisem kwalifikowanym lub zaufanym przy wdrożeniu';
+// ---------- Podpis systemu, zapoznanie i sprzeciw (art. 83 ustawy o służbie cywilnej) ----------
 route('POST', '/api/evals/:id/sign', async (req, res, u, p) => {
   const ev = ownEval(u, p.id);
   if (!ev || ev.evaluator_id !== u.id || u.role !== 'przelozony') return fail(res, 403, 'Brak dostępu.');

@@ -12,7 +12,7 @@
     : `<span class="${cls} av-ph" aria-hidden="true">${esc(String(name || "?").split(" ").map(x => x[0]).slice(0, 2).join(""))}</span>`;
   const actBtn = (icon, label, attrs, cls = "g") => `<button class="btn sm ${cls} act-btn" ${attrs}>${KK_ICON(icon)}<span>${label}</span></button>`;
   const compIc = k => KK_COMP_ICON(k, "ic-svg comp-ic");
-  const fmt = n => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
+  const fmt = n => (n === null || n === undefined ? "—" : Number(n).toFixed(1).replace(".", ","));  // przecinek dziesiętny (jak w arkuszu PDF)
   const MODEL = window.KK_MODEL || [];
   const TYP = { pierwsza: "Pierwsza ocena", B: "Okresowa – Arkusz B (osoby kierujące zespołem)", C: "Okresowa – Arkusz C (pozostałe stanowiska)" };
   const STATUS = { draft: ["Szkic", "wr"], submitted: ["Złożona", "info"], discussed: ["Omówiona", "ok"], none: ["Brak oceny", ""] };
@@ -447,7 +447,7 @@
   function countUp(el) {
     const to = parseFloat(el.dataset.to); if (isNaN(to)) return;
     const dec = el.dataset.dec ? +el.dataset.dec : 0; const t0 = performance.now(); const dur = 400;
-    const step = t => { const p = Math.min(1, (t - t0) / dur); el.textContent = (to * (1 - Math.pow(1 - p, 3))).toFixed(dec); if (p < 1) requestAnimationFrame(step); };
+    const step = t => { const p = Math.min(1, (t - t0) / dur); el.textContent = (to * (1 - Math.pow(1 - p, 3))).toFixed(dec).replace(".", ","); if (p < 1) requestAnimationFrame(step); };
     requestAnimationFrame(step);
   }
   // Tabele na telefonie jako karty: każda komórka dostaje etykietę z nagłówka kolumny (CSS: td::before)
@@ -870,7 +870,7 @@
           <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
           <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
           <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
-          ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
+          ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(plDT(d.kickoff.ackAt.slice(0, 10)))}. Od tego dnia liczy się okres oceny.</p>`
             : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
           <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom ? isoToPl(u2.periodFrom) : "—")} – ${esc(u2.periodTo ? isoToPl(u2.periodTo) : "—")} · termin sporządzenia: <b>${esc(u2.terminOceny ? isoToPl(u2.terminOceny) : "nie ustalono")}</b></p>
@@ -910,7 +910,7 @@
       const edit = isMgr && e.status === "draft";
       return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
         <td>${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}</td><td>${pill(e.status)}</td>
-        ${isMgr ? `<td>${e.status === "draft" ? "—" : e.ackAt ? `zapoznano ${esc(plDT(e.ackAt).slice(0, 10))}` : "czeka na zapoznanie"}</td>` : ""}
+        ${isMgr ? `<td>${e.status === "draft" ? "—" : e.ackAt ? `zapoznano ${esc(plDT(e.ackAt).slice(0, 10))}` : "pracownik jeszcze nie potwierdził"}</td>` : ""}
         <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}" aria-label="Podgląd oceny – ${first(isMgr ? names[e.employeeId] : S.user.name)}"`)}</td></tr>`;
     }).join("");
     return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th>${isMgr ? "<th>Zapoznanie</th>" : ""}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
@@ -1565,7 +1565,7 @@
     const box = $("#sigBox"); if (!box) return;
     try {
       const r = await api("GET", `/api/evals/${id}/signatures`);
-      const rows = r.signatures.map(g => `<tr><td>${g.role === "przelozony" ? "Podpis oceniającego" : "Zapoznanie ocenianego"}</td><td>${esc(g.name)}</td><td>${esc(g.signed_at.slice(0, 16).replace("T", " "))}</td><td><span class="tag ${g.valid && g.unchanged ? "ok" : "bad"}">${g.valid ? (g.unchanged ? "weryfikacja OK" : "treść zmieniona") : "błąd podpisu"}</span></td></tr>`).join("");
+      const rows = r.signatures.map(g => `<tr><td>${g.role === "przelozony" ? "Podpis oceniającego" : "Zapoznanie ocenianego"}</td><td>${esc(g.name)}</td><td>${esc(plDT(g.signed_at))}</td><td><span class="tag ${g.valid && g.unchanged ? "ok" : "bad"}">${g.valid ? (g.unchanged ? "weryfikacja OK" : "treść zmieniona") : "błąd podpisu"}</span></td></tr>`).join("");
       const isMgr = S.user.role === "przelozony";
       const hasMgrSig = r.signatures.some(g => g.role === "przelozony");
       const ackDone = !!r.ackAt;
@@ -1573,11 +1573,11 @@
       box.innerHTML = `<h2>Podpisy i zapoznanie</h2>
         <p class="muted">Podpis potwierdza integralność treści oceny (skrót SHA-256).</p>
         ${rows ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Osoba</th><th scope="col">Czas</th><th scope="col">Weryfikacja</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">Brak podpisów.</p>`}
-        ${isMgr && r.objectionAt && !r.objectionResult ? `<div class="note warn"><b>Sprzeciw pracownika</b> z ${esc(r.objectionAt.slice(0, 10))}: ${esc(r.objectionText || "")}<br><b>Rozpatrz do:</b> ${esc((r.decisionDeadline || "").slice(0, 10))} (14 dni, art. 83 ust. 3).
+        ${isMgr && r.objectionAt && !r.objectionResult ? `<div class="note warn"><b>Sprzeciw pracownika</b> z ${esc(plDT((r.objectionAt).slice(0, 10)))}: ${esc(r.objectionText || "")}<br><b>Rozpatrz do:</b> ${esc(plDT((r.decisionDeadline || "").slice(0, 10)))} (14 dni, art. 83 ust. 3).
           <div class="btns" style="justify-content:flex-start"><button class="btn" data-act="decideObjection" data-id="${id}" data-result="uwzglednione">Uwzględnij – popraw ocenę</button><button class="btn g" data-act="decideObjection" data-id="${id}" data-result="nieuwzglednione">Nie uwzględniaj</button></div></div>` : ""}
         ${isMgr && r.objectionResult ? `<p class="muted">Sprzeciw rozpatrzony: <b>${esc(r.objectionResult)}</b>${r.revision ? ` · wersja oceny: ${r.revision + 1}` : ""}</p>` : ""}
         ${isMgr && status !== "draft" && !hasMgrSig ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="signEval" data-id="${id}">Podpisz ocenę</button></div>` : ""}
-        ${!isMgr ? `<p><b>Zapoznanie:</b> ${ackDone ? esc(r.ackAt.slice(0, 10)) : "jeszcze nie"}${r.objectionDeadline ? ` · <b>Termin na sprzeciw:</b> ${esc(r.objectionDeadline.slice(0, 10))}` : ""}${r.objectionAt ? ` · <b>Sprzeciw złożono:</b> ${esc(r.objectionAt.slice(0, 10))}` : ""}</p>
+        ${!isMgr ? `<p><b>Zapoznanie:</b> ${ackDone ? esc(plDT((r.ackAt).slice(0, 10))) : "jeszcze nie"}${r.objectionDeadline ? ` · <b>Termin na sprzeciw:</b> ${esc(plDT((r.objectionDeadline).slice(0, 10)))}` : ""}${r.objectionAt ? ` · <b>Sprzeciw złożono:</b> ${esc(plDT((r.objectionAt).slice(0, 10)))}` : ""}</p>
           ${!ackDone ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="ackEval" data-id="${id}">Zapoznałem(-łam) się z oceną</button></div>` : ""}
           ${ackDone && !r.objectionAt && !deadlinePassed ? `<div class="btns" style="justify-content:flex-start"><button class="btn g" data-act="objectionEval" data-id="${id}">Złóż sprzeciw</button></div>` : ""}
           ${r.objectionAt ? `<p class="note warn">Sprzeciw został złożony. Przełożony rozpatrzy go zgodnie z procedurą.</p>` : ""}` : ""}`;
@@ -1603,6 +1603,7 @@
     if ((m = /^(\d+):(\w+)(?:: (.*))?$/.exec(t)) && act === "objection_decision") return `Ocena nr ${m[1]} – ${m[2]}${m[3] ? ": " + m[3] : ""}`;
     if ((m = /^(\w+)=([01])$/.exec(t)) && act === "setting") return `${m[1]}: ${m[2] === "1" ? "włączony" : "wyłączony"}`;
     if (t === "session_rotated") return "Nowa sesja";
+    if (!t) return /login|logout|session/.test(act) ? "Własne konto" : "—";
     if (/^\d+$/.test(t)) return /eval|download|^ai_(talk|formal)$/.test(act) ? `Ocena nr ${t}` : /employee|activat|password/.test(act) ? `Konto nr ${t}` : `Nr ${t}`;
     return t;
   }
