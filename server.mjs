@@ -2013,7 +2013,8 @@ route('POST', '/api/ai/chat', async (req, res, u) => {
     aiLog(null, u.id, 'chat', q, { text, source: 'ai' });
     send(res, 200, { text, source: 'ai', model: AI_MODEL });
   } catch {
-    const hit = /ile|liczb|ocen.*(zrobi|do|przygot)|sprzeciw.*(ile|ma)/i.test(q) ? [null, data + ' Szczegóły w module Oceny.'] : CHAT_FALLBACK.find(([re]) => re.test(q));
+    // Najpierw temat pytania (z bazy wiedzy, ze źródłem), dopiero potem liczby z danych przełożonego
+    const hit = CHAT_FALLBACK.find(([re]) => re.test(q)) || (/ile|liczb|ocen.*(zrobi|do|przygot)/i.test(q) ? [null, data + ' Szczegóły w module Oceny.'] : null);
     const text = (hit ? hit[1] : 'Nie mam tej informacji w bazie wiedzy, więc nie odpowiem, żeby nie podać niezweryfikowanej treści. Zapytaj dział kadr albo zadaj pytanie o sprzeciw, cykl oceny, skalę wskaźników, kryteria obowiązkowe lub podpisy.') + '\n\n' + AI_RULE_NOTE;
     aiLog(null, u.id, 'chat', q, { text, source: 'rules' });
     send(res, 200, { text, source: 'rules' });
