@@ -14,7 +14,7 @@
   const compIc = k => KK_COMP_ICON(k, "ic-svg comp-ic");
   const fmt = n => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
   const MODEL = window.KK_MODEL || [];
-  const TYP = { pierwsza: "Pierwsza ocena", B: "Okresowa – kierownicza (Arkusz B)", C: "Okresowa – pozostałe stanowiska (Arkusz C)" };
+  const TYP = { pierwsza: "Pierwsza ocena", B: "Okresowa – Arkusz B (osoby kierujące zespołem)", C: "Okresowa – Arkusz C (pozostałe stanowiska)" };
   const STATUS = { draft: ["Szkic", "wr"], submitted: ["Złożona", "info"], discussed: ["Omówiona", "ok"], none: ["Brak oceny", ""] };
   const LEVELS5 = ["Znacznie poniżej", "Poniżej", "Na poziomie", "Powyżej", "Znacznie powyżej"];
   const PTS5 = [1, 3, 5, 7, 9];
@@ -31,7 +31,7 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Informacje i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
+      ["evidence", "Informacje i informacja zwrotna", "book", "Obserwacje, informacja zwrotna i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
@@ -67,8 +67,8 @@
     try { r = await fetch(url, opt); }
     catch (_) { const e = new Error("Brak połączenia z serwerem. Uruchom w terminalu: node server.mjs i otwórz http://localhost:8080"); e.status = 0; throw e; }
     let j = {}; try { j = await r.json(); } catch (_) {}
-    if (r.status === 401 && url !== "/api/login" && url !== "/api/password") { S.user = null; renderLogin(); throw new Error("Sesja wygasła. Zaloguj się ponownie."); }
-    if (r.status === 403 && j.code === "password_change_required") { renderPasswordChange(); throw new Error(j.error); }
+    if (r.status === 401 && url !== "/api/login" && url !== "/api/password") { S.user = null; renderLogin(); throw Object.assign(new Error("Sesja wygasła. Zaloguj się ponownie."), { status: 401 }); }
+    if (r.status === 403 && j.code === "password_change_required") { renderPasswordChange(); throw Object.assign(new Error(j.error), { status: 403 }); }
     if (!r.ok) { const e = new Error(j.error || "Wystąpił błąd."); e.data = j; e.status = r.status; throw e; }
     return j;
   }
@@ -76,6 +76,12 @@
     document.querySelectorAll(".toast").forEach(t => t.remove());
     const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 2800);
+  };
+  // Komunikaty z API (mają status/data) pokazujemy wprost; błędy kodu – tylko w konsoli, użytkownik widzi prosty komunikat
+  const errMsg = e => {
+    if (e && (e.status !== undefined || e.data)) return e.message;
+    console.warn(e);
+    return "Coś poszło nie tak. Odśwież stronę i spróbuj ponownie.";
   };
   // Link aktywacyjny: lokalnie pokazujemy go przełożonemu (demo); w produkcji trafia tylko na e-mail pracownika
   const activationInfo = a => openModal(`
@@ -96,8 +102,8 @@
       <p class="muted">Termin: 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny.${list[0] && list[0].ackAt ? ` Ostatnia rozmowa: ${esc(list[0].date)} (zapoznano).` : ""}</p>
       <form id="kForm" novalidate>
         <fieldset class="plain"><legend class="f">Arkusz</legend>
-          <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>B – kierujący zespołem</span></label>
-          <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>C – pozostałe stanowiska</span></label></fieldset>
+          <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>Arkusz B – osoby kierujące zespołem</span></label>
+          <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>Arkusz C – pozostałe stanowiska</span></label></fieldset>
         <label class="f" for="kDate">Data rozmowy</label><input id="kDate" type="date" required value="${esc(v.date)}">
         <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div>
           <div class="ai-crit"><button type="button" class="btn g" id="kAiBtn">${KK_ICON("star")}<span>Zaproponuj kryteria (AI)</span></button>
@@ -125,7 +131,7 @@
             pr.slice(0, S.maxExtra).forEach(p => { const x = document.querySelector(`[data-extra="${CSS.escape(p.k)}"]`); if (x) x.checked = true; });
             out.insertAdjacentHTML("beforeend", `<p class="muted" role="status">Zaznaczono. Możesz to zmienić przed zapisem.</p>`); ap.disabled = true;
           });
-        } catch (ex) { out.innerHTML = `<div class="err" role="alert">Nie udało się pobrać podpowiedzi: ${esc(ex.message)} Wybierz kryteria samodzielnie.</div>`; }
+        } catch (ex) { out.innerHTML = `<div class="err" role="alert">Nie udało się pobrać podpowiedzi: ${esc(errMsg(ex))} Wybierz kryteria samodzielnie.</div>`; }
         finally { stop(); b.disabled = false; }
       });
       $("#kForm").addEventListener("submit", async e => {
@@ -151,7 +157,7 @@
       $("#svForm").addEventListener("submit", async e => {
         e.preventDefault();
         const r = document.querySelector('[name="sv"]:checked'); if (!r) return toast("Wybierz wartość albo pomiń.");
-        try { await api("POST", `/api/evals/${evalId}/survey`, { rating: +r.value }); closeModal(); toast("Dziękujemy."); } catch (ex) { toast(ex.message); }
+        try { await api("POST", `/api/evals/${evalId}/survey`, { rating: +r.value }); closeModal(); toast("Dziękujemy."); } catch (ex) { toast(errMsg(ex)); }
       });
     });
   async function loadMetrics() {
@@ -267,7 +273,8 @@
   // Zmiana między dwiema ostatnimi ocenami okresowymi (bez średniej i prognozy)
   async function loadCompare(empId) {
     const box = $("#cmpBox"); if (!box) return;
-    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(ex.message)}</p>`; return; }
+    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { if (!box.isConnected) return; box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(errMsg(ex))}</p>`; return; }
+    if (!box.isConnected) return;
     const arrow = { wzrost: "▲ wzrost", spadek: "▼ spadek", "bez zmian": "= bez zmian" };
     box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2>` + (!r.available
       ? `<p class="muted">Porównanie pojawi się, gdy będą dwie złożone oceny okresowe (B lub C).</p>`
@@ -280,18 +287,19 @@
   const briefHtml = text => esc(text).replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => `<a href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}">[${id}]</a>`);
   async function briefModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
-    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
-    const stop = startThinking($("#brBody"));
-    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); $("#brBody").innerHTML = `<p class="muted">${esc(ex.message)}</p>`; return; }
-    stop(); S.briefJson = r.json;
+    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><p class="muted">Tematy, przykłady z zebranych informacji z odnośnikami do faktów, pytania otwarte. Bez ocen i punktów. Zwykle 10–30 s.</p><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
+    const body = $("#brBody");
+    const stop = startThinking(body);
+    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); if (body.isConnected) body.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; return; }
+    stop(); if (!body.isConnected) return; S.briefJson = r.json;
     const j = r.json;
-    $("#brBody").innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
+    body.innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
       <div class="tabs" role="tablist"><button class="btn sm" role="tab" aria-selected="true" data-act="briefTab" data-tab="brief">Brief</button><button class="btn sm g" role="tab" aria-selected="false" data-act="briefTab" data-tab="json">Fakty (JSON)</button></div>
       <div data-brief-pane="brief"><div class="ai-out brief-text">${briefHtml(r.brief)}</div>
         <h3>Fakty</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}</div>
       <div data-brief-pane="json" hidden><pre class="json-out">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></div>
       <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
-    bindActs($("#brBody"));
+    bindActs(body);
   }
   // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
   async function goalsModal(empId) {
@@ -321,7 +329,7 @@
   async function loadMonthGoals() {
     const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
     try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; fillTrends(S.month.employeeId); }
-    catch (ex) { box.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+    catch (ex) { box.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
   }
   // Po zmianie celu odśwież miejsce, w którym pracuje użytkownik
   async function refreshGoals() {
@@ -377,7 +385,7 @@
   const first = name => esc(String(name || "").replace(/ \(demo\)/, ""));
   function countUp(el) {
     const to = parseFloat(el.dataset.to); if (isNaN(to)) return;
-    const dec = el.dataset.dec ? +el.dataset.dec : 0; const t0 = performance.now(); const dur = 800;
+    const dec = el.dataset.dec ? +el.dataset.dec : 0; const t0 = performance.now(); const dur = 400;
     const step = t => { const p = Math.min(1, (t - t0) / dur); el.textContent = (to * (1 - Math.pow(1 - p, 3))).toFixed(dec); if (p < 1) requestAnimationFrame(step); };
     requestAnimationFrame(step);
   }
@@ -392,13 +400,13 @@
   function radar(scores) {
     const items = Object.entries(scores).filter(([, v]) => v.avg !== null);
     if (items.length < 3) return `<p class="muted">Wykres pojawi się, gdy ocenionych będzie co najmniej 3 kompetencje.</p>`;
-    const N = items.length, C = 150, R = 105;
+    const N = items.length, C = 190, R = 100;
     const pt = (i, r) => { const a = -Math.PI / 2 + i * 2 * Math.PI / N; return [C + r * Math.cos(a), C + r * Math.sin(a)]; };
     const rings = [0.33, 0.66, 1].map(f => `<polygon points="${items.map((_, i) => pt(i, R * f).join(",")).join(" ")}" fill="none" stroke="var(--ln)"/>`).join("");
     const axes = items.map((_, i) => { const [x, y] = pt(i, R); return `<line x1="${C}" y1="${C}" x2="${x}" y2="${y}" stroke="var(--ln)"/>`; }).join("");
     const poly = items.map(([, v], i) => pt(i, R * v.avg / 9).join(",")).join(" ");
-    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 22); return `<text x="${x}" y="${y}" font-size="10" text-anchor="middle" fill="var(--mu)">${esc(nameOf(k).slice(0, 16))}</text>`; }).join("");
-    return `<svg class="radar" viewBox="0 0 300 300" role="img" aria-label="Profil kompetencji">${rings}${axes}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg>`;
+    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 16), full = nameOf(k), short = full.length > 18 ? full.slice(0, 17).trim() + "…" : full, anc = x < C - 8 ? "end" : x > C + 8 ? "start" : "middle"; return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" font-size="11" text-anchor="${anc}" fill="var(--mu)"><title>${esc(full)}</title>${esc(short)}</text>`; }).join("");
+    return `<svg class="radar" viewBox="0 0 380 380" role="img" aria-label="Profil kompetencji">${rings}${axes}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg>`;
   }
   const scoreBars = scores => Object.entries(scores).map(([k, v]) => `
     <div class="sb"><div class="row"><span class="sb-l">${compIc(k)}${esc(nameOf(k))}</span><span class="muted">${v.avg === null ? "brak" : fmt(v.avg) + " pkt"}</span></div>${bar(v.avg)}</div>`).join("");
@@ -569,14 +577,14 @@
   // ---------- Powłoka: sticky menu boczne (desktop) + dolna nawigacja (mobile) ----------
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
-    const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">AI ${aiWhere()}</span>` : `<span class="pill off" title="Model AI jest niedostępny">AI wyłączone</span>`;
+    const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">Asystent AI: dostępny</span>` : `<span class="pill off" title="Model AI jest niedostępny – asystent podpowiada na podstawie reguł">Asystent AI: tryb podpowiedzi bez modelu</span>`;
     const navItems = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false);
     const mkBtn = ([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`;
     const navBtns = navItems.map(mkBtn).join("");
-    const needMore = navItems.length > 4;
+    const needMore = true;
     const mainItems = needMore ? navItems.slice(0, 4) : navItems, moreItems = needMore ? navItems.slice(4) : [];
     const moreActive = moreItems.some(([v]) => v === navView);
-    const bottomNav = `<nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${mainItems.length + (needMore ? 1 : 0)},1fr)">${mainItems.map(mkBtn).join("")}${needMore ? `<button type="button" class="more-btn" id="moreBtn" aria-haspopup="true" aria-expanded="false" aria-controls="morePanel" ${moreActive ? 'aria-current="true"' : ""}><span class="ic" aria-hidden="true">⋯</span><span class="lbl">Więcej</span></button>` : ""}${needMore ? `<div class="more-panel" id="morePanel" role="group" aria-label="Pozostałe pozycje menu" hidden>${moreItems.map(mkBtn).join("")}</div>` : ""}</nav>`;
+    const bottomNav = `<nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${mainItems.length + (needMore ? 1 : 0)},1fr)">${mainItems.map(mkBtn).join("")}${needMore ? `<button type="button" class="more-btn" id="moreBtn" aria-haspopup="true" aria-expanded="false" aria-controls="morePanel" ${moreActive ? 'aria-current="true"' : ""}><span class="ic" aria-hidden="true">⋯</span><span class="lbl">Więcej</span></button>` : ""}${needMore ? `<div class="more-panel" id="morePanel" role="group" aria-label="Pozostałe pozycje menu" hidden>${moreItems.map(mkBtn).join("")}<button type="button" data-act="logout"><span class="ic" aria-hidden="true">⎋</span><span class="lbl">Wyloguj</span></button></div>` : ""}</nav>`;
     return `
       <div class="app">
         <a class="skip" href="#view">Przejdź do treści</a>
@@ -594,7 +602,7 @@
             <div class="brandmark" aria-hidden="true">K</div>
             <div class="top-t"><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub)}</div></div>
             <span class="spacer"></span>${aiPill}
-            <button class="btn sm g hdr-logout" data-act="logout" aria-label="Wyloguj">⎋</button>
+            <button class="btn sm g hdr-logout" data-act="logout" ><span aria-hidden="true">⎋</span> Wyloguj</button>
           </header>
           <main class="view" id="view" tabindex="-1">
             ${opts.hidePageHead ? "" : `<div class="page-h"><h1>${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
@@ -733,7 +741,7 @@
   function go(view) {
     S.view = view;
     if (view === "wizard" || view === "evalView") return render();
-    refreshData().then(render).catch(e => toast(e.message));
+    refreshData().then(render).catch(e => toast(errMsg(e)));
     window.scrollTo(0, 0);
   }
   function bindShell() {
@@ -749,7 +757,7 @@
       document.addEventListener("click", e => { if (!mp.hidden && !mp.contains(e.target) && !mb.contains(e.target)) closeMore(false); });
     }
     document.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
-    document.querySelectorAll("[data-go-eval]").forEach(b => b.addEventListener("click", () => openWizard(+b.dataset.goEval).catch(e => toast(e.message))));
+    document.querySelectorAll("[data-go-eval]").forEach(b => b.addEventListener("click", () => openWizard(+b.dataset.goEval).catch(e => toast(errMsg(e)))));
   }
 
   // ---------- Pracownik ----------
@@ -765,97 +773,21 @@
       else if (last && last.status === "discussed") next = { t: "Ocena omówiona – ustal cele na kolejny okres", s: "Przełożony nie zapisał wniosków rozwojowych. Zaproponuj cel, który omówicie.", btn: "Otwórz cele", go: "goals" };
       else next = { t: "Sprawdź swoje cele", s: "Zaktualizuj postęp, zanim przyjdzie czas na ocenę.", btn: "Otwórz cele", go: "goals" };
       return `
-        <section class="next card anim">
-          <div><h2>${esc(next.t)}</h2><p class="muted">${esc(next.s)}</p></div>
-          <button class="btn btn-next" data-nav="${next.go}"><span>${esc(next.btn)}</span>${KK_ICON("arrow")}</button></section>
+        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)}. Zacznij od kroku 1 – kolejne odblokują się same, gdy zbierzesz informacje.</p>
+          <ol class="s3-list">
+            <li><span class="vn" aria-hidden="true">1</span><div><b>Ustal kryteria</b><span class="t">Rozmowa rozpoczynająca z pracownikiem. Asystent AI podpowie kryteria dla jego stanowiska.</span>
+              ${kickEmp ? `<button class="btn" data-act="kickoff" data-emp="${kickEmp.id}" aria-label="Ustal kryteria – rozmowa rozpoczynająca – ${first(kickEmp.name)}">${KK_ICON("star")}<span>Ustal kryteria</span></button>` : ""}</div></li>
+            <li><span class="vn" aria-hidden="true">2</span><div><b>Zbierz informacje i oceń</b><span class="t">Zapisuj fakty z pracy i wypełnij ocenę krok po kroku. Kreator pilnuje, żeby nic nie pominąć.</span>
+              <button class="btn" data-nav="evals"><span>Zbierz informacje i oceń</span>${KK_ICON("arrow")}</button></div></li>
+            <li><span class="vn" aria-hidden="true">3</span><div><b>Przygotuj rozmowę</b><span class="t">Brief z zebranych faktów: tematy i pytania otwarte, bez ocen i punktów.</span>
+              ${briefEmp ? `<button class="btn" data-act="aiBrief" data-emp="${briefEmp.id}" aria-label="Przygotuj rozmowę – brief – ${first(briefEmp.name)}">${KK_ICON("msg")}<span>Przygotuj rozmowę</span></button>` : ""}</div></li>
+          </ol></section>
+        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}" aria-label="Cele – ${first(x.name)}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}" aria-label="Rozmowa rozpoczynająca – ${first(x.name)}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}" aria-label="Otwórz ocenę – ${first(x.name)}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
         <div class="kpis">
-          <div class="kpi"><b data-to="${d.evals.length}" data-dec="0">0</b><span>Złożone oceny</span></div>
-          <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
-          <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
-        </div>
-        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(d.kickoff.date)})</h2>
-          <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
-          <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
-          <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
-          ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
-            : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
-        ${(d.upcoming || []).length || d.kickoff ? `<div class="card"><h2>Przygotuj się do rozmowy</h2>
-          <p class="muted">Asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
-          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
-          <div id="aiPrepOut" aria-live="polite"></div></div>` : ""}
-        ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
-          <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
-          <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
-          <p class="muted">Masz wgląd w kryteria i termin przed złożeniem oceny (§ 6 rozporządzenia). Poziomy zobaczysz po złożeniu.</p></div>`).join("")}
-        <div class="card"><h2>Gdzie jesteś w procesie</h2>${last ? timeline(last.status) : `<p class="muted">Gdy przełożony przygotuje ocenę, zobaczysz tu jej postęp.</p>`}
-          <p class="muted">Ocena opisuje zachowania z okresu, a nie Twoją osobę. Masz prawo zapoznać się z nią przed rozmową.</p></div>`;
-    }
-    if (v === "profile") {
-      const sc = d.latestScores || {};
-      const items = Object.entries(sc).filter(([, x]) => x.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
-      return `
-        <div class="grid two">
-          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
-          <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
-        </div>
-        <div class="grid two">
-          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
-          <div class="card"><h2>Asystent rozwoju</h2>
-            <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
-            <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
-            <div id="aiDevOut"></div></div>
-        </div>
-        <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
-    }
-    if (v === "goals") {
-      return `<p class="muted" style="margin:0 0 12px">Cele ustala przełożony. Gdy wykonasz krok, zgłoś to – przełożony potwierdzi. Postęp liczy tylko potwierdzone kroki.</p>
-        ${goalTiles(S.goals, "emp")}`;
-    }
-    if (v === "evidence") return evidencePage(false);
-    // evals
-    return evalsList(false);
-  }
-  function evalsList(isMgr) {
-    const names = Object.fromEntries((S.dash.team || []).map(t => [t.id, t.name]));
-    if (!S.evals.length) return `<div class="card"><p class="muted">Brak ocen do wyświetlenia.</p></div>`;
-    const rows = S.evals.map(e => {
-      const edit = isMgr && e.status === "draft";
-      return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
-        <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
-        <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}"`)}</td></tr>`;
-    }).join("");
-    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
-  }
-
-  // ---------- Przełożony ----------
-  function mgrPage(v) {
-    if (v === "settings") return settingsPage();
-    const d = S.dash, c = d.counts;
-    if (v === "home") {
-      const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
-      const toDiscuss = d.team.filter(t => t.status === "submitted");
-      const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
-      const rows = d.team.map(t => `
-        <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
-          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
-          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
-          <td style="text-align:right">${t.status === "none"
-            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
-            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}"`)
-            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}"`)
-            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}"`)}</td></tr>`).join("");
-      return `
-        <section class="next card anim">
-          <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
-          <button class="btn btn-next" data-nav="evals"><span>Przejdź do ocen</span>${KK_ICON("arrow")}</button></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
-        <div class="kpis">
-          <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
-          <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
-          <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone</span></div>
-          <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
+          <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole<small>Osoby przypisane do Ciebie.</small></span></div>
+          <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania<small>Oceny bez szkicu lub niedokończone.</small></span></div>
+          <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone<small>Oceny gotowe do rozmowy.</small></span></div>
+          <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione<small>Oceny po rozmowie z pracownikiem.</small></span></div>
         </div>
         ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy).</p>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(x.lastEval) : "—"}</td><td>${x.due ? esc(x.due) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
@@ -892,7 +824,7 @@
   const safeLink = u => (/^https?:\/\//i.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">link<span class="sr"> (otwiera się w nowej karcie)</span></a>` : "");
   function evidenceTable(list, { editable, showEmp }) {
     if (!list.length) return `<p class="muted">Brak informacji dla wybranych filtrów.</p>`;
-    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
+    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Nr zadania i link do dokumentu</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
       ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
         <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
         <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
@@ -912,15 +844,15 @@
       </form></div>
       <div class="card"><h2>Informacje</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
         <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>
-      ${isMgr ? "" : `<div class="card"><h2>Feedback o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
+      ${isMgr ? "" : `<div class="card"><h2>Informacja zwrotna o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Rozmowy miesięczne</h2><div id="ciMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem informacji.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
   }
   const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
   function feedbackList(list, editable) {
-    if (!list.length) return `<p class="muted">Brak feedbacku.</p>`;
+    if (!list.length) return `<p class="muted">Brak informacji zwrotnej.</p>`;
     return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(f.date)} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
-      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj feedback z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
+      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
   const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
@@ -931,7 +863,7 @@
       put("fbMine", feedbackList(fb.feedback, false));
       put("ciMine", ci.checkins.length ? `<ul class="c">${ci.checkins.map(c => `<li>${checkinText(c)}</li>`).join("")}</ul>` : `<p class="muted">Brak rozmów.</p>`);
       put("pqMine", pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych.</p>`);
-    } catch (e) { put("fbMine", `<p class="muted">${esc(e.message)}</p>`); }
+    } catch (e) { put("fbMine", `<p class="muted">${esc(errMsg(e))}</p>`); }
   }
 
   // ---------- Przegląd miesiąca (przełożony): check-in, informacje według wskaźników, feedback ----------
@@ -957,7 +889,7 @@
       S.monthData = d; S.evidence = d.groups.flatMap(g => g.evidence); S.monthFeedback = d.feedback; S.monthPartials = pq.partials;
       const c = d.checkin || { done: "", attention: "", goal: "", date: "", status: "planowany" };
       const ro = "";
-      box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna (check-in)</h2>
+      box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna</h2>
           <p class="muted">Do 20 minut. Trzy pola i informacje z miesiąca. Bez punktacji i bez oceny osoby.</p>
           <form id="ciForm" aria-labelledby="ciH" novalidate>
             <label class="f" for="ciDone">Co zrobiono</label><textarea id="ciDone" maxlength="600" ${ro}>${esc(c.done)}</textarea>
@@ -966,7 +898,7 @@
             <div class="grid two"><div><label class="f" for="ciDate">Data rozmowy</label><input id="ciDate" type="date" value="${esc(c.date || "")}" max="${new Date().toISOString().slice(0, 10)}"></div>
               <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
             <div id="ciErr" role="alert" class="err"></div>
-            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
+            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz rozmowę miesięczną"}</button>
               <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button>
               <button class="btn g" type="button" data-act="aiBrief" data-emp="${esc(m.employeeId)}">Przygotuj brief do rozmowy</button></div>
           </form><div id="aiCkOut" aria-live="polite"></div>
@@ -976,8 +908,8 @@
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
             <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
               ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
-        <div class="card"><div class="row"><h2>Feedback z miesiąca</h2>${actBtn("plus", "Feedback", `data-act="addFeedback"`, "")}</div>
-          <p class="muted">Feedback dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
+        <div class="card"><div class="row"><h2>Informacja zwrotna z miesiąca</h2>${actBtn("plus", "Informacja zwrotna", `data-act="addFeedback"`, "")}</div>
+          <p class="muted">Informacja zwrotna dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
         <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
           <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem informacji.</p>
           ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
@@ -988,10 +920,10 @@
         try {
           if (d.checkin) await api("PUT", `/api/checkins/${d.checkin.id}`, body);
           else await api("POST", "/api/checkins", { ...body, employeeId: +m.employeeId, month: m.month });
-          toast("Zapisano check-in."); loadMonth();
+          toast("Zapisano rozmowę miesięczną."); loadMonth();
         } catch (ex) { $("#ciErr").textContent = fieldErrors(ex); }
       });
-    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
   function bindMonthPage() {
     const fm = $("#monthForm"); if (!fm) return;
@@ -1000,11 +932,11 @@
   const RELATIONS = { przelozony: "przełożony bezpośredni", wspolpracownik: "współpracownik (przekazane przełożonemu)", odbiorca: "odbiorca rezultatu (przekazane przełożonemu)" };
   function feedbackModal(fb) {
     const v = fb || { indicator: "", source: "", level: null, justification: "", relation: "przelozony", date: new Date().toISOString().slice(0, 10) };
-    openModal(`<h2 id="fbTitle">${fb ? "Edytuj feedback" : "Nowy feedback"}</h2>
+    openModal(`<h2 id="fbTitle">${fb ? "Edytuj informację zwrotną" : "Nowa informacja zwrotna"}</h2>
       <p class="muted">Opisz rezultat konkretnego zadania. Nie oceniaj osoby. Nie zapisuj czasu pracy, obecności ani aktywności.</p>
       <form id="fbForm" novalidate>
         <label class="f" for="fbInd">Wskaźnik</label><select id="fbInd" required><option value="">Wybierz…</option>${indOptions(v.indicator)}</select>
-        <label class="f" for="fbSrc">Źródło zdarzenia (zadanie, sprawa, artefakt)</label><input id="fbSrc" required maxlength="300" value="${esc(v.source)}">
+        <label class="f" for="fbSrc">Źródło zdarzenia (zadanie, sprawa, dokument)</label><input id="fbSrc" required maxlength="300" value="${esc(v.source)}">
         <label class="f" for="fbJust">Uzasadnienie (wymagane)</label><textarea id="fbJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
         <label class="f" for="fbRel">Relacja autora do rezultatu</label><select id="fbRel">${Object.entries(RELATIONS).map(([k, l]) => `<option value="${k}" ${v.relation === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <label class="f" for="fbLvl">Poziom (opcjonalnie)</label><select id="fbLvl"><option value="">bez poziomu</option>${PTS5.map((p, i) => `<option value="${p}" ${v.level === p ? "selected" : ""}>${p} pkt – ${LEVELS5[i]}</option>`).join("")}</select>
@@ -1017,7 +949,7 @@
         const body = { indicator: $("#fbInd").value, source: $("#fbSrc").value, justification: $("#fbJust").value, relation: $("#fbRel").value, level: $("#fbLvl").value ? +$("#fbLvl").value : null, date: $("#fbDate").value };
         try {
           if (fb) await api("PUT", `/api/feedback/${fb.id}`, body); else await api("POST", "/api/feedback", { ...body, employeeId: +S.month.employeeId });
-          closeModal(); toast("Zapisano feedback."); loadMonth();
+          closeModal(); toast("Zapisano informację zwrotną."); loadMonth();
         } catch (ex) { $("#fbErr").textContent = fieldErrors(ex); }
       });
     }, "fbTitle");
@@ -1057,7 +989,7 @@
     const box = $("#evList"); if (!box) return;
     const q = new URLSearchParams(Object.entries(S.evFilter).filter(([, v]) => v)).toString();
     try { S.evidence = (await api("GET", "/api/evidence" + (q ? "?" + q : ""))).evidence; box.innerHTML = evidenceTable(S.evidence, { editable: S.user.role === "przelozony", showEmp: S.user.role === "przelozony" }); bindActs(box); }
-    catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    catch (e) { box.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   function bindEvidencePage() {
     const fm = $("#evFilter"); if (!fm) return;
@@ -1079,7 +1011,7 @@
         <label class="f" for="eAct">Działanie</label><textarea id="eAct" required maxlength="1000">${esc(v.action)}</textarea>
         <label class="f" for="eRes">Rezultat</label><textarea id="eRes" required maxlength="1000">${esc(v.result)}</textarea>
         <label class="f" for="eLink">Link do artefaktu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
-        <label class="f" for="eTask">ID zadania lub artefaktu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
+        <label class="f" for="eTask">Nr zadania lub link do dokumentu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
         <div id="evErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
@@ -1133,29 +1065,29 @@
     try {
       const s = await api("GET", "/api/summary?" + q);
       box.innerHTML = `<div class="kpis">
-          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie</span></div>
-          <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Check-iny odbyte / zapisane</span></div>
-          <div class="kpi"><b>${s.feedbackTotal}</b><span>Feedback</span></div>
-          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez informacji</span></div></div>
-        <div class="card"><h2>Wskaźniki z informacjami lub feedbackiem</h2>
+          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie<small>Ile opisanych sytuacji, działań i rezultatów zapisano.</small></span></div>
+          <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Rozmowy miesięczne odbyte / zapisane<small>Ile rozmów się odbyło z ilu zapisanych w okresie.</small></span></div>
+          <div class="kpi"><b>${s.feedbackTotal}</b><span>Informacja zwrotna<small>Ile wpisów informacji zwrotnej zebrano w okresie.</small></span></div>
+          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez informacji<small>Ile wskaźników nie ma jeszcze żadnego zapisu.</small></span></div></div>
+        <div class="card"><h2>Wskaźniki z informacjami lub informacją zwrotną</h2>
           <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
-          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z informacjami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
+          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Rozmowy miesięczne z informacjami</th><th scope="col">Informacja zwrotna (poziomy)</th></tr></thead><tbody>
             ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
-            </tbody></table></div>` : `<p class="muted">Brak informacji i feedbacku w okresie.</p>`}</div>
+            </tbody></table></div>` : `<p class="muted">Brak informacji i informacji zwrotnej w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
             <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
-        <div class="card"><h2>Check-iny</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak check-inów w okresie.</p>`}</div>`;
-    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+        <div class="card"><h2>Rozmowy miesięczne</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak rozmów miesięcznych w okresie.</p>`}</div>`;
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
 
   function settingsPage() {
     const mods = S.moduleList || [];
     return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
-      <p class="muted">Informacje, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
+      <p class="muted">Informacje, rozmowy miesięczne, informacja zwrotna, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
       <form id="setForm">${mods.map(m => `<label class="choice"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span></label>`).join("")}
       <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
-      <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B i C), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
+      <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B – osoby kierujące zespołem, Arkusz C – pozostałe stanowiska), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
   }
 
   // ---------- Kreator oceny: strony Dalej/Wstecz ----------
@@ -1179,7 +1111,7 @@
     else if (st.id === "talk") body = talkStep();
     else if (st.id === "sum") body = sumStep();
     else body = rateOne(st.comp);
-    const prevLabel = idx === 0 ? "Zamknij" : "Wstecz";
+    const prevLabel = idx === 0 ? "Zapisz i wróć później" : "Wstecz";
     const last = idx === steps.length - 1;
     const canNext = !(st.id === "crit" && !c.criteria.length);
     const nav = `<nav class="wiz-nav" aria-label="Nawigacja kreatora">
@@ -1340,7 +1272,7 @@
   }
   function draftLinks(id) {
     const base = `/api/evals/${id}/document?variant=szkic`;
-    return `<div class="docs"><h3>Szkic z informacji i check-inów</h3><p class="muted">Materiał roboczy: informacje i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
+    return `<div class="docs"><h3>Szkic z informacji i rozmów miesięcznych</h3><p class="muted">Materiał roboczy: informacje i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
       <div class="btns" style="justify-content:flex-start">
         <a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
         <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>
@@ -1391,13 +1323,13 @@
   let saveTimer = null;
   function queueSave() {
     clearTimeout(saveTimer);
+    const c = S.cur; if (!c) return;
     const sv = $("#saved"); if (sv) sv.textContent = "Zapisywanie…";
     saveTimer = setTimeout(async () => {
       try {
-        const c = S.cur;
         const r = await api("PUT", `/api/evals/${c.id}`, { data: c.data, periodFrom: c.periodFrom, periodTo: c.periodTo });
         c.missing = r.missing; const s2 = $("#saved"); if (s2) s2.textContent = "Zapisano";
-      } catch (e) { const s2 = $("#saved"); if (s2) s2.textContent = "Nie zapisano"; toast(e.message); }
+      } catch (e) { const s2 = $("#saved"); if (s2) s2.textContent = "Nie zapisano"; toast(errMsg(e)); }
     }, 500);
   }
   async function openWizard(id) {
@@ -1432,7 +1364,7 @@
     try {
       const r = await api("POST", kind === "talk" ? "/api/ai/talk" : "/api/ai/formal", { evalId: S.cur.id });
       stop(); S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
-    } catch (e) { stop(); toast(e.message); }
+    } catch (e) { stop(); toast(errMsg(e)); }
   }
   // Podpisy i zapoznanie z oceną – stan z serwera
   async function loadSigs(id, status) {
@@ -1457,7 +1389,7 @@
           ${r.objectionAt ? `<p class="note warn">Sprzeciw został złożony. Przełożony rozpatrzy go zgodnie z procedurą.</p>` : ""}` : ""}`;
       box.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => act(b.dataset.act, b, e)));
       animateIn(box);
-    } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(e.message)}</p>`; }
+    } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(errMsg(e))}</p>`; }
   }
   async function loadLog() {
     const b = $("#logBody"); if (!b) return;
@@ -1467,7 +1399,7 @@
         + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
         + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
-    } catch (e) { b.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
   function chatBubble(m) {
@@ -1520,12 +1452,12 @@
     submitEval: async () => {
       if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
       try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); surveyModal(S.cur.id); }
-      catch (e) { toast(e.message); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
+      catch (e) { toast(errMsg(e)); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
     },
     discussEval: async () => {
       const dev = $("#devN")?.value || "";
       try { await api("POST", `/api/evals/${S.cur.id}/discuss`, { dev }); S.cur.status = "discussed"; S.cur.data.dev = dev; toast("Oznaczono jako omówioną."); render(); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     aiChat: async b => {
       const inp = $("#aiQ"); const q = (inp?.value || "").trim();
@@ -1536,7 +1468,7 @@
       try {
         const r = await api("POST", "/api/ai/chat", { message: q, history });
         S.aiChat = [...S.aiChat, { role: "assistant", text: r.text, source: r.source }];
-      } catch (e) { S.aiChat = [...S.aiChat, { role: "assistant", text: "Nie udało się uzyskać odpowiedzi. " + e.message, source: "rules" }]; }
+      } catch (e) { S.aiChat = [...S.aiChat, { role: "assistant", text: "Nie udało się uzyskać odpowiedzi. " + errMsg(e), source: "rules" }]; }
       S.aiPending = false; render(); $("#aiQ")?.focus(); scrollChat();
     },
     aiClear: () => { S.aiChat = []; render(); $("#aiQ")?.focus(); },
@@ -1546,29 +1478,29 @@
       const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
       const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa działania rozwojowe…`); const stop = startThinking(outEl);
       try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
-      catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
+      catch (e) { stop(); outEl.innerHTML = ""; toast(errMsg(e)); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
-    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(ex.message); } },
+    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); } },
     addStep: async b => {
       const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
       if (!t || !t.trim()) return;
-      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(ex.message); }
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); }
     },
     goalReport: async b => {
       try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, reported: b.dataset.val === "1" }); toast(b.dataset.val === "1" ? "Zgłoszono wykonanie kroku. Przełożony je potwierdzi." : "Cofnięto zgłoszenie."); await refreshGoals(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     goalConfirm: async b => {
       try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, confirmed: b.dataset.val === "1" }); await refreshGoals(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
-    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
+    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(errMsg(ex))),
     aiBrief: b => briefModal(+b.dataset.emp),
     aiPrep: async b => {
       const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
       try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
-      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
       b.disabled = false;
     },
     briefTab: b => { document.querySelectorAll("[data-brief-pane]").forEach(p => { p.hidden = p.dataset.briefPane !== b.dataset.tab; }); document.querySelectorAll('[data-act="briefTab"]').forEach(t => t.setAttribute("aria-selected", t === b ? "true" : "false")); },
@@ -1630,18 +1562,18 @@
         try {
           const r = await api("POST", "/api/employees", { name: $("#eName").value, email: $("#eMail").value, position: $("#ePos").value });
           closeModal(); await refreshData(); render(); activationInfo(r.activation);
-        } catch (ex) { toast(ex.message); }
+        } catch (ex) { toast(errMsg(ex)); }
       });
     }),
     resendActivation: async b => {
       try { const r = await api("POST", `/api/employees/${b.dataset.emp}/activation`); activationInfo(r.activation); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     kickoff: b => kickoffModal(+b.dataset.emp),
     ackKickoff: async b => {
       if (!confirm("Potwierdzasz zapoznanie z obowiązkami, kryteriami i celami na ten okres oceny?")) return;
       try { await api("POST", `/api/kickoffs/${b.dataset.id}/acknowledge`); toast("Zapisano zapoznanie."); await refreshData(); render(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     closeModal: () => closeModal(),
     addEvidence: b => {
@@ -1668,7 +1600,7 @@
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
       try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
-      catch (e) { stop(); out.innerHTML = ""; toast(e.message); }
+      catch (e) { stop(); out.innerHTML = ""; toast(errMsg(e)); }
       b.disabled = false;
     },
     editFeedback: b => { const f = (S.monthFeedback || []).find(x => x.id === +b.dataset.id); if (f) feedbackModal(f); },
@@ -1683,20 +1615,20 @@
         toast(r.reopened ? "Ocena wróciła do poprawy." : "Zapisano decyzję.");
         if (r.reopened) return openWizard(+b.dataset.id);
         loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status);
-      } catch (e) { toast(e.message); }
+      } catch (e) { toast(errMsg(e)); }
     },
     saveSettings: async () => {
       const modules = Object.fromEntries([...document.querySelectorAll("[data-mod]")].map(cb => [cb.dataset.mod, cb.checked]));
       try { await api("PUT", "/api/settings", { modules }); await load(); toast("Zapisano ustawienia."); render(); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     signEval: async b => {
       try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     ackEval: async b => {
       try { await api("POST", `/api/evals/${b.dataset.id}/acknowledge`); toast("Zapoznanie zarejestrowane."); loadSigs(+b.dataset.id, S.readEval?.status); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     objectionEval: b => openModal(`
       <h2>Sprzeciw wobec oceny</h2>
@@ -1709,13 +1641,13 @@
       $("#objForm").addEventListener("submit", async e => {
         e.preventDefault();
         try { await api("POST", `/api/evals/${b.dataset.id}/objection`, { text: $("#objText").value }); closeModal(); toast("Sprzeciw złożony."); loadSigs(+b.dataset.id, S.readEval?.status); }
-        catch (ex) { toast(ex.message); }
+        catch (ex) { toast(errMsg(ex)); }
       });
     }),
   };
   function act(name, el) {
     if (!actions[name]) return;
-    Promise.resolve(actions[name](el)).catch(e => toast(e.message));
+    Promise.resolve(actions[name](el)).catch(e => toast(errMsg(e)));
   }
   const bindActs = root => root.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
   let modalReturn = null;
