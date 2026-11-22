@@ -99,7 +99,9 @@ describe('ponowna ocena po negatywnej na pulpicie', () => {
     try {
       const mgr = await asManager(srv);
       const evs = (await mgr.get('/api/evals')).body.evals;
-      const e = evs.find(x => x.typ !== 'pierwsza' && x.status !== 'draft');
+      // Osoba bez rozmowy rozpoczynającej (dane demo mają część rozmów już zapisanych)
+      const team = (await mgr.get('/api/dashboard')).body.team;
+      const e = evs.find(x => x.typ !== 'pierwsza' && x.status !== 'draft' && !team.find(t => t.id === x.employee_id)?.kickoff);
       const db = new DatabaseSync(path.join(srv.dir, 'kompas.db'));
       const data = { ...e.data, wynik: 'negatywna', terminOceny: '2026-06-30' };
       db.prepare('UPDATE evals SET data=? WHERE id=?').run(JSON.stringify(data), e.id);

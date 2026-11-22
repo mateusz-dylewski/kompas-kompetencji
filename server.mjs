@@ -251,8 +251,10 @@ function seed() {
     const criteria = (typ === 'pierwsza' ? MODEL.slice(0, 6) : MODEL.filter(c => mandFor(typ).some(m => c.k.startsWith(m)))).map(c => c.k);
     const ratings = {};
     MODEL.filter(c => criteria.includes(c.k)).forEach(c => c.w.forEach((w, wi) => {
-      const lvl = typ === 'pierwsza' ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 5);
-      ratings[`${c.k}|${wi}`] = { lvl, ex: 'Przykład z okresu oceny (dane demonstracyjne).' };
+      const lvl0 = typ === 'pierwsza' ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 5);
+      // szkice: poziomy realistyczne wokół oczekiwań (głównie 2, część 3, pojedyncze 1; bez 0)
+      const lvl = status === 'draft' ? [2, 2, 3, 2, 1][lvl0] : lvl0;
+      ratings[`${c.k}|${wi}`] = { lvl, ex: '' };
     }));
     const data = { criteria, ratings, dev: 'Szkolenie z analizy danych do końca kwartału.' };
     if (typ !== 'pierwsza') { // dane fikcyjne: oceny cząstkowe „przyznane” przez oceniającego w scenariuszu demo
@@ -262,8 +264,7 @@ function seed() {
     }
     insE.run(eid, mgr, typ, '2026-01-01', '2026-06-30', status, JSON.stringify(data), now(), now());
   });
-  seedEvidence(mgr, emps, rnd);
-  seedRhythm(mgr, emps);
+  const at0 = now(), addD = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const insG = db.prepare('INSERT INTO goals(user_id,s,m,a,r,t,done,progress,steps,created_by,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const STEPS = ['Ukończone szkolenie z narzędzia', 'Pierwszy raport przygotowany z pomocą opiekuna', 'Dwa raporty przygotowane samodzielnie', 'Raportowanie zespołu przejęte'];
   emps.forEach((eid, i) => {
@@ -274,23 +275,96 @@ function seed() {
     if (doneN === STEPS.length) steps.forEach(x => { x.reported_at = at; });
     insG.run(eid, 'Obsługa narzędzia analitycznego', '2 raporty miesięcznie samodzielnie', '2 godziny szkolenia tygodniowo', 'Przejęcie raportowania zespołu', '2026-12-31', doneN === STEPS.length ? 1 : 0, Math.round(doneN / STEPS.length * 100), JSON.stringify(steps), mgr, at);
   });
+  // Drugi cel pracownika1: kroki w różnych stanach (potwierdzony, zgłoszony, do zrobienia)
+  const st2 = [['Lista wymagań dostępności zebrana od zespołów', 1, 1], ['Audyt trzech serwisów przeprowadzony', 1, 0], ['Raport z zaleceniami przekazany kierownictwu', 0, 0], ['Poprawki wdrożone i sprawdzone ponownie', 0, 0]]
+    .map(([t, rep, conf]) => ({ t, reported_at: rep ? at0 : null, confirmed_at: conf ? at0 : null, confirmed_by: conf ? mgr : null }));
+  insG.run(emps[0], 'Poprawa dostępności serwisów departamentu', 'Audyt 3 serwisów i raport z zaleceniami', 'Udział w szkoleniu z dostępności cyfrowej', 'Zgodność serwisów z wymaganiami ustawy o dostępności cyfrowej', addD(today(), 60), 0, 25, JSON.stringify(st2), mgr, at0);
+  // Rozmowy rozpoczynające (fikcyjne): dwie zapoznane przez pracownika, jedna czeka na zapoznanie; pracownik3 (emps[2]) zostaje „po terminie”
+  const insK = db.prepare('INSERT INTO kickoffs(employee_id,evaluator_id,typ,date,prev_eval_id,due,extra_criteria,duties,expectations,goals,ack_at,eval_id,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const evOf = eid => db.prepare('SELECT id FROM evals WHERE employee_id=? ORDER BY id LIMIT 1').get(eid)?.id ?? null;
+  const kd = d => addD(today(), d);
+  insK.run(emps[3], mgr, 'B', kd(-20), evOf(emps[3]), '2026-07-30', JSON.stringify(['MYŚLENIE ANALITYCZNE', 'NEGOCJOWANIE']),
+    'Prowadzenie rejestru incydentów bezpieczeństwa informacji i przegląd uprawnień w systemach.', 'Zgłoszenia incydentów rejestrowane w ciągu jednego dnia roboczego; kwartalny przegląd uprawnień.',
+    'Skrócenie czasu obsługi incydentu oraz aktualizacja procedury do końca okresu.', `${kd(-18)}T09:00:00.000Z`, null, at0, at0);
+  insK.run(emps[4], mgr, 'B', kd(-12), evOf(emps[4]), '2026-07-30', JSON.stringify(['KREATYWNOŚĆ']),
+    'Przygotowanie komunikatów wewnętrznych i obsługa kanałów informacyjnych departamentu.', 'Komunikaty publikowane zgodnie z kalendarzem, bez uwag redakcyjnych w kolejnej rundzie.',
+    'Uruchomienie cyklicznego biuletynu departamentu i ocena jego czytelności wśród odbiorców.', `${kd(-10)}T09:00:00.000Z`, null, at0, at0);
+  // Zapisana, czeka na zapoznanie pracownika (ocena typu C jest szkicem poniżej)
+  const kC = insK.run(emps[1], mgr, 'C', kd(-2), null, null, JSON.stringify(['ORIENTACJA NA KLIENTA']),
+    'Wsparcie wdrożeń dostępności cyfrowej w serwisach departamentu.', 'Terminowe przekazywanie wyników kontroli oraz jasne opisy zaleceń.',
+    'Przeprowadzenie kontroli dostępności dwóch serwisów i przygotowanie zaleceń.', null, null, at0, at0).lastInsertRowid;
+  // Ocena typu C (szkic) dla pracownika2 – oceny cząstkowe zgodne ze schematem 2
+  const cCrit = MODEL.filter(c => MAND_C.some(m => c.k.startsWith(m))).map(c => c.k);
+  const cRatings = {}; let ci = 0;
+  MODEL.filter(c => cCrit.includes(c.k)).forEach(c => c.w.forEach((w, wi) => { cRatings[`${c.k}|${wi}`] = { lvl: [2, 2, 3, 2, 2, 3, 1][ci++ % 7], ex: '' }; }));
+  const cData = { criteria: cCrit, ratings: cRatings, dev: 'Szkolenie z zasad redagowania dokumentów urzędowych.', schema: EVAL_SCHEMA, partials: {} };
+  cCrit.forEach((k, i) => { cData.partials[k] = { pts: PTS5[2 + (i % 3)] }; });
+  const cId = db.prepare('INSERT INTO evals(employee_id,evaluator_id,typ,period_from,period_to,status,data,created,updated) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(emps[1], mgr, 'C', kd(-150), kd(-1), 'draft', JSON.stringify(cData), at0, '2026-01-02T08:00:00.000Z').lastInsertRowid;
+  db.prepare('UPDATE kickoffs SET eval_id=? WHERE id=?').run(cId, kC);
+  seedEvidence(mgr, emps, rnd);
+  seedExamples();
+  seedRhythm(mgr, emps);
+  // Plan rozwoju i komunikat przełożonego dla pracownika1
+  db.prepare('INSERT INTO dev_plans(employee_id,author_id,plan,message,created) VALUES(?,?,?,?,?)').run(emps[0], mgr,
+    `1. Szkolenie z dostępności cyfrowej (WCAG) – zapis do ${addD(today(), 14)}, udział do ${addD(today(), 45)}.\n2. Wspólny audyt jednego serwisu z doświadczoną koleżanką z zespołu – do ${addD(today(), 60)}.\n3. Prezentacja wniosków z audytu na spotkaniu zespołu – do ${addD(today(), 90)}.`,
+    'Dziękuję za rzetelne raporty w ostatnim kwartale. Proponuję rozwój w kierunku dostępności cyfrowej – porozmawiamy o tym na najbliższym spotkaniu miesięcznym.', at0);
+}
+// Przykłady w ocenach demo: z treści informacji osoby przy danym wskaźniku (sytuacja – działanie – rezultat); bez informacji – pusty
+function seedExamples() {
+  const ev = db.prepare('SELECT indicator,situation,action,result FROM evidence WHERE employee_id=? ORDER BY date,id');
+  for (const e of db.prepare("SELECT id,employee_id,data FROM evals").all()) {
+    const d = JSON.parse(e.data || '{}'); let ch = false;
+    const byInd = new Map(); for (const x of ev.all(e.employee_id)) byInd.set(x.indicator, x);
+    for (const [k, r] of Object.entries(d.ratings || {})) {
+      const x = byInd.get(k);
+      if (x && !r.ex) { r.ex = `${x.situation} – ${x.action.charAt(0).toLowerCase() + x.action.slice(1)} – ${x.result.charAt(0).toLowerCase() + x.result.slice(1)}.`; ch = true; }
+    }
+    if (ch) db.prepare('UPDATE evals SET data=? WHERE id=?').run(JSON.stringify(d), e.id);
+  }
 }
 // Informacje demo (fikcyjne): okres oceny I półrocza 2026 oraz ostatnie miesiące (przegląd miesiąca)
 function seedEvidence(mgr, emps, rnd) {
   const SIT = ['Przygotowanie raportu kwartalnego dla kierownictwa', 'Odpowiedź na pismo innej komórki organizacyjnej', 'Wdrożenie nowej procedury obiegu dokumentów',
     'Spotkanie projektowe z zespołem wykonawcy', 'Obsługa wniosku o udostępnienie informacji publicznej', 'Aktualizacja rejestru umów'];
   const ACT = ['Sprawdzono wymagania i uzgodniono harmonogram z osobami zależnymi', 'Przygotowano wersję roboczą i zebrano uwagi przed terminem',
-    'Zgłoszono ryzyko opóźnienia z dwudniowym wyprzedzeniem i zaproponowano zmianę kolejności prac', 'Ustalenia podsumowano na piśmie i rozesłano uczestnikom'];
+    'Zgłoszono ryzyko opóźnienia z dwudniowym wyprzedzeniem i zaproponowano zmianę kolejności prac', 'Ustalenia podsumowano na piśmie i rozesłano uczestnikom',
+    'Zebrano dane z trzech źródeł i zweryfikowano ich spójność przed przekazaniem', 'Omówiono zakres z przełożonym i doprecyzowano oczekiwany efekt',
+    'Przygotowano krótką instrukcję dla pozostałych osób w zespole', 'Skonsultowano projekt z radcą prawnym i naniesiono zalecone zmiany',
+    'Uzupełniono braki w dokumentacji i oznaczono wersję końcową', 'Przeprowadzono krótkie szkolenie wewnętrzne dla osób korzystających z rozwiązania'];
   const RES = ['Dokument przekazany w terminie, bez poprawek merytorycznych', 'Termin dotrzymany, uwagi uwzględnione w jednej rundzie',
-    'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych'];
+    'Zmiana planu uzgodniona, zadanie zakończone w nowym terminie', 'Uczestnicy potwierdzili ustalenia, brak pytań zwrotnych',
+    'Dane przyjęte przez odbiorcę bez konieczności uzupełnień', 'Przełożony zatwierdził rozwiązanie bez zmian w zakresie',
+    'Instrukcja wykorzystana przez zespół w kolejnych zadaniach', 'Uwagi prawne wprowadzone, sprawa zamknięta w terminie',
+    'Dokumentacja kompletna, kontrola wewnętrzna bez uwag', 'Osoby przeszkolone samodzielnie wykonują zadanie'];
   const pick = a => a[Math.floor(rnd() * a.length)];
   const ins = db.prepare('INSERT INTO evidence(employee_id,evaluator_id,date,indicator,situation,action,result,link,task_ref,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
-  const add = (eid, date, ind) => ins.run(eid, mgr, date, ind, pick(SIT), pick(ACT), pick(RES), null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
-  // Szkic oceny (ostatni pracownik): informacje do prawie wszystkich wskaźników – dwa celowo bez informacji (demo walidacji)
-  const draft = db.prepare("SELECT employee_id, data FROM evals WHERE status='draft' ORDER BY id LIMIT 1").get();
-  if (draft) {
-    const inds = Object.keys(JSON.parse(draft.data).ratings || {});
-    inds.slice(0, -2).forEach((ind, i) => add(draft.employee_id, `2026-0${1 + (i % 6)}-${String(5 + (i % 20)).padStart(2, '0')}`, ind));
+  const used = new Set(), usedAct = new Map();
+  const add = (eid, date, ind) => {
+    let sit, act, res, key, n = 0;
+    const ua = usedAct.get(eid) || usedAct.set(eid, new Set()).get(eid);
+    do { sit = pick(SIT); act = pick(ACT); res = pick(RES); key = `${eid}|${sit}|${act}|${res}`; } while ((used.has(key) || (ua.has(act) && ua.size < ACT.length)) && ++n < 400);
+    ua.add(act);
+    if (used.has(key)) return; // wyczerpane kombinacje – bez duplikatu
+    used.add(key);
+    return ins.run(eid, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+  };
+  // Każdy szkic oceny (B i C): do każdego wskaźnika co najmniej jedna informacja z okresu oceny, bez duplikatów treści u osoby
+  const dd = (d, n) => { const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  for (const dr of db.prepare("SELECT employee_id, period_from, period_to, data FROM evals WHERE status='draft' ORDER BY id").all()) {
+    const inds = Object.keys(JSON.parse(dr.data).ratings || {});
+    const span = Math.max(1, Math.round((Date.parse(dr.period_to) - Date.parse(dr.period_from)) / 86400000));
+    let n = 0;
+    inds.forEach((ind, i) => {
+      const date = dd(dr.period_from, Math.floor((i + 0.5) * span / inds.length));
+      for (;;) { // następna wolna kombinacja treści u tej osoby
+        const sit = SIT[Math.floor(n / ACT.length) % SIT.length], act = ACT[n % ACT.length], res = RES[(n + Math.floor(n / 24)) % RES.length]; n++;
+        if (n > 500) return;
+        if (db.prepare('SELECT 1 FROM evidence WHERE employee_id=? AND situation=? AND action=? AND result=?').get(dr.employee_id, sit, act, res)) continue;
+        ins.run(dr.employee_id, mgr, date, ind, sit, act, res, null, `ZAD-${100 + Math.floor(rnd() * 900)}`, now(), now());
+        return;
+      }
+    });
   }
   // Ostatnie miesiące: kilka informacji na osobę (wskaźniki z kryteriów obowiązkowych Arkusza C)
   const pool = [...INDICATORS.keys()].filter(k => MAND_C.some(m => k.startsWith(m)));
@@ -684,6 +758,8 @@ route('GET', '/api/demo', async (req, res) => send(res, 200, DEMO.seed && !PROD
   ? { enabled: true, manager: DEMO_MANAGER, employee: DEMO_EMPLOYEE(1), password: DEMO.hintPassword }
   : { enabled: false }));
 route('GET', '/api/me', async (req, res, u) => send(res, 200, { user: publicUser(u), ai: await ollamaStatus() }));
+// Start aplikacji: zawsze 200 (niezalogowany: user=null), także przy wymuszonej zmianie hasła
+route('GET', '/api/session', async (req, res, u) => send(res, 200, u ? { user: publicUser(u), ai: await ollamaStatus() } : { user: null }));
 route('GET', '/api/settings', async (req, res) => send(res, 200, { modules: Object.entries(MODULES).map(([key, m]) => ({ key, label: m.label, on: modOn(key), regulation: false })), required: ['Ocena okresowa (Arkusz B/C)', 'Pierwsza ocena', 'Zapoznanie i sprzeciw (art. 83)', 'Dziennik zdarzeń'] }));
 route('PUT', '/api/settings', async (req, res, u) => {
   if (u.role !== 'przelozony') return fail(res, 403, 'Tylko przełożony zmienia ustawienia.');
@@ -1638,7 +1714,15 @@ function briefFacts(empId, from, to) {
     facts.push({ id: `G${g.id}.${i + 1}`, rodzaj: 'krok celu', data: d, kryterium: null, cel: g.s, krok: x.t,
       kto: x.confirmed_at ? 'pracownik (zgłoszenie), przełożony (potwierdzenie)' : 'pracownik (zgłoszenie, bez potwierdzenia)' });
   });
-  return facts.sort((a, b) => (a.data < b.data ? -1 : 1));
+  // Scal fakty o identycznej treści (sytuacja, działanie, rezultat) – zostaje pierwszy id, reszta w „takze”
+  const seen = new Map(), out = [];
+  for (const f of facts) {
+    if (f.rodzaj !== 'informacja') { out.push(f); continue; }
+    const key = [f.sytuacja, f.dzialanie, f.rezultat].map(x => String(x ?? '').trim().toLowerCase()).join('\u0001');
+    const first = seen.get(key);
+    if (first) (first.takze ||= []).push(f.id); else { seen.set(key, f); out.push(f); }
+  }
+  return out.sort((a, b) => (a.data < b.data ? -1 : 1));
 }
 function briefContext(u, empId, b) {
   const draft = db.prepare("SELECT * FROM evals WHERE employee_id=? AND evaluator_id=? AND status='draft' ORDER BY id DESC LIMIT 1").get(empId, u.id);
@@ -1659,10 +1743,50 @@ function checkBriefRefs(text, ids) {
   let section = '';
   return String(text).split('\n').map(line => {
     if (/^\s*(#+|\*\*|[A-ZĄĆĘŁŃÓŚŹŻ][^.:]{2,40}:?\s*$)/.test(line)) section = line;
-    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : ''));
+    let l = line.replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => (ids.has(id) ? m : '')).replace(/(\S) {2,}/g, '$1 ').trimEnd();
     if (/przykład/i.test(section) && /^\s*([-*•]|\d+[.)])\s+\S/.test(l) && !/\[[IFCG][0-9.]+\]/.test(l)) l += ' (bez źródła)';
     return l;
   }).join('\n');
+}
+// Po modelu: ujednolicenie formatu – bez Markdown, cztery sekcje w stałej kolejności z dokładnymi nagłówkami
+const BRIEF_HEADS = [['t', 'Tematy do omówienia:'], ['p', 'Przykłady z okresu:'], ['q', 'Pytania otwarte:'], ['b', 'Kryteria bez informacji:']];
+function briefSectionOf(s) {
+  if (/kryteri|brak(i|ujące)?\b|bez informacji/i.test(s) && !/przykład|pytani/i.test(s)) return 'b';
+  if (/przykład/i.test(s)) return 'p';
+  if (/pytani/i.test(s)) return 'q';
+  if (/temat/i.test(s)) return 't';
+  return null;
+}
+function normalizeBrief(text, json) {
+  const sec = { t: [], p: [], q: [], b: [] };
+  let cur = 't';
+  for (const raw of String(text).replace(/\r/g, '').split('\n')) {
+    const mdHead = /^\s*#{1,6}\s/.test(raw) || /^\s*(\*\*|__)[^*_]+(\*\*|__):?\s*$/.test(raw);
+    let l = raw.replace(/^\s*#{1,6}\s*/, '').replace(/(\*\*|__)/g, '').replace(/`/g, '').trim();
+    if (!l) continue;
+    const bullet = /^([-*•]|\d+[.)])\s+(.*)$/.exec(l);
+    const body = bullet ? bullet[2].trim() : l;
+    const m = /^(.{2,70}?):\s*(.*)$/.exec(body);
+    const headLike = mdHead || !bullet || /:$/.test(body);
+    const headPart = m ? m[1] : body;
+    const s = headLike && headPart.length <= 70 ? briefSectionOf(headPart) : null;
+    if (s && (!bullet || mdHead || /:$/.test(body)) && !/^[-*•]\s/.test(l)) {
+      cur = s;
+      if (m && m[2].trim()) sec[cur].push(m[2].trim());
+      continue;
+    }
+    if (mdHead && !bullet) { if (!/^brief\b/i.test(body)) sec[cur].push(body.replace(/:$/, '')); continue; }
+    sec[cur].push(body);
+  }
+  if (!sec.p.length) {
+    const by = (json.pokrycie || []).filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty).slice(0, 3);
+    sec.p = by.map(p => { const f = json.fakty.find(x => x.kryterium === p.kryterium); return `${p.kryterium.toLowerCase()}: ${f.sytuacja || f.opis || ''} [${f.id}]`; });
+    if (!sec.p.length) sec.p = ['brak wpisów w okresie'];
+  }
+  if (!sec.b.length) sec.b = (json.braki || []).length ? json.braki.map(k => k.toLowerCase()) : ['brak'];
+  if (!sec.t.length) sec.t = ['brak'];
+  if (!sec.q.length) sec.q = ['brak'];
+  return BRIEF_HEADS.map(([k, h]) => [h, ...sec[k].map(x => `- ${x}`)].join('\n')).join('\n\n');
 }
 function rulesBrief(json) {
   const by = json.pokrycie.filter(p => p.fakty).sort((a, b) => b.fakty - a.fakty);
@@ -1687,13 +1811,85 @@ route('POST', '/api/ai/brief', async (req, res, u) => {
 Sekcje (nagłówki dokładnie tak): „Tematy do omówienia:”, „Przykłady z okresu:”, „Pytania otwarte:”, „Kryteria bez informacji:”.
 W „Przykładach” każde zdanie kończ odnośnikiem do faktu w nawiasie kwadratowym, np. [I12]. Używaj tylko identyfikatorów z pola "id".
 Nie podawaj poziomów, punktów ani wyniku. Nie oceniaj osoby. Nie dodawaj niczego spoza faktów.`, `FAKTY (JSON):\n${input}`);
-    const brief = checkBriefRefs(raw, ids);
+    const brief = checkBriefRefs(normalizeBrief(raw, json), ids);
     aiLog(null, u.id, 'brief', input, { text: brief, source: 'ai' });
     send(res, 200, { brief, json, source: 'ai', model: AI_MODEL });
   } catch {
     const brief = rulesBrief(json);
     aiLog(null, u.id, 'brief', input, { text: brief, source: 'rules' });
     send(res, 200, { brief: brief + (json.fakty.length ? '\n\n' + AI_RULE_NOTE : ''), json, source: 'rules' });
+  }
+});
+// Dobór kryteriów dodatkowych do rozmowy rozpoczynającej: dane deterministyczne z serwera, model tylko wybiera z listy dozwolonych.
+const CRIT_HINTS = [
+  ['ORIENTACJA NA KLIENTA', /klient|interesant|obsług|petent|zewnętrzn/i, 'obsługę klientów lub interesantów'],
+  ['MYŚLENIE ANALITYCZNE', /analiz|dane|danych|raport|statyst|sprawozdaw|budżet|finans/i, 'pracę z danymi, analizami lub raportami'],
+  ['NEGOCJOWANIE', /negocj|umow|kontrahent|przetarg|zamówień/i, 'negocjacje lub uzgadnianie warunków'],
+  ['WYSTĄPIENIA PUBLICZNE', /wystąpi|prezentac|szkole|konferenc|publiczn|rzecznik/i, 'wystąpienia, prezentacje lub szkolenia'],
+  ['RADZENIE SOBIE W SYTUACJIACH KR', /kryzys|awari|reagowan|interwenc|pilne/i, 'działanie w sytuacjach kryzysowych lub pilnych'],
+  ['ZARZĄDZANIE STRATEGICZNE', /strateg|planowan|programow|rozwój organizac/i, 'planowanie i prace o charakterze strategicznym'],
+  ['KREATYWNOŚĆ', /innow|nowych rozwiąz|usprawnien|pomysł|projektow/i, 'wymyślanie usprawnień i nowych rozwiązań'],
+  ['WYKORZYSTYWANIE WIEDZY', /specjalist|ekspert|doradz|prawn|legislac/i, 'wiedzę specjalistyczną'],
+];
+const critStem = w => w.toLowerCase().slice(0, 5);
+const critWords = s => [...new Set(String(s || '').toLowerCase().match(/\p{L}{5,}/gu) || [])].map(critStem);
+
+route('POST', '/api/ai/criteria', async (req, res, u) => {
+  if (u.role !== 'przelozony') return fail(res, 403, 'Dobór kryteriów jest dla przełożonego.');
+  const b = await readJson(req);
+  const emp = teamMember(u, b.employeeId);
+  if (!emp) return fail(res, 404, 'Nie znaleziono pracownika w Twoim zespole.');
+  if (b.typ !== 'B' && b.typ !== 'C') return invalid(res, { typ: 'Wybierz arkusz B lub C.' });
+  const duties = typeof b.duties === 'string' ? b.duties.slice(0, 3000) : '';
+  const position = db.prepare('SELECT position FROM users WHERE id=?').get(emp.id)?.position || '';
+  const mand = mandKeysFor(b.typ);
+  const allowed = MODEL.filter(c => !mand.includes(c.k));
+  const from = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const ev = Object.fromEntries(allowed.map(c => [c.k, 0])), fb = { ...ev };
+  for (const r of db.prepare('SELECT indicator FROM evidence WHERE employee_id=? AND date>=?').all(emp.id, from)) { const k = r.indicator.split('|')[0]; if (k in ev) ev[k]++; }
+  for (const r of db.prepare('SELECT indicator FROM feedback WHERE employee_id=? AND date>=?').all(emp.id, from)) { const k = r.indicator.split('|')[0]; if (k in fb) fb[k]++; }
+  const goals = db.prepare('SELECT s FROM goals WHERE user_id=?').all(emp.id).map(g => String(g.s || '').slice(0, 120)).filter(Boolean);
+  const nameOf = k => MODEL.find(c => c.k === k)?.n || k;
+  const list = allowed.map(c => `- ${c.k} (${c.n}): ${c.w.slice(0, 2).map(w => w.w.replace(/\s+/g, ' ')).join(' / ')} [informacje: ${ev[c.k]}, feedback: ${fb[c.k]}]`).join('\n');
+  const input = redactNames(`STANOWISKO: ${position || 'brak danych'}\nOBOWIĄZKI: ${duties || 'brak opisu'}\nCELE: ${goals.join('; ') || 'brak'}\nDOZWOLONE KRYTERIA (klucz dokładnie jak poniżej):\n${list}`);
+  const finish = (propozycje, odrzucone, source) => {
+    aiLog(null, u.id, 'criteria', input, { text: JSON.stringify(propozycje), source });
+    send(res, 200, { propozycje, odrzucone, source, ...(source === 'ai' ? { model: AI_MODEL } : {}) });
+  };
+  let odrzucone = 0;
+  try {
+    const raw = await llm(`Jesteś asystentem przełożonego w urzędzie. Dobierasz kryteria DODATKOWE do rozmowy rozpoczynającej. Wybierz 1–3 kryteria WYŁĄCZNIE z podanej listy dozwolonych (pole „kryterium” = klucz dokładnie jak na liście). Dla każdego napisz 1–2 zdania uzasadnienia odwołujące się do obowiązków, stanowiska lub zebranych informacji. Odpowiadaj po polsku. Nie oceniaj osoby, nie podawaj imion. Odpowiedz wyłącznie JSON-em: {"propozycje":[{"kryterium":"KLUCZ","uzasadnienie":"…"}]}`, input);
+    const m = raw.match(/\{[\s\S]*\}/);
+    const list2 = JSON.parse(m ? m[0] : raw)?.propozycje;
+    if (!Array.isArray(list2)) throw new Error('bad_shape');
+    const seen = new Set(), ok = [];
+    for (const p of list2) {
+      const k = typeof p?.kryterium === 'string' ? p.kryterium.trim() : '';
+      const why = typeof p?.uzasadnienie === 'string' ? p.uzasadnienie.trim().slice(0, 600) : '';
+      if (!allowed.some(c => c.k === k) || seen.has(k) || !why) { odrzucone++; continue; }
+      seen.add(k);
+      if (ok.length < MAX_EXTRA) ok.push({ k, n: nameOf(k), uzasadnienie: why }); else odrzucone++;
+    }
+    if (!ok.length) throw new Error('nothing_valid');
+    return finish(ok, odrzucone, 'ai');
+  } catch {
+    // Fallback regułowy: słowa kluczowe stanowiska i obowiązków + liczba zebranych informacji
+    const text = `${position} ${duties}`;
+    const tw = new Set(critWords(text));
+    const scored = allowed.map(c => {
+      const hint = CRIT_HINTS.find(h => h[0] === c.k);
+      const hintHit = hint && hint[1].test(text);
+      const wordHits = [...new Set([...critWords(c.n), ...c.w.flatMap(w => critWords(w.w))])].filter(x => tw.has(x)).length;
+      const info = ev[c.k] + fb[c.k];
+      const parts = [];
+      if (hintHit) parts.push(`Stanowisko lub obowiązki obejmują ${hint[2]}`);
+      else if (wordHits) parts.push('Opis stanowiska i obowiązków odpowiada wskaźnikom tego kryterium');
+      if (info) parts.push(`w ostatnich 12 miesiącach zebrano ${info} ${info === 1 ? 'informację' : 'informacji'} (informacje: ${ev[c.k]}, feedback: ${fb[c.k]})`);
+      return { c, score: (hintHit ? 10 : 0) + Math.min(wordHits, 5) + Math.min(info, 5), parts };
+    }).filter(x => x.score > 0).sort((a, z) => z.score - a.score || allowed.indexOf(a.c) - allowed.indexOf(z.c)).slice(0, MAX_EXTRA);
+    const propozycje = scored.map(x => ({ k: x.c.k, n: x.c.n, uzasadnienie: `${x.parts.join('; ').replace(/^./, ch => ch.toUpperCase())} – kryterium ${x.c.n}.` }));
+    if (!propozycje.length) { const c = allowed.find(x => x.k === 'ORIENTACJA NA KLIENTA') || allowed[0]; propozycje.push({ k: c.k, n: c.n, uzasadnienie: `Brak opisu obowiązków i zebranych informacji – kryterium ${c.n} to punkt wyjścia do rozmowy; uzupełnij obowiązki, aby dobór był trafniejszy.` }); }
+    return finish(propozycje, odrzucone, 'rules');
   }
 });
 route('POST', '/api/ai/talk', async (req, res, u) => {
@@ -2045,13 +2241,13 @@ const server = http.createServer(async (req, res) => {
     const pa = route_.pattern.split('/'), ua = url.pathname.split('/');
     const params = {};
     pa.forEach((seg, i) => { if (seg.startsWith(':')) params[seg.slice(1)] = Number(ua[i]); });
-    const publicPaths = ['/api/login', '/api/logout', '/api/model', '/api/demo', '/api/activate'];
+    const publicPaths = ['/api/session', '/api/login', '/api/logout', '/api/model', '/api/demo', '/api/activate'];
     let u = null;
-    if (!publicPaths.includes(url.pathname)) {
+    if (!publicPaths.includes(url.pathname) || url.pathname === '/api/session') {
       u = sessionUser(req);
-      if (!u) return fail(res, 401, 'Zaloguj się.');
+      if (!u && url.pathname !== '/api/session') return fail(res, 401, 'Zaloguj się.');
       // Hasło nadane przez kogoś innego: do czasu zmiany dostępne są tylko dane konta i zmiana hasła
-      if (u.must_change && !['/api/me', '/api/password'].includes(url.pathname)) return fail(res, 403, 'Zmień hasło, aby kontynuować.', { code: 'password_change_required' });
+      if (u?.must_change && !['/api/me', '/api/session', '/api/password'].includes(url.pathname)) return fail(res, 403, 'Zmień hasło, aby kontynuować.', { code: 'password_change_required' });
     }
     await route_.handler(req, res, u, params);
   } catch (e) {

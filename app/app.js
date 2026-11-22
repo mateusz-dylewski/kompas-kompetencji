@@ -3,7 +3,10 @@
   const $ = (s, r = document) => r.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pretty = s => s.toLowerCase().replace(/(^|\s)\S/g, m => m.toUpperCase());
-  const nameOf = k => (MODEL.find(c => c.k === k) || {}).n || pretty(k);
+  // Zwykła pisownia: pierwsza litera wielka, reszta małe; skróty (np. IPRZ) i samodzielne „i/oraz” zostają
+  const ACR = new Set(["IPRZ", "KPA", "RODO", "BHP", "UE", "AI", "PDF"]);
+  const sentence = s => { const t = String(s ?? ""); if (!/[A-ZĄĆĘŁŃÓŚŹŻ]{2,}/.test(t)) return t; const r = t.split(/(\s+|\/)/).map(x => ACR.has(x) ? x : x.toLowerCase()).join(""); return r.charAt(0).toUpperCase() + r.slice(1); };
+  const nameOf = k => sentence((MODEL.find(c => c.k === k) || {}).n || pretty(k));
   const avatar = (src, name, cls = "av") => src
     ? `<img class="${cls}" src="${esc(src)}" alt="" width="40" height="40" loading="lazy">`
     : `<span class="${cls} av-ph" aria-hidden="true">${esc(String(name || "?").split(" ").map(x => x[0]).slice(0, 2).join(""))}</span>`;
@@ -11,7 +14,7 @@
   const compIc = k => KK_COMP_ICON(k, "ic-svg comp-ic");
   const fmt = n => (n === null || n === undefined ? "—" : Number(n).toFixed(1));
   const MODEL = window.KK_MODEL || [];
-  const TYP = { pierwsza: "Pierwsza ocena", B: "Okresowa – kierownicza (Arkusz B)", C: "Okresowa – pozostałe stanowiska (Arkusz C)" };
+  const TYP = { pierwsza: "Pierwsza ocena", B: "Okresowa – Arkusz B (osoby kierujące zespołem)", C: "Okresowa – Arkusz C (pozostałe stanowiska)" };
   const STATUS = { draft: ["Szkic", "wr"], submitted: ["Złożona", "info"], discussed: ["Omówiona", "ok"], none: ["Brak oceny", ""] };
   const LEVELS5 = ["Znacznie poniżej", "Poniżej", "Na poziomie", "Powyżej", "Znacznie powyżej"];
   const PTS5 = [1, 3, 5, 7, 9];
@@ -28,7 +31,7 @@
       ["home", "Start", "home", "Co dziś warto zrobić"],
       ["profile", "Mój profil", "user", "Jak widzisz swoje kompetencje"],
       ["goals", "Cele", "flag", "Dokąd chcesz dojść"],
-      ["evidence", "Informacje i feedback", "book", "Obserwacje, feedback i rozmowy miesięczne – Twój wgląd"],
+      ["evidence", "Informacje i opinie", "book", "Obserwacje, informacja zwrotna i rozmowy miesięczne – Twój wgląd"],
       ["evals", "Oceny", "file", "Oceny złożone przez przełożonego"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
     ],
@@ -41,7 +44,7 @@
       ["results", "Wyniki", "chart", "Obraz zespołu bez ocen indywidualnych"],
       ["log", "Dziennik", "lock", "Kto i kiedy działał w systemie"],
       ["ai", "Asystent AI", "spark", "Proste pytania o system i zasady – bez limitu"],
-      ["settings", "Ustawienia", "spark", "Moduły spoza rozporządzenia – włącz lub wyłącz"],
+      ["settings", "Ustawienia", "gear", "Moduły spoza rozporządzenia – włącz lub wyłącz"],
     ],
   };
   // Strony, które znikają z menu po wyłączeniu modułu (moduły spoza rozporządzenia)
@@ -64,8 +67,8 @@
     try { r = await fetch(url, opt); }
     catch (_) { const e = new Error("Brak połączenia z serwerem. Uruchom w terminalu: node server.mjs i otwórz http://localhost:8080"); e.status = 0; throw e; }
     let j = {}; try { j = await r.json(); } catch (_) {}
-    if (r.status === 401 && url !== "/api/login" && url !== "/api/password") { S.user = null; renderLogin(); throw new Error("Sesja wygasła. Zaloguj się ponownie."); }
-    if (r.status === 403 && j.code === "password_change_required") { renderPasswordChange(); throw new Error(j.error); }
+    if (r.status === 401 && url !== "/api/login" && url !== "/api/password") { S.user = null; renderLogin(); throw Object.assign(new Error("Sesja wygasła. Zaloguj się ponownie."), { status: 401 }); }
+    if (r.status === 403 && j.code === "password_change_required") { renderPasswordChange(); throw Object.assign(new Error(j.error), { status: 403 }); }
     if (!r.ok) { const e = new Error(j.error || "Wystąpił błąd."); e.data = j; e.status = r.status; throw e; }
     return j;
   }
@@ -73,6 +76,12 @@
     document.querySelectorAll(".toast").forEach(t => t.remove());
     const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 2800);
+  };
+  // Komunikaty z API (mają status/data) pokazujemy wprost; błędy kodu – tylko w konsoli, użytkownik widzi prosty komunikat
+  const errMsg = e => {
+    if (e && (e.status !== undefined || e.data)) return e.message;
+    console.warn(e);
+    return "Coś poszło nie tak. Odśwież stronę i spróbuj ponownie.";
   };
   // Link aktywacyjny: lokalnie pokazujemy go przełożonemu (demo); w produkcji trafia tylko na e-mail pracownika
   const activationInfo = a => openModal(`
@@ -84,19 +93,26 @@
   // Rozmowa rozpoczynająca: arkusz, data, kryteria dodatkowe (maks. S.maxExtra, bez obowiązkowych), obowiązki, oczekiwania, cele
   async function kickoffModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
+    const fromSteps = !!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".steps3"));
     const list = (await api("GET", `/api/kickoffs?employeeId=${empId}`)).kickoffs;
     const cur = list[0] && !list[0].ackAt ? list[0] : null;
-    const v = cur || { typ: "C", date: new Date().toISOString().slice(0, 10), extraCriteria: [], duties: "", expectations: "", goals: "" };
-    const extras = typ => MODEL.filter(m => !isMand(m.k, typ)).map(m => `<label class="choice"><input type="checkbox" data-extra="${esc(m.k)}" ${v.extraCriteria.includes(m.k) ? "checked" : ""}><span>${esc(nameOf(m.k))}</span></label>`).join("");
+    const v = cur || { typ: "", date: new Date().toISOString().slice(0, 10), extraCriteria: [], duties: "", expectations: "", goals: "" };
+    const extras = typ => !typ ? `<p class="muted">Najpierw wybierz arkusz – wtedy pokażemy kryteria dodatkowe.</p>` : MODEL.filter(m => !isMand(m.k, typ)).map(m => `<label class="choice"><input type="checkbox" data-extra="${esc(m.k)}" ${v.extraCriteria.includes(m.k) ? "checked" : ""}><span>${esc(nameOf(m.k))}</span></label>`).join("");
     openModal(`
       <h2 id="kTitle">Rozmowa rozpoczynająca – ${first(emp ? emp.name : "")}</h2>
-      <p class="muted">Termin: 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny.${list[0] && list[0].ackAt ? ` Ostatnia rozmowa: ${esc(list[0].date)} (zapoznano).` : ""}</p>
+      <p>Ustal z pracownikiem obowiązki, oczekiwania i cele na ten okres. Pracownik potwierdzi zapoznanie w swoim panelu.</p>
+      ${list[0] && list[0].ackAt ? `<p class="muted">Ostatnia rozmowa: ${esc(isoToPl(list[0].date))} (zapoznano).</p>` : ""}
+      <details class="adv"><summary>Podstawa prawna</summary><p class="muted">Rozmowę rozpoczynającą przeprowadza się w terminie 30 dni od poprzedniej oceny. Pracownik potwierdza zapoznanie (część I arkusza) – od tego dnia liczy się okres oceny. Rozporządzenie Prezesa Rady Ministrów z 4 kwietnia 2016 r. w sprawie przeprowadzania ocen okresowych członków korpusu służby cywilnej.</p></details>
       <form id="kForm" novalidate>
-        <fieldset class="plain"><legend class="f">Arkusz</legend>
-          <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>B – kierujący zespołem</span></label>
-          <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>C – pozostałe stanowiska</span></label></fieldset>
-        <label class="f" for="kDate">Data rozmowy</label><input id="kDate" type="date" required value="${esc(v.date)}">
-        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div></fieldset>
+        <fieldset class="plain"><legend class="f">Rodzaj arkusza oceny</legend>
+          <label class="choice"><input type="radio" name="kTyp" value="B" ${v.typ === "B" ? "checked" : ""}><span>Arkusz B – osoby kierujące zespołem</span></label>
+          <label class="choice"><input type="radio" name="kTyp" value="C" ${v.typ === "C" ? "checked" : ""}><span>Arkusz C – pozostałe stanowiska</span></label>
+          <p class="muted" id="kTypHelp">Arkusz B dotyczy osób kierujących zespołem, arkusz C – pozostałych stanowisk. Od arkusza zależą kryteria obowiązkowe, dlatego wybierasz go świadomie – bez ustawienia domyślnego.</p></fieldset>
+        <label class="f" for="kDate">Data rozmowy</label>${dateFieldHtml("kDate", v.date, "required")}
+        <fieldset class="plain"><legend class="f">Kryteria dodatkowe (maks. ${S.maxExtra}; obowiązkowe są wybrane automatycznie)</legend><div id="kExtras">${extras(v.typ)}</div><p class="muted mand-note">Kryteria obowiązkowe wg rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r. (załącznik – arkusz B/C).</p>
+          <div class="ai-crit"><button type="button" class="btn" id="kAiBtn">${KK_ICON("star")}<span>Zaproponuj kryteria (AI)</span></button>
+            <div class="ai-crit-out" id="kAiOut" aria-live="polite"></div>
+            <p class="muted">AI proponuje tylko kryteria z rozporządzenia. Decyzja należy do Ciebie.</p></div></fieldset>
         <label class="f" for="kDuties">Obowiązki na stanowisku</label><textarea id="kDuties" required minlength="10" maxlength="2000">${esc(v.duties)}</textarea>
         <label class="f" for="kExp">Oczekiwania wobec realizacji kryteriów</label><textarea id="kExp" required minlength="10" maxlength="2000">${esc(v.expectations)}</textarea>
         <label class="f" for="kGoals">Cele na okres oceny</label><textarea id="kGoals" required minlength="10" maxlength="2000">${esc(v.goals)}</textarea>
@@ -104,20 +120,46 @@
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
       document.querySelectorAll('[name="kTyp"]').forEach(r => r.addEventListener("change", () => { v.typ = r.value; v.extraCriteria = []; $("#kExtras").innerHTML = extras(r.value); }));
+      $("#kAiBtn").addEventListener("click", async () => {
+        const b = $("#kAiBtn"), out = $("#kAiOut");
+        if (!document.querySelector('[name="kTyp"]:checked')) { out.innerHTML = `<div class="err" role="alert">Najpierw wybierz arkusz (B albo C).</div>`; return; }
+        b.disabled = true;
+        out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} dobiera kryteria…`); const stop = startThinking(out);
+        try {
+          const r = await api("POST", "/api/ai/criteria", { employeeId: empId, typ: document.querySelector('[name="kTyp"]:checked').value, duties: $("#kDuties").value });
+          const pr = r.propozycje || [];
+          out.innerHTML = pr.length ? `<ul class="ai-props">${pr.map(p => `<li class="ai-prop"><b>${esc(nameOf(p.k))}</b><span>${esc(p.uzasadnienie || "")}</span></li>`).join("")}</ul>
+            <p class="ai-crit-src">Źródło: ${r.source === "ai" ? "model AI" : "reguły"}.</p>
+            <button type="button" class="btn" id="kAiApply">Zaznacz te kryteria</button>` : `<p class="muted">Brak propozycji dla podanych obowiązków. Wybierz kryteria samodzielnie.</p>`;
+          const ap = $("#kAiApply");
+          if (ap) ap.addEventListener("click", () => {
+            document.querySelectorAll("[data-extra]").forEach(x => { x.checked = false; });
+            pr.slice(0, S.maxExtra).forEach(p => { const x = document.querySelector(`[data-extra="${CSS.escape(p.k)}"]`); if (x) x.checked = true; });
+            out.insertAdjacentHTML("beforeend", `<p class="muted" role="status">Zaznaczono. Możesz to zmienić przed zapisem.</p>`); ap.disabled = true;
+          });
+        } catch (ex) { out.innerHTML = `<div class="err" role="alert">Nie udało się pobrać podpowiedzi: ${esc(errMsg(ex))} Wybierz kryteria samodzielnie.</div>`; }
+        finally { stop(); b.disabled = false; }
+      });
+      const kd = bindDate("kDate");
       $("#kForm").addEventListener("submit", async e => {
         e.preventDefault();
+        const kIso = kd.iso(); if (!kIso) { $("#kDate").focus(); return; }
+        if (!document.querySelector('[name="kTyp"]:checked')) { $("#kErr").textContent = "Wybierz arkusz: B (osoby kierujące zespołem) albo C (pozostałe stanowiska)."; document.querySelector('[name="kTyp"]').focus(); return; }
         const extra = [...document.querySelectorAll("[data-extra]:checked")].map(x => x.dataset.extra);
         if (extra.length > S.maxExtra) { $("#kErr").textContent = `Najwyżej ${S.maxExtra} kryteria dodatkowe.`; return; }
-        const body = { typ: document.querySelector('[name="kTyp"]:checked').value, date: $("#kDate").value, extraCriteria: extra, duties: $("#kDuties").value, expectations: $("#kExp").value, goals: $("#kGoals").value };
+        const body = { typ: document.querySelector('[name="kTyp"]:checked').value, date: kIso, extraCriteria: extra, duties: $("#kDuties").value, expectations: $("#kExp").value, goals: $("#kGoals").value };
         try {
           if (cur) await api("PUT", `/api/kickoffs/${cur.id}`, body); else await api("POST", "/api/kickoffs", { employeeId: empId, ...body });
           closeModal(); toast("Zapisano rozmowę rozpoczynającą. Pracownik potwierdzi zapoznanie w swoim panelu."); await refreshData(); render();
+          // powrót fokusu na przycisk, z którego otwarto okno (po odświeżeniu widoku stary przycisk już nie istnieje)
+          (fromSteps ? document.querySelector('.steps3 [data-act="kickoff"]') : document.querySelector(`[data-act="kickoff"][data-emp="${empId}"]`) || document.querySelector('.steps3 [data-act="kickoff"]'))?.focus();
         } catch (ex) { $("#kErr").textContent = ex.data?.fields ? Object.values(ex.data.fields).join(" ") : ex.message; }
       });
     }, "kTitle");
   }
   // Dobrowolna ankieta po złożeniu oceny: zapisywana anonimowo (tylko wartość i miesiąc), do metryk zbiorczych
   const surveyModal = evalId => openModal(`
+      <p class="ok-banner" role="status">${KK_ICON("check")}<span>Ocena złożona. Pracownik zobaczy ją w swoim panelu.</span></p>
       <h2>Jedno pytanie (dobrowolne)</h2>
       <p>Jak oceniasz swoje przygotowanie do rozmowy oceniającej z pomocą aplikacji?</p>
       <form id="svForm"><fieldset class="plain"><legend class="sr">Ocena od 1 do 5</legend>
@@ -127,7 +169,7 @@
       $("#svForm").addEventListener("submit", async e => {
         e.preventDefault();
         const r = document.querySelector('[name="sv"]:checked'); if (!r) return toast("Wybierz wartość albo pomiń.");
-        try { await api("POST", `/api/evals/${evalId}/survey`, { rating: +r.value }); closeModal(); toast("Dziękujemy."); } catch (ex) { toast(ex.message); }
+        try { await api("POST", `/api/evals/${evalId}/survey`, { rating: +r.value }); closeModal(); toast("Dziękujemy."); } catch (ex) { toast(errMsg(ex)); }
       });
     });
   async function loadMetrics() {
@@ -135,7 +177,7 @@
     let m; try { m = await api("GET", "/api/metrics"); } catch (ex) { box.querySelector("p").textContent = ex.message; return; }
     const pct = v => (v === null || v === undefined ? "—" : `${v}%`);
     box.innerHTML = `<h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2>` + (m.suppressed
-      ? `<div class="note warn">Metryki pokazujemy, gdy dane pochodzą od co najmniej ${m.kMin} przełożonych (obecnie ${m.managers}). Nie mierzymy pojedynczych osób.</div>`
+      ? `<div class="note warn">Metryki wsparcia przełożonych pokazujemy od ${m.kMin} przełożonych – obecnie ${m.managers}. To dane o korzystaniu z aplikacji, nie o pojedynczych osobach.</div>`
       : `<ul class="c">
           <li>Ocenianie: miesiące okresu z co najmniej jedną informacją – mediana <b>${pct(m.coverage.medianPct)}</b> (${m.coverage.n} ocen)</li>
           <li>Ocena na piśmie: od szkicu do złożenia – mediana <b>${m.submit.medianDays ?? "—"} dni</b>; poprawki po złożeniu: <b>${pct(m.submit.revisedPct)}</b></li>
@@ -147,6 +189,8 @@
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
   const isoToPl = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || "") ? iso.split("-").reverse().join(".") : iso || "");
+  // Data z godziną: „dd.mm.rrrr gg:mm”; sama data: „dd.mm.rrrr”
+  const plDT = at => { const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}` : at || ""; };
   // Przyjmuje kolejne cyfry: dzień 01–31, miesiąc 01–12; „5” w dniu → „05.”, „2” w miesiącu → „02.”
   function maskDigits(raw) {
     let out = "";
@@ -194,6 +238,11 @@
     input.addEventListener("blur", () => { const dg = maskDigits(input.value); if (dg.length) show(check(dg), true); });
     return { iso: () => { const dg = maskDigits(input.value), msg = check(dg); show(msg, true); return msg ? "" : `${dg.slice(4)}-${dg.slice(2, 4)}-${dg.slice(0, 2)}`; } };
   }
+  // Pole daty jako tekst DD.MM.RRRR (maska dateMask); wartość początkowa z ISO, odczyt zwraca RRRR-MM-DD
+  const dateFieldHtml = (id, iso, extra = "") => `<input id="${id}" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="DD.MM.RRRR" aria-describedby="${id}Err" value="${esc(isoToPl(iso || ""))}" ${extra}><div class="err" id="${id}Err" role="alert"></div>`;
+  const bindDate = (id, opt) => { const el = $("#" + id); return el ? dateMask(el, $("#" + id + "Err"), opt) : null; };
+  // Odczyt: pusta wartość -> "" (pole opcjonalne), błędna -> null (komunikat przy polu)
+  const readDate = (h, id) => { const el = $("#" + id); if (!el || !el.value.trim()) return ""; const r = h.iso(); return r || null; };
   // ---------- Cele: kafelki (wyznacza przełożony; pracownik zgłasza krok, przełożony potwierdza) ----------
   const goalStepState = x => (x.confirmed_at ? "confirmed" : x.reported_at ? "reported" : "open");
   function goalTile(g, mode) {
@@ -201,17 +250,17 @@
     const state = g.done ? '<span class="tag ok">zrealizowany</span>' : rep ? `<span class="tag wr">${rep} do potwierdzenia</span>` : '<span class="tag info">w toku</span>';
     const stepBtn = (x, i) => {
       const st = goalStepState(x);
-      if (mode === "emp") return st === "confirmed" ? `<span class="muted">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
-        : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
-      return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
+      if (mode === "emp") return st === "confirmed" ? `<span class="st-meta">potwierdzone ${esc(isoToPl(x.confirmed_at.slice(0, 10)))}</span>`
+        : `<button class="btn sm g" data-act="goalReport" data-goal="${g.id}" data-step="${i}" data-val="${st === "reported" ? 0 : 1}" aria-label="${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"} kroku „${esc(x.t)}” – ${esc(g.s)}">${st === "reported" ? "Cofnij zgłoszenie" : "Zgłoś wykonanie"}</button>`;
+      return `<button class="btn sm ${st === "reported" ? "" : "g"}" data-act="goalConfirm" data-goal="${g.id}" data-step="${i}" data-val="${st === "confirmed" ? 0 : 1}" aria-label="${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"} krok „${esc(x.t)}” – ${esc(g.s)}">${st === "confirmed" ? "Cofnij potwierdzenie" : "Potwierdź"}</button>`;
     };
     const label = { confirmed: "potwierdzony", reported: "zgłoszony – czeka na potwierdzenie", open: "do zrobienia" };
     const body = n ? `
         <div class="seg" role="img" aria-label="Potwierdzone kroki: ${k} z ${n}${rep ? `, zgłoszone: ${rep}` : ""}">${g.steps.map(x => `<i class="${{ confirmed: "on", reported: "rep", open: "" }[goalStepState(x)]}"></i>`).join("")}</div>
         <div class="muted"><b>${k} z ${n}</b> kroków potwierdzonych</div>
         <div class="trend" data-trend-goal="${g.id}"></div>
-        <details class="goal-steps"><summary>Kroki</summary>
-          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><small class="muted">${label[goalStepState(x)]}</small></span>${stepBtn(x, i)}</li>`).join("")}</ul>
+        <details class="goal-steps"${n <= 5 ? " open" : ""}><summary>Kroki</summary>
+          <ul class="steps">${g.steps.map((x, i) => `<li class="st-${goalStepState(x)}"><span class="st-t"><b>${esc(x.t)}</b><br><span class="st-meta">${label[goalStepState(x)]}</span></span>${stepBtn(x, i)}</li>`).join("")}</ul>
           ${mode === "mgr" && n < 8 ? `<button class="btn sm g" data-act="addStep" data-id="${g.id}">${KK_ICON("plus")}<span>Dodaj krok</span></button>` : ""}
         </details>`
       : `<p class="muted">Cel sprzed zmian – bez kroków.</p><button class="btn sm g" data-act="toggleGoal" data-id="${g.id}" data-done="${g.done ? 0 : 1}">${g.done ? "Cofnij" : "Oznacz jako zrealizowany"}</button>`;
@@ -243,7 +292,8 @@
   // Zmiana między dwiema ostatnimi ocenami okresowymi (bez średniej i prognozy)
   async function loadCompare(empId) {
     const box = $("#cmpBox"); if (!box) return;
-    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(ex.message)}</p>`; return; }
+    let r; try { r = await api("GET", "/api/evals/compare" + (empId ? `?employeeId=${empId}` : "")); } catch (ex) { if (!box.isConnected) return; box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2><p class="muted">${esc(errMsg(ex))}</p>`; return; }
+    if (!box.isConnected) return;
     const arrow = { wzrost: "▲ wzrost", spadek: "▼ spadek", "bez zmian": "= bez zmian" };
     box.innerHTML = `<h2>Zmiana między ocenami okresowymi</h2>` + (!r.available
       ? `<p class="muted">Porównanie pojawi się, gdy będą dwie złożone oceny okresowe (B lub C).</p>`
@@ -251,23 +301,63 @@
         <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Kryterium</th><th scope="col">Poprzednio</th><th scope="col">Teraz</th><th scope="col">Zmiana</th></tr></thead><tbody>
         ${r.competencies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.previous} pkt</td><td>${c.current} pkt</td><td><span class="tag ${c.direction === "wzrost" ? "ok" : c.direction === "spadek" ? "wr" : ""}">${arrow[c.direction]}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">Brak wspólnych kryteriów w obu ocenach.</td></tr>`}</tbody></table></div>`);
   }
+  // Terminy i sprawy: wpisy tej samej osoby w jednym wierszu (zdanie prostym językiem + przyciski akcji)
+  function alertsCard(alerts) {
+    if (!alerts || !alerts.length) return "";
+    const plural = n => n === 1 ? "krok celu czeka" : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "kroki celu czekają" : "kroków celu czeka";
+    const sentence = x => {
+      let m;
+      if (x.kind === "goals" && (m = /(\d+)\s*$/.exec(x.text))) return `${m[1]} ${plural(+m[1])} na Twoje potwierdzenie`;
+      if (x.kind === "kickoff" && (m = /(\d{4}-\d{2}-\d{2})/.exec(x.text))) return /minął/.test(x.text) ? `Termin rozmowy rozpoczynającej minął ${isoToPl(m[1])}` : `Rozmowa rozpoczynająca do ${isoToPl(m[1])}`;
+      if (x.kind === "kickoff_ack" && (m = /(\d{4}-\d{2}-\d{2})/.exec(x.text))) return `Rozmowa rozpoczynająca z ${isoToPl(m[1])} czeka na zapoznanie pracownika`;
+      return x.text;
+    };
+    const btn = x => x.kind === "goals" ? `<button class="btn g" data-act="mgrGoals" data-emp="${x.employeeId}" aria-label="Cele pracownika – ${first(x.name)}">Cele pracownika</button>`
+      : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn g" data-act="kickoff" data-emp="${x.employeeId}" aria-label="Rozmowa rozpoczynająca – ${first(x.name)}">Rozmowa rozpoczynająca</button>`
+      : `<button class="btn g" data-act="openEval" data-id="${x.evalId}" aria-label="Otwórz ocenę – ${first(x.name)}">Otwórz</button>`;
+    const groups = [];
+    alerts.forEach(x => { let g = groups.find(y => y.name === x.name); if (!g) groups.push(g = { name: x.name, items: [] }); g.items.push(x); });
+    return `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="todo">${groups.map(g => `<li class="todo-row"><div class="todo-t"><b>${first(g.name)}</b>${g.items.map(x => /minął|po terminie/i.test(x.text || "") ? `<span class="overdue"><span class="tag bad">${KK_ICON("alert")}<span>po terminie</span></span> ${esc(sentence(x))}</span>` : `<span>${esc(sentence(x))}</span>`).join("")}</div><div class="todo-a">${g.items.map(btn).join("")}</div></li>`).join("")}</ul></div>`;
+  }
   // Brief do rozmowy: tekst z odnośnikami do faktów + fakty (JSON „kto co robił”) zbudowane przez serwer
   const factLine = f => `<li id="fact-${esc(f.id.replace(/\./g, "-"))}"><b>[${esc(f.id)}]</b> <span class="muted">${esc(isoToPl(f.data))} · ${esc(f.rodzaj)}${f.kryterium ? " · " + esc(nameOf(f.kryterium)) : ""} · ${esc(f.kto_zapisal || f.kto || "")}${f.zrodlo ? " · źródło: " + esc(f.zrodlo) : ""}</span><br>${esc([f.sytuacja, f.dzialanie, f.rezultat, f.opis, f.co_zrobiono, f.co_wymaga_uwagi, f.krok ? `${f.cel}: ${f.krok}` : ""].filter(Boolean).join(" · "))}</li>`;
-  const briefHtml = text => esc(text).replace(/\[([IFCG][0-9.]+)\]/g, (m, id) => `<a href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}">[${id}]</a>`);
+  // Opis linku „źródło”: rodzaj i data faktu (z S.briefJson.fakty), np. „Źródło: informacja z 22.09.2026”
+  const srcTitle = id => {
+    const f = ((S.briefJson && S.briefJson.fakty) || []).find(x => x.id === id);
+    const kind = { I: "informacja", C: "rozmowa miesięczna", F: "informacja zwrotna", G: "krok celu" }[id[0]] || "fakt";
+    return f && f.data ? `Źródło: ${kind} z ${isoToPl(f.data)}` : `Źródło: ${kind} ${id}`;
+  };
+  const briefInline = t => esc(t).replace(/\s*\[([IFCG][0-9.]+)\]/g, (m, id) => ` <a class="src-link" href="#fact-${id.replace(/\./g, "-")}" data-fact="${id}" aria-label="${esc(srcTitle(id))}" title="${esc(srcTitle(id))}">źródło</a>`);
+  // Tekst wielowierszowy (brief, odpowiedzi AI, plan rozwoju): „Nagłówek:” -> h3, „- …” -> lista punktowana, „1. …” -> lista numerowana, reszta -> akapit
+  function briefHtml(text, plain) {
+    let out = "", open = "";
+    const close = () => { if (open) { out += `</${open}>`; open = ""; } };
+    const start = tag => { if (open !== tag) { close(); out += `<${tag} class="c">`; open = tag; } };
+    String(text).replace(/\r/g, "").split("\n").forEach(raw => {
+      const l = raw.trim().replace(/^#{1,4}\s+/, "").replace(/\*\*/g, ""); if (!l) return;
+      let m;
+      if ((m = /^[-*•]\s+(.*)$/.exec(l))) { start("ul"); out += `<li>${briefInline(m[1])}</li>`; return; }
+      if ((m = /^\d+[.)]\s+(.*)$/.exec(l))) { start("ol"); out += `<li>${briefInline(m[1])}</li>`; return; }
+      close();
+      if (/^[^.!?]{2,70}:$/.test(l)) out += `<h3>${esc(l.replace(/:$/, ""))}</h3>`; else out += `<p${plain ? "" : ' class="muted"'}>${briefInline(l)}</p>`;
+    });
+    close(); return out;
+  }
+  const aiRich = t => `<div class="ai-out brief-text">${briefHtml(t, true)}</div>`;
   async function briefModal(empId) {
     const emp = (S.dash.team || []).find(t => t.id === empId);
-    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
-    const stop = startThinking($("#brBody"));
-    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); $("#brBody").innerHTML = `<p class="muted">${esc(ex.message)}</p>`; return; }
-    stop(); S.briefJson = r.json;
+    openModal(`<h2 id="brTitle">Brief do rozmowy – ${first(emp ? emp.name : "")}</h2><p class="muted">Tematy, przykłady z zebranych informacji z odnośnikami do faktów, pytania otwarte. Bez ocen i punktów. Zwykle 10–30 s.</p><div id="brBody">${thinkingHtml(`Model AI ${aiWhere()} przygotowuje brief z zebranych informacji…`)}</div>`, null, "brTitle");
+    const body = $("#brBody");
+    const stop = startThinking(body);
+    let r; try { r = await api("POST", "/api/ai/brief", { employeeId: empId }); } catch (ex) { stop(); if (body.isConnected) body.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; return; }
+    stop(); if (!body.isConnected) return; S.briefJson = r.json;
     const j = r.json;
-    $("#brBody").innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
-      <div class="tabs" role="tablist"><button class="btn sm" role="tab" aria-selected="true" data-act="briefTab" data-tab="brief">Brief</button><button class="btn sm g" role="tab" aria-selected="false" data-act="briefTab" data-tab="json">Fakty (JSON)</button></div>
-      <div data-brief-pane="brief"><div class="ai-out brief-text">${briefHtml(r.brief)}</div>
-        <h3>Fakty</h3>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}</div>
-      <div data-brief-pane="json" hidden><pre class="json-out">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></div>
+    body.innerHTML = `<p class="muted">Okres ${esc(isoToPl(j.okres.od))} – ${esc(isoToPl(j.okres.do))} · ${j.fakty.length} faktów · ${r.source === "ai" ? "Przygotował asystent AI" : "Przygotowano bez modelu AI (reguły)"}. Brief to propozycja – nie zawiera ocen ani wyniku.</p>
+      <div class="ai-out brief-text">${briefHtml(String(r.brief).replace(/Kryteria bez informacji:\s*\n\s*[-*•]\s*brak\.?\s*$/i, "Wszystkie kryteria mają zebrane informacje."))}</div>
+      <h3 id="brFacts">Fakty, na które powołuje się brief</h3><p class="muted">Źródła: zapisane informacje (I…), rozmowy miesięczne (C…), informacje zwrotne (F…) i kroki celów (G…), na których opiera się brief.</p>${j.fakty.length ? `<ul class="ev-list">${j.fakty.map(factLine).join("")}</ul>` : `<p class="muted">Brak wpisów w okresie.</p>`}
+      <details class="adv"><summary>Dla zaawansowanych: dane w formacie JSON</summary><pre class="json-out" tabindex="0" aria-label="Dane w formacie JSON">${esc(JSON.stringify(j, null, 2))}</pre><button class="btn sm" data-act="briefDownload">Pobierz JSON</button></details>
       <div class="btns"><button type="button" class="btn g" data-act="closeModal">Zamknij</button></div>`;
-    bindActs($("#brBody"));
+    bindActs(body);
   }
   // Przełożony: okno z celami pracownika (dodawanie, potwierdzanie kroków)
   async function goalsModal(empId) {
@@ -297,7 +387,7 @@
   async function loadMonthGoals() {
     const box = $("#monthGoals"); if (!box || !S.month.employeeId) return;
     try { const goals = (await api("GET", `/api/goals?employeeId=${S.month.employeeId}`)).goals; box.innerHTML = `<div class="row"><h2>Cele</h2><button class="btn sm" data-act="newGoalFor" data-emp="${esc(S.month.employeeId)}">${KK_ICON("plus")}<span>Nowy cel</span></button></div>${goalTiles(goals, "mgr")}`; fillTrends(S.month.employeeId); }
-    catch (ex) { box.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+    catch (ex) { box.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
   }
   // Po zmianie celu odśwież miejsce, w którym pracuje użytkownik
   async function refreshGoals() {
@@ -308,7 +398,7 @@
   }
   // ---------- Plan rozwoju: wnioski z oceny + obszary + przejście do celów ----------
   function devPlan(d, items) {
-    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<p style="margin:6px 0 0;white-space:pre-line">${esc(d.devPlan.plan)}</p>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
+    const mp = d.devPlan ? `<div class="note"><b>Od przełożonego</b> · ${esc(isoToPl(d.devPlan.created.slice(0, 10)))}<div class="plan-text">${briefHtml(d.devPlan.plan, true)}</div>${d.devPlan.message ? `<p style="margin:8px 0 0"><b>Komunikat:</b> ${esc(d.devPlan.message)}</p>` : ""}</div>` : "";
     return mp + devPlanFromEval(d, items, !!d.devPlan);
   }
   function devPlanFromEval(d, items, hasPlan) {
@@ -317,7 +407,7 @@
     if (d.latestDev) {
       const e = d.latestDevEval;
       return `<p class="muted">Wnioski zapisał przełożony w ocenie ${e ? `${esc(TYP[e.typ])} za okres ${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}` : ""}.</p>
-        <p>${esc(d.latestDev)}</p>${areas}
+        <div class="plan-text">${briefHtml(d.latestDev, true)}</div>${areas}
         <div class="btns" style="justify-content:flex-start">${e ? `<button class="btn sm g" data-act="readEval" data-id="${e.id}">${KK_ICON("eye")}<span>Zobacz ocenę</span></button>` : ""}<button class="btn sm" data-nav="goals">${KK_ICON("flag")}<span>Przejdź do celów</span></button></div>`;
     }
     if (hasPlan) return areas;
@@ -344,7 +434,7 @@
   }
   // Gdzie działa model AI: lokalnie (Ollama) albo na serwerze zewnętrznym (tryb zgodny z OpenAI, KK_AI_KEY)
   const aiWhere = () => (S.ai && S.ai.remote ? "zewnętrzny" : "lokalnie");
-  const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id }));
+  const normEvals = list => list.map(e => ({ id: e.id, typ: e.typ, status: e.status, periodFrom: e.period_from, periodTo: e.period_to, employeeId: e.employee_id, ackAt: e.ack_at || null }));
 
   // ---------- Elementy wspólne ----------
   const pill = st => `<span class="tag ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
@@ -353,10 +443,20 @@
   const first = name => esc(String(name || "").replace(/ \(demo\)/, ""));
   function countUp(el) {
     const to = parseFloat(el.dataset.to); if (isNaN(to)) return;
-    const dec = el.dataset.dec ? +el.dataset.dec : 0; const t0 = performance.now(); const dur = 800;
+    const dec = el.dataset.dec ? +el.dataset.dec : 0; const t0 = performance.now(); const dur = 400;
     const step = t => { const p = Math.min(1, (t - t0) / dur); el.textContent = (to * (1 - Math.pow(1 - p, 3))).toFixed(dec); if (p < 1) requestAnimationFrame(step); };
     requestAnimationFrame(step);
   }
+  // Tabele na telefonie jako karty: każda komórka dostaje etykietę z nagłówka kolumny (CSS: td::before)
+  function labelTables() {
+    document.querySelectorAll("table.table").forEach(t => {
+      if (t.dataset.labelled === String(t.rows.length)) return;
+      const hs = [...t.querySelectorAll("thead th")].map(h => h.textContent.trim());
+      t.querySelectorAll("tbody tr").forEach(tr => [...tr.children].forEach((td, i) => { if (td.tagName === "TD" && hs[i] && !td.hasAttribute("data-label") && td.colSpan === 1) td.setAttribute("data-label", hs[i]); }));
+      t.dataset.labelled = String(t.rows.length);
+    });
+  }
+  { let tm = 0; new MutationObserver(() => { clearTimeout(tm); tm = setTimeout(labelTables, 30); }).observe(document.documentElement, { childList: true, subtree: true }); }
   function animateIn(root = document) {
     requestAnimationFrame(() => {
       root.querySelectorAll(".bar").forEach(b => b.classList.add("on"));
@@ -365,16 +465,22 @@
       root.querySelectorAll("[data-to]").forEach(countUp);
     });
   }
-  function radar(scores) {
+  const SHORT = { "WYKORZYSTYWANIE WIEDZY": "Wykorzystywanie wiedzy", "ORGANIZACJA PRACY": "Organizacja pracy", "ORIENTACJA NA KLIENTA": "Orientacja na klienta", "RADZENIE SOBIE W SYTUACJIACH KR": "Sytuacje kryzysowe", "PODEJMOWANIE DECYZJI I ODPOWIED": "Podejmowanie decyzji", "ZARZĄDZANIE STRATEGICZNE": "Zarządzanie strategiczne" };
+  const shortName = k => SHORT[k] || nameOf(k);
+  function radar(scores, withList) {
     const items = Object.entries(scores).filter(([, v]) => v.avg !== null);
     if (items.length < 3) return `<p class="muted">Wykres pojawi się, gdy ocenionych będzie co najmniej 3 kompetencje.</p>`;
-    const N = items.length, C = 150, R = 105;
-    const pt = (i, r) => { const a = -Math.PI / 2 + i * 2 * Math.PI / N; return [C + r * Math.cos(a), C + r * Math.sin(a)]; };
+    const N = items.length, C = 230, CY = 180, R = 95;
+    const pt = (i, r) => { const a = -Math.PI / 2 + i * 2 * Math.PI / N; return [C + r * Math.cos(a), CY + r * Math.sin(a)]; };
     const rings = [0.33, 0.66, 1].map(f => `<polygon points="${items.map((_, i) => pt(i, R * f).join(",")).join(" ")}" fill="none" stroke="var(--ln)"/>`).join("");
-    const axes = items.map((_, i) => { const [x, y] = pt(i, R); return `<line x1="${C}" y1="${C}" x2="${x}" y2="${y}" stroke="var(--ln)"/>`; }).join("");
+    const axes = items.map((_, i) => { const [x, y] = pt(i, R); return `<line x1="${C}" y1="${CY}" x2="${x}" y2="${y}" stroke="var(--ln)"/>`; }).join("");
     const poly = items.map(([, v], i) => pt(i, R * v.avg / 9).join(",")).join(" ");
-    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 22); return `<text x="${x}" y="${y}" font-size="10" text-anchor="middle" fill="var(--mu)">${esc(nameOf(k).slice(0, 16))}</text>`; }).join("");
-    return `<svg class="radar" viewBox="0 0 300 300" role="img" aria-label="Profil kompetencji">${rings}${axes}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg>`;
+    // Etykiety w dwóch wierszach (do 16 znaków każdy); pełna nazwa zawsze w <title>
+    const wrap = full => { const w = full.split(" "), L = [""]; w.forEach(x => { const l = L[L.length - 1]; if (l && (l + " " + x).length > 15 && L.length < 2) L.push(x); else L[L.length - 1] = l ? l + " " + x : x; }); return L.map((l, i) => (l.length > 17 && (i === L.length - 1)) ? l.slice(0, 16).trim() + "…" : l); };
+    const labels = items.map(([k], i) => { const [x, y] = pt(i, R + 14), full = nameOf(k), ls = wrap(shortName(k)), anc = x < C - 8 ? "end" : x > C + 8 ? "start" : "middle", y0 = y + (y < CY - 5 ? -(ls.length - 1) * 16 : 5);
+      return `<text x="${x.toFixed(1)}" y="${y0.toFixed(1)}" font-size="15" text-anchor="${anc}" fill="var(--tx)"><title>${esc(full)}</title>${ls.map((l, n) => `<tspan x="${x.toFixed(1)}" dy="${n ? 16 : 0}">${esc(l)}</tspan>`).join("")}</text>`; }).join("");
+    const svg = `<svg class="radar" viewBox="0 0 460 360" role="img" aria-label="Profil kompetencji, skala 1 do 9 punktów, 5 punktów to poziom oczekiwań">${rings}${axes}${[3, 6, 9].map(p => `<text x="${C + 5}" y="${(CY - R * p / 9 + 12).toFixed(1)}" font-size="12" font-weight="700" fill="var(--mu)" stroke="var(--card,#fff)" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${p}</text>`).join("")}<polygon class="poly" points="${poly}" fill="rgba(44,111,209,.22)" stroke="var(--blue)" stroke-width="2"/>${labels}</svg><p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań. Cyfry na wykresie to pierścienie: 3, 6 i 9 pkt.</p>`;
+    return withList ? `<div class="radar-box"><div class="radar-desk">${svg}</div><div class="radar-mob">${scoreBars(Object.fromEntries(Object.entries(scores).sort((a, b) => (a[1].avg ?? 99) - (b[1].avg ?? 99))))}<p class="muted radar-scale">Skala 1–9 pkt, 5 pkt = na poziomie oczekiwań.</p></div></div>` : svg;
   }
   const scoreBars = scores => Object.entries(scores).map(([k, v]) => `
     <div class="sb"><div class="row"><span class="sb-l">${compIc(k)}${esc(nameOf(k))}</span><span class="muted">${v.avg === null ? "brak" : fmt(v.avg) + " pkt"}</span></div>${bar(v.avg)}</div>`).join("");
@@ -409,9 +515,20 @@
 
   // ---------- Logowanie ----------
   function renderLogin(err = "") {
+    lastPageKey = ""; window.scrollTo(0, 0);
     $("#root").innerHTML = `
-      <div class="login"><div class="login-main"><div class="login-card">
-        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się, aby przejść do panelu</div></div></div>
+      <div class="login"><div class="login-main"><div class="login-grid">
+      <section class="login-val" aria-labelledby="valH">
+        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
+        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
+        <ol class="val-list">
+          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
+          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
+          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
+        </ol>
+      </section>
+      <div class="login-card">
+        <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>Kompas Kompetencji</h1><div class="muted">Zaloguj się albo wybierz konto demo</div></div></div>
         <div class="demo-row" role="group" aria-label="Konta testowe">
           <button type="button" class="demo-btn" data-demo="przelozony" title="Wypełnij danymi przełożonego (demo)"><span aria-hidden="true">${KK_ICON("star")}</span><span>Demo: przełożony</span></button>
           <button type="button" class="demo-btn" data-demo="pracownik" title="Wypełnij danymi pracownika (demo)"><span aria-hidden="true">${KK_ICON("user")}</span><span>Demo: pracownik</span></button>
@@ -424,8 +541,8 @@
           <button class="btn w" style="margin-top:16px" type="submit">Zaloguj się</button>
           ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
         </form>
-        <p class="note">Konta testowe są opisane w README. Nie używaj prawdziwych danych osobowych w wersji testowej.</p>
-      </div></div>${footer("foot-login")}</div>`;
+        <p class="note">Wersja demonstracyjna na danych fikcyjnych. We wdrożeniu logowanie przez system tożsamości urzędu (SSO).</p>
+      </div></div></div>${footer("foot-login")}</div>`;
     // Konta demo z konfiguracji serwera (GET /api/demo); hasło tylko, gdy to publiczna wartość lokalna
     const demoRow = $(".demo-row");
     fetch("/api/demo").then(r => r.json()).then(d => {
@@ -450,7 +567,17 @@
   // Karta jak przy logowaniu; formularz z dwoma polami nowego hasła (min. 12 znaków, sprawdza też serwer)
   const PASS_HINT = "Co najmniej 12 znaków, bez nazwy konta i popularnych haseł.";
   const authCard = (title, sub, body) => `
-      <div class="login"><div class="login-main"><div class="login-card">
+      <div class="login"><div class="login-main"><div class="login-grid">
+      <section class="login-val" aria-labelledby="valH">
+        <h2 id="valH">Ocena okresowa oparta na faktach, nie na wrażeniach</h2>
+        <p class="lead">Kompas Kompetencji pomaga przełożonemu rzetelnie ocenić pracownika urzędu – krok po kroku.</p>
+        <ol class="val-list">
+          <li><span class="vn" aria-hidden="true">1</span><span><b>Dobór kryteriów z podpowiedzią AI</b><span class="t">Asystent proponuje kryteria z rozporządzenia dla stanowiska. Decyzja należy do Ciebie.</span></span></li>
+          <li><span class="vn" aria-hidden="true">2</span><span><b>Rzetelna ocena na podstawie zebranych informacji</b><span class="t">Każda punktacja opiera się na zapisanych faktach z całego okresu oceny.</span></span></li>
+          <li><span class="vn" aria-hidden="true">3</span><span><b>Rozmowa i plan rozwoju z asystentem</b><span class="t">Brief do rozmowy, pytania i działania rozwojowe przygotowane na podstawie faktów.</span></span></li>
+        </ol>
+      </section>
+      <div class="login-card">
         <div class="brand"><div class="brandmark" aria-hidden="true">K</div><div><h1>${esc(title)}</h1><div class="muted">${esc(sub)}</div></div></div>
         ${body}
       </div></div>${footer("foot-login")}</div>`;
@@ -525,8 +652,16 @@
   // ---------- Powłoka: sticky menu boczne (desktop) + dolna nawigacja (mobile) ----------
   function shell(content, navView, title, sub, opts = {}) {
     const u = S.user, pages = PAGES[u.role];
-    const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">AI ${aiWhere()}</span>` : `<span class="pill off" title="Model AI jest niedostępny">AI wyłączone</span>`;
-    const navBtns = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false).map(([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`).join("");
+    const aiPill = S.ai.ok ? `<span class="pill on" title="${S.ai.remote ? "Model na serwerze zewnętrznym" : "Model lokalny"}: ${esc(S.ai.model)}">Asystent AI: dostępny</span>` : `<span class="pill off" title="Model AI jest niedostępny – asystent podpowiada na podstawie reguł">Asystent AI: tryb podpowiedzi bez modelu</span>`;
+    const navItems = pages.filter(([v]) => !MODULE_OF[v] || (S.modules || {})[MODULE_OF[v]] !== false);
+    const mkBtn = ([v, t, i]) => `<button data-nav="${v}" ${navView === v ? 'aria-current="page"' : ""}><span class="ic" aria-hidden="true">${KK_ICON(i)}</span><span class="lbl">${t}</span></button>`;
+    const navBtns = navItems.map(mkBtn).join("");
+    const needMore = true;
+    const MOB = u.role === "pracownik" ? ["home", "goals", "evals", "profile"] : ["home", "evals", "month", "evidence"];
+    const ordered = [...MOB.map(v => navItems.find(n => n[0] === v)).filter(Boolean), ...navItems.filter(n => !MOB.includes(n[0]))];
+    const mainItems = ordered.slice(0, 4), moreItems = ordered.slice(4);
+    const moreActive = moreItems.some(([v]) => v === navView);
+    const bottomNav = `<nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${mainItems.length + (needMore ? 1 : 0)},1fr)">${mainItems.map(mkBtn).join("")}${needMore ? `<button type="button" class="more-btn" id="moreBtn" aria-haspopup="true" aria-expanded="false" aria-controls="morePanel" ${moreActive ? 'aria-current="true"' : ""}><span class="ic" aria-hidden="true">⋯</span><span class="lbl">Więcej</span></button>` : ""}${needMore ? `<div class="more-panel" id="morePanel" role="group" aria-label="Pozostałe pozycje menu" hidden><div class="more-ai">${aiPill}</div>${moreItems.map(mkBtn).join("")}<button type="button" data-act="logout"><span class="ic" aria-hidden="true">⎋</span><span class="lbl">Wyloguj</span></button></div>` : ""}</nav>`;
     return `
       <div class="app">
         <a class="skip" href="#view">Przejdź do treści</a>
@@ -543,15 +678,15 @@
           <header class="top">
             <div class="brandmark" aria-hidden="true">K</div>
             <div class="top-t"><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub)}</div></div>
-            <span class="spacer"></span>${aiPill}
-            <button class="btn sm g hdr-logout" data-act="logout" aria-label="Wyloguj">⎋</button>
+            <span class="spacer"></span><span class="hdr-ai">${aiPill}</span>
+            <button class="btn sm g hdr-logout" data-act="logout" ><span aria-hidden="true">⎋</span> Wyloguj</button>
           </header>
           <main class="view" id="view" tabindex="-1">
-            ${opts.hidePageHead ? "" : `<div class="page-h"><h1>${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
+            ${opts.hidePageHead ? "" : `<div class="page-h"><h1 tabindex="-1">${esc(title)}</h1><p class="why">${esc(sub)}</p></div>`}
             ${content}
           </main>
           ${footer()}
-          <nav class="bottom" aria-label="Nawigacja mobilna" style="grid-template-columns:repeat(${pages.length},1fr)">${navBtns}</nav>
+          ${bottomNav}
         </div>
       </div>`;
   }
@@ -610,7 +745,9 @@
       });
       w.appendChild(btn); w.appendChild(list);
       // etykieta wskazuje na przycisk (klik i czytnik ekranu trafiają w widoczny element)
-      if (sel.id) root.querySelectorAll(`label[for="${sel.id}"]`).forEach(l => l.htmlFor = btn.id);
+      if (sel.id) root.querySelectorAll(`label[for="${sel.id}"]`).forEach(l => { l.htmlFor = btn.id; if (!l.id) l.id = id + "-lbl"; btn.setAttribute("aria-labelledby", l.id); sel.setAttribute("aria-label", l.textContent.trim()); });
+      if (!btn.hasAttribute("aria-labelledby") && sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+      list.setAttribute("aria-label", sel.getAttribute("aria-label") || "Lista wyboru");
       btn.addEventListener("click", () => (list.hidden ? selOpen(w, sel) : selClose(w, true)));
       btn.addEventListener("keydown", e => {
         if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); selOpen(w, sel); }
@@ -662,7 +799,8 @@
       : a.dataset.nav ? `.side-nav [data-nav="${CSS.escape(a.dataset.nav)}"]` : a.dataset.wiz ? `[data-wiz="${CSS.escape(a.dataset.wiz)}"]` : null) : null;
     const pageChanged = pageKey !== lastPageKey; lastPageKey = pageKey;
     root.innerHTML = shell(html, navView, title, sub, opts);
-    if (pageChanged && sel) $("#view")?.focus({ preventScroll: true });
+    if (pageChanged) window.scrollTo(0, 0);
+    if (pageChanged && sel) { const vw = $("#view"); const h = vw && (vw.querySelector("h1") || vw.querySelector("h2")); if (h) { if (!h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); } else if (vw) vw.focus({ preventScroll: true }); }
     else if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
     bindShell();
     initSelects();
@@ -681,13 +819,23 @@
   function go(view) {
     S.view = view;
     if (view === "wizard" || view === "evalView") return render();
-    refreshData().then(render).catch(e => toast(e.message));
+    refreshData().then(render).catch(e => toast(errMsg(e)));
     window.scrollTo(0, 0);
   }
   function bindShell() {
     document.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => go(b.dataset.nav)));
+    const mb = document.getElementById("moreBtn"), mp = document.getElementById("morePanel");
+    if (mb && mp) {
+      const closeMore = focus => { mp.hidden = true; mb.setAttribute("aria-expanded", "false"); if (focus) mb.focus(); };
+      mb.addEventListener("click", () => { if (mp.hidden) { mp.hidden = false; mb.setAttribute("aria-expanded", "true"); mp.querySelector("button")?.focus(); } else closeMore(true); });
+      mp.addEventListener("keydown", e => {
+        if (e.key === "Escape") { e.stopPropagation(); closeMore(true); }
+        else if (e.key === "Tab") { const b = [...mp.querySelectorAll("button")]; if (e.shiftKey && document.activeElement === b[0]) { e.preventDefault(); closeMore(true); } else if (!e.shiftKey && document.activeElement === b[b.length - 1]) closeMore(false); }
+      });
+      document.addEventListener("click", e => { if (!mp.hidden && !mp.contains(e.target) && !mb.contains(e.target)) closeMore(false); });
+    }
     document.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
-    document.querySelectorAll("[data-go-eval]").forEach(b => b.addEventListener("click", () => openWizard(+b.dataset.goEval).catch(e => toast(e.message))));
+    document.querySelectorAll("[data-go-eval]").forEach(b => b.addEventListener("click", () => openWizard(+b.dataset.goEval).catch(e => toast(errMsg(e)))));
   }
 
   // ---------- Pracownik ----------
@@ -699,28 +847,28 @@
       let next;
       if (!goals.length) next = { t: "Dodaj pierwszy cel SMART", s: "Cel pomoże Ci i przełożonemu zobaczyć, dokąd chcesz dojść.", btn: "Dodaj cel", go: "goals" };
       else if (last && last.status === "submitted") next = { t: "Twoja ocena jest złożona", s: "Przejrzyj ją przed rozmową z przełożonym.", btn: "Zobacz ocenę", go: "evals" };
-      else if (last && last.status === "discussed" && d.latestDev) next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Przełożony zapisał wnioski rozwojowe. Zamień je w cele z krokami.", btn: "Plan rozwoju", go: "profile" };
+      else if (last && last.status === "discussed" && d.latestDev) next = { t: "Rozmowa za Tobą – zajrzyj do planu rozwoju", s: "Przełożony zapisał wnioski rozwojowe. Zobacz plan i zaproponuj cele na rozmowie miesięcznej.", btn: "Plan rozwoju", go: "profile" };
       else if (last && last.status === "discussed") next = { t: "Ocena omówiona – ustal cele na kolejny okres", s: "Przełożony nie zapisał wniosków rozwojowych. Zaproponuj cel, który omówicie.", btn: "Otwórz cele", go: "goals" };
       else next = { t: "Sprawdź swoje cele", s: "Zaktualizuj postęp, zanim przyjdzie czas na ocenę.", btn: "Otwórz cele", go: "goals" };
       return `
         <section class="next card anim">
           <div><h2>${esc(next.t)}</h2><p class="muted">${esc(next.s)}</p></div>
           <button class="btn btn-next" data-nav="${next.go}"><span>${esc(next.btn)}</span>${KK_ICON("arrow")}</button></section>
+        <section class="card" aria-labelledby="prepH"><h2 id="prepH">Przygotuj się do rozmowy</h2>
+          <p class="muted">Przygotowanie do rozmowy miesięcznej lub oceniającej: asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
+          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
+          <div id="aiPrepOut" aria-live="polite"></div></section>
         <div class="kpis">
           <div class="kpi"><b data-to="${d.evals.length}" data-dec="0">0</b><span>Złożone oceny</span></div>
           <div class="kpi"><b data-to="${openGoals}" data-dec="0">0</b><span>Cele w toku</span></div>
           <div class="kpi"><b>${last ? pill(last.status) : "—"}</b><span>Status ostatniej oceny</span></div>
         </div>
-        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(d.kickoff.date)})</h2>
+        ${d.kickoff && !d.kickoff.evalId ? `<div class="card"><h2>Rozmowa rozpoczynająca okres oceny (${esc(isoToPl(d.kickoff.date))})</h2>
           <p class="muted">${esc(TYP[d.kickoff.typ])}. Ustalenia z rozmowy z przełożonym – na ich podstawie będzie sporządzona ocena.</p>
           <h3>Kryteria</h3><ul class="c">${d.kickoff.criteria.map(c => `<li>${esc(c.n)}${c.mandatory ? "" : " (dodatkowe)"}</li>`).join("")}</ul>
           <h3>Obowiązki</h3><p>${esc(d.kickoff.duties)}</p><h3>Oczekiwania</h3><p>${esc(d.kickoff.expectations)}</p><h3>Cele</h3><p>${esc(d.kickoff.goals)}</p>
           ${d.kickoff.ackAt ? `<p class="muted">Zapoznanie potwierdzone ${esc(d.kickoff.ackAt.slice(0, 10))}. Od tego dnia liczy się okres oceny.</p>`
             : `<p class="muted">Potwierdzenie odpowiada podpisowi części I arkusza. Od dnia zapoznania liczy się okres oceny.</p><button class="btn" data-act="ackKickoff" data-id="${d.kickoff.id}">Potwierdzam zapoznanie</button>`}</div>` : ""}
-        ${(d.upcoming || []).length || d.kickoff ? `<div class="card"><h2>Przygotuj się do rozmowy</h2>
-          <p class="muted">Asystent podpowie, o co może zapytać przełożony, co warto przygotować i o co Ty możesz zapytać. Nie ocenia i niczego nie zapisuje.</p>
-          ${(S.modules || {}).mod_ai !== false ? `<button class="btn" data-act="aiPrep">${KK_ICON("spark")}<span>Podpowiedz pytania</span></button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}
-          <div id="aiPrepOut" aria-live="polite"></div></div>` : ""}
         ${(d.upcoming || []).map(u2 => `<div class="card"><h2>Przygotowywana ocena: kryteria i termin</h2>
           <p class="muted">${esc(TYP[u2.typ])} · okres ${esc(u2.periodFrom || "—")} – ${esc(u2.periodTo || "—")} · termin sporządzenia: <b>${esc(u2.terminOceny || "nie ustalono")}</b></p>
           <ul class="c">${u2.criteria.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
@@ -732,17 +880,15 @@
       const sc = d.latestScores || {};
       const items = Object.entries(sc).filter(([, x]) => x.avg !== null).sort((a, b) => a[1].avg - b[1].avg);
       return `
-        <div class="grid two">
-          <div class="card"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im dalej od środka, tym mocniejsza kompetencja.</p>${radar(sc)}</div>
-          <div class="card"><h2>Obszary do rozwoju</h2>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
-            + `<button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
-        </div>
-        <div class="grid two">
-          <div class="card"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
-          <div class="card"><h2>Asystent rozwoju</h2>
+        <div class="grid two prof-grid">
+          <div class="card prof-plan"><h2>Plan rozwoju</h2>${devPlan(d, items)}</div>
+          <div class="card prof-areas"><h2>Obszary do rozwoju</h2><p class="muted">Pokazujemy 5 kryteriów z najniższą oceną (od najniższej).</p>${items.length ? scoreBars(Object.fromEntries(items.slice(0, 5)))
+            + `<p class="muted" style="margin:12px 0 8px">Omów to z przełożonym na rozmowie miesięcznej.</p><div class="btns" style="justify-content:flex-start;margin-top:0"><button class="btn" data-act="aiDev">${KK_ICON("spark")}<span>Zaplanuj działania z asystentem</span></button><button class="btn sm g" data-act="readEval" data-id="${d.latestEvalId}">${KK_ICON("eye")}<span>Szczegóły w ocenie: wskaźniki i informacje</span></button></div>` : `<p class="muted">Brak danych. Pojawią się po złożeniu oceny.</p>`}</div>
+          <div class="card prof-comp"><h2>Profil kompetencji</h2><p class="muted">Średnie z ostatniej złożonej oceny. Im wyższy wynik, tym mocniejsza kompetencja.</p>${radar(sc, true)}</div>
+          <div class="card prof-asst"><h2>Asystent rozwoju</h2>
             <p class="muted">Propozycje działań SMART na podstawie Twoich celów i obszarów do rozwoju. Decyzję podejmujesz Ty i przełożony.</p>
             <button class="btn" data-act="aiDev" id="aiDevBtn">Zapytaj asystenta</button>
-            <div id="aiDevOut"></div></div>
+            <div id="aiDevOut" aria-live="polite"></div></div>
         </div>
         <div class="card" id="cmpBox"><h2>Zmiana między ocenami okresowymi</h2><p class="muted">Wczytywanie…</p></div>`;
     }
@@ -760,53 +906,65 @@
     const rows = S.evals.map(e => {
       const edit = isMgr && e.status === "draft";
       return `<tr><td>${esc(TYP[e.typ])}</td>${isMgr ? `<td>${first(names[e.employeeId])}</td>` : ""}
-        <td>${esc(e.periodFrom || "")} – ${esc(e.periodTo || "")}</td><td>${pill(e.status)}</td>
-        <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}"`)}</td></tr>`;
+        <td>${esc(isoToPl(e.periodFrom || ""))} – ${esc(isoToPl(e.periodTo || ""))}</td><td>${pill(e.status)}</td>
+        ${isMgr ? `<td>${e.status === "draft" ? "—" : e.ackAt ? `zapoznano ${esc(plDT(e.ackAt).slice(0, 10))}` : "czeka na zapoznanie"}</td>` : ""}
+        <td style="text-align:right">${edit ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${e.id}"`) : actBtn("eye", "Podgląd", `data-act="readEval" data-id="${e.id}" aria-label="Podgląd oceny – ${first(isMgr ? names[e.employeeId] : S.user.name)}"`)}</td></tr>`;
     }).join("");
-    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    return `<div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th>${isMgr ? "<th>Pracownik</th>" : ""}<th>Okres</th><th>Status</th>${isMgr ? "<th>Zapoznanie</th>" : ""}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   // ---------- Przełożony ----------
   function mgrPage(v) {
     if (v === "settings") return settingsPage();
+    // Dziennik zdarzeń: kto, kiedy i co zmienił (z poprzednią i nową wartością) – wypełnia loadLog()
+    if (v === "log") return `<div class="card"><h2>Dziennik zdarzeń</h2><p class="muted">Każda zmiana ocen, informacji, feedbacku, celów i planów rozwoju – z autorem, czasem oraz poprzednią i nową wartością. Integralność chroni łańcuch skrótów.</p><div id="logBody" aria-live="polite"><p class="muted">Wczytywanie…</p></div></div>`;
     const d = S.dash, c = d.counts;
     if (v === "home") {
       const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
       const toDiscuss = d.team.filter(t => t.status === "submitted");
-      const next = todo.length ? `Do przygotowania: ${todo.length}` : toDiscuss.length ? `Do omówienia: ${toDiscuss.length}` : "Wszystkie oceny są w porządku";
+      const status = todo.length ? `Ocen do przygotowania: ${todo.length}` : toDiscuss.length ? `Ocen do omówienia z pracownikami: ${toDiscuss.length}` : "Wszystkie oceny są przygotowane";
+      // „Ocena w 3 krokach”: krok 1 dla pierwszej osoby bez zapisanej rozmowy rozpoczynającej, krok 3 dla pierwszej z oceną do omówienia
+      const kickEmp = d.team.find(t => !t.kickoff) || d.team[0] || null;
+      const briefEmp = toDiscuss[0] || d.team.find(t => t.status !== "none") || d.team[0] || null;
       const rows = d.team.map(t => `
         <tr><td><div class="who-row">${avatar(t.avatar, t.name)}<div><b>${first(t.name)}</b><div class="muted">${esc(t.position || "")}</div>${t.pending ? `<span class="tag wr">konto nieaktywne</span> <button class="btn sm g" data-act="resendActivation" data-emp="${t.id}">Nowy link aktywacyjny</button>` : ""}
-          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(t.kickoff.date)} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
-          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
-          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(t.nextDue) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(t.earliestNext)}</div>` : ""}</td>
+          <div class="muted">${t.kickoff ? `Rozmowa rozpoczynająca: ${esc(isoToPl(t.kickoff.date))} · ${t.kickoff.ackAt ? "zapoznano" : "czeka na zapoznanie"}` : "Brak rozmowy rozpoczynającej"} <button class="btn sm g" data-act="kickoff" data-emp="${t.id}" aria-label="${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz"} rozmowę rozpoczynającą – ${first(t.name)}">${t.kickoff && !t.kickoff.ackAt ? "Edytuj" : "Zapisz rozmowę"}</button>
+          <button class="btn sm g" data-act="mgrGoals" data-emp="${t.id}" aria-label="Cele – ${first(t.name)}${t.goalsToConfirm ? `, ${t.goalsToConfirm} do potwierdzenia` : ""}">${KK_ICON("flag")}<span>Cele${t.goalsToConfirm ? ` (${t.goalsToConfirm} do potwierdzenia)` : ""}</span></button></div></div></div></td>
+          <td>${t.typ ? esc(TYP[t.typ]) : "—"}</td><td style="white-space:nowrap">${pill(t.status)}</td><td style="white-space:nowrap">${t.nextDue ? esc(isoToPl(t.nextDue)) : "—"}${t.earliestNext ? `<div class="muted">najwcześniej ${esc(isoToPl(t.earliestNext))}</div>` : ""}</td>
           <td style="text-align:right">${t.status === "none"
-            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}"`, "")
-            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}"`)
-            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}"`)
-            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}"`)}</td></tr>`).join("");
+            ? actBtn("plus", "Utwórz ocenę", `data-act="newEval" data-emp="${t.id}" aria-label="Utwórz ocenę – ${first(t.name)}"`, "")
+            : t.status === "draft" ? actBtn("edit", "Dokończ", `data-act="openEval" data-id="${t.evalId}" aria-label="Dokończ ocenę – ${first(t.name)}"`)
+            : t.status === "submitted" ? actBtn("msg", "Omów", `data-act="openEval" data-id="${t.evalId}" aria-label="Omów ocenę – ${first(t.name)}"`)
+            : actBtn("eye", "Otwórz", `data-act="openEval" data-id="${t.evalId}" aria-label="Otwórz ocenę – ${first(t.name)}"`)}</td></tr>`).join("");
       return `
-        <section class="next card anim">
-          <div><h2>${esc(next)}</h2><p class="muted">Zacznij od oceny, która ma najbliższy termin. Kreator poprowadzi Cię krok po kroku.</p></div>
-          <button class="btn btn-next" data-nav="evals"><span>Przejdź do ocen</span>${KK_ICON("arrow")}</button></section>
-        ${d.alerts && d.alerts.length ? `<div class="card" role="region" aria-label="Terminy i sprawy do załatwienia"><h2>Terminy i sprawy do załatwienia</h2><ul class="c">${d.alerts.map(x => `<li><b>${first(x.name)}</b> – ${esc(x.text)} ${x.kind === "goals" ? `<button class="btn sm g" data-act="mgrGoals" data-emp="${x.employeeId}">Cele</button>` : x.kind === "kickoff" || x.kind === "kickoff_ack" ? `<button class="btn sm g" data-act="kickoff" data-emp="${x.employeeId}">Rozmowa rozpoczynająca</button>` : `<button class="btn sm g" data-act="openEval" data-id="${x.evalId}">Otwórz</button>`}</li>`).join("")}</ul></div>` : ""}
+        <section class="card steps3" aria-labelledby="s3H"><h2 id="s3H">Ocena w 3 krokach</h2><p class="muted">${esc(status)} · zacznij od kroku 1, potem przejdź do kolejnych.</p>
+          <ol class="s3-list">
+            <li><span class="vn" aria-hidden="true">1</span><div><b>Ustal kryteria</b><span class="t">Rozmowa rozpoczynająca z pracownikiem. Asystent AI podpowie kryteria dla jego stanowiska.</span>
+              ${kickEmp ? `<button class="btn" data-act="kickoff" data-emp="${kickEmp.id}" aria-label="Ustal kryteria – rozmowa rozpoczynająca – ${first(kickEmp.name)}">${KK_ICON("star")}<span>Ustal kryteria</span></button>` : ""}</div></li>
+            <li><span class="vn" aria-hidden="true">2</span><div><b>Zbierz informacje i oceń</b><span class="t">Zapisuj fakty z pracy i wypełnij ocenę krok po kroku. Kreator pilnuje, żeby nic nie pominąć.</span>
+              <button class="btn" data-nav="evals"><span>Zbierz informacje i oceń</span>${KK_ICON("arrow")}</button></div></li>
+            <li><span class="vn" aria-hidden="true">3</span><div><b>Przygotuj rozmowę</b><span class="t">Brief z zebranych faktów: tematy i pytania otwarte, bez ocen i punktów.</span>
+              ${briefEmp ? `<button class="btn" data-act="aiBrief" data-emp="${briefEmp.id}" aria-label="Przygotuj rozmowę – brief – ${first(briefEmp.name)}">${KK_ICON("msg")}<span>Przygotuj rozmowę</span></button>` : ""}</div></li>
+          </ol></section>
+        ${alertsCard(d.alerts)}
         <div class="kpis">
-          <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole</span></div>
-          <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania</span></div>
-          <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone</span></div>
-          <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione</span></div>
+          <div class="kpi"><b data-to="${d.team.length}">0</b><span>Pracownicy w zespole<small>Osoby przypisane do Ciebie.</small></span></div>
+          <div class="kpi"><b data-to="${c.none + c.draft}">0</b><span>Do przygotowania<small>Oceny bez szkicu lub niedokończone.</small></span></div>
+          <div class="kpi"><b data-to="${c.submitted}">0</b><span>Złożone<small>Oceny gotowe do rozmowy.</small></span></div>
+          <div class="kpi"><b data-to="${c.discussed}">0</b><span>Omówione<small>Oceny po rozmowie z pracownikiem.</small></span></div>
         </div>
         ${d.deadlines && d.deadlines.length ? `<div class="card"><h2>Terminy ocen okresowych</h2><p class="muted">Termin liczony z ostatniej oceny okresowej: 24 miesiące (art. 81 ustawy).</p>
-          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(x.lastEval) : "—"}</td><td>${x.due ? esc(x.due) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
+          <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ostatnia ocena</th><th scope="col">Termin</th><th scope="col">Status</th></tr></thead><tbody>${d.deadlines.map(x => `<tr><td>${first(x.name)}</td><td>${x.lastEval ? esc(isoToPl(x.lastEval)) : "—"}</td><td>${x.due ? esc(isoToPl(x.due)) : "—"}</td><td><span class="tag ${x.days === null ? "" : x.days < 0 ? "bad" : x.days <= 60 ? "wr" : "info"}">${x.days === null ? "brak oceny" : x.days < 0 ? "termin minął" : `za ${x.days} dni`}</span></td></tr>`).join("")}</tbody></table></div></div>` : ""}
         <div class="card"><div class="row"><h2>Zespół</h2><button class="btn sm" data-act="addEmp">+ Dodaj pracownika</button></div>
           <div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Pracownik</th><th scope="col">Ocena</th><th scope="col">Status</th><th scope="col">Kolejna ocena (cykl 24 mies.)</th><th scope="col"><span class="sr">Akcje</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }
     if (v === "results") {
       const agg = d.aggregate;
       const body = agg.suppressed
-        ? `<div class="note warn">Wyniki zbiorcze pokazujemy od ${agg.kMin} złożonych ocen (obecnie ${agg.n}). To chroni prywatność pracowników.</div>`
+        ? `<div class="note warn">Wyniki zespołu pokazujemy od ${agg.kMin} złożonych ocen (ochrona prywatności) – obecnie ${agg.n}.</div>`
         : `<p class="muted">Średnie z ${agg.n} ocen. Widok zbiorczy: nie pokazuje wyników pojedynczych osób.</p>${agg.competencies.map(x => `<div class="sb"><div class="row"><span class="sb-l">${compIc(x.k)}${esc(nameOf(x.k))}</span><span class="muted">${fmt(x.avg)} pkt</span></div>${bar(x.avg)}</div>`).join("")}`;
       return `<div class="grid two">
-        <div class="card"><h2>Wyniki zespołu</h2>${body}</div>
+        <div class="card"><h2>Wyniki zespołu</h2><p class="muted">Wyniki zespołu pokazujemy od ${agg.kMin} złożonych ocen (ochrona prywatności). Metryki wsparcia przełożonych – od ${agg.kMin} przełożonych.</p>${body}</div>
         <div class="card" id="metricsCard"><h2>Czy aplikacja pomaga w ocenie? (metryki zbiorcze)</h2><p class="muted">Wczytywanie…</p></div>
         <div class="card"><h2>Jak czytać ten widok</h2>
           <ul class="c"><li>Kompetencje posortowane od najsłabszej. To punkt startowy do rozmów, nie wyrok.</li>
@@ -830,10 +988,10 @@
   const safeLink = u => (/^https?:\/\//i.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">link<span class="sr"> (otwiera się w nowej karcie)</span></a>` : "");
   function evidenceTable(list, { editable, showEmp }) {
     if (!list.length) return `<p class="muted">Brak informacji dla wybranych filtrów.</p>`;
-    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Artefakt</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
-      ${list.map(e => `<tr><td style="white-space:nowrap">${esc(e.date)}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
+    return `<div style="overflow-x:auto"><table class="table"><caption class="sr">Informacje (${list.length})</caption><thead><tr><th scope="col">Data</th>${showEmp ? `<th scope="col">Pracownik</th>` : ""}<th scope="col">Wskaźnik</th><th scope="col">Sytuacja · działanie · rezultat</th><th scope="col">Nr zadania i link do dokumentu</th>${editable ? `<th scope="col"><span class="sr">Akcje</span></th>` : ""}</tr></thead><tbody>
+      ${list.map(e => `<tr><td style="white-space:nowrap">${esc(isoToPl(e.date))}</td>${showEmp ? `<td>${empName(e.employeeId)}</td>` : ""}<td>${esc(indLabel(e.indicator))}</td>
         <td><b>Sytuacja:</b> ${esc(e.situation)}<br><b>Działanie:</b> ${esc(e.action)}<br><b>Rezultat:</b> ${esc(e.result)}</td>
-        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(e.date)}"`)}</td>` : ""}</tr>`).join("")}
+        <td>${esc(e.taskRef || "")} ${safeLink(e.link)}</td>${editable ? `<td style="text-align:right">${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" aria-label="Edytuj informację z ${esc(isoToPl(e.date))} – ${esc(indShort(e.indicator))}"`)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>`;
   }
   function evidencePage(isMgr) {
@@ -850,15 +1008,15 @@
       </form></div>
       <div class="card"><h2>Informacje</h2><p class="muted">${isMgr ? "Opisz obserwowalne działanie i jego rezultat. Nie opisuj cech osoby." : "Obserwacje zapisane przez przełożonego. Masz do nich wgląd w każdej chwili."}</p>
         <div id="evList" aria-live="polite"><p class="muted">Ładowanie…</p></div></div>
-      ${isMgr ? "" : `<div class="card"><h2>Feedback o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
+      ${isMgr ? "" : `<div class="card"><h2>Informacja zwrotna o rezultatach zadań</h2><div id="fbMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Rozmowy miesięczne</h2><div id="ciMine"><p class="muted">Ładowanie…</p></div></div>
         <div class="card"><h2>Oceny cząstkowe kwartalne</h2><p class="muted">Przyznaje przełożony, z uzasadnieniem i wskazaniem informacji.</p><div id="pqMine"><p class="muted">Ładowanie…</p></div></div>`}`;
   }
   const lvlTxt = l => (l ? `${l} pkt` : "bez poziomu");
   function feedbackList(list, editable) {
-    if (!list.length) return `<p class="muted">Brak feedbacku.</p>`;
-    return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(f.date)} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
-      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj feedback z ${esc(f.date)}"`)}` : ""}</li>`).join("")}</ul>`;
+    if (!list.length) return `<p class="muted">Brak informacji zwrotnej.</p>`;
+    return `<ul class="c">${list.map(f => `<li><span class="muted">${esc(isoToPl(f.date))} · ${esc(indLabel(f.indicator))} · ${esc(f.relationLabel)} · ${esc(lvlTxt(f.level))}</span><br>
+      <b>Źródło:</b> ${esc(f.source)}<br>${esc(f.justification)}${editable ? ` ${actBtn("edit", "Edytuj", `data-act="editFeedback" data-id="${f.id}" aria-label="Edytuj informację zwrotną z ${esc(isoToPl(f.date))}"`)}` : ""}</li>`).join("")}</ul>`;
   }
   const checkinText = c => `<b>${esc(c.month)}</b> · ${c.status === "odbyty" ? `rozmowa ${esc(c.date || "")}` : "planowana"}${c.done ? `<br><b>Co zrobiono:</b> ${esc(c.done)}` : ""}${c.attention ? `<br><b>Co wymaga uwagi:</b> ${esc(c.attention)}` : ""}${c.goal ? `<br><b>Cel:</b> ${esc(c.goal)}` : ""}`;
   const partialText = p => `<b>${esc(p.quarter)}</b> · ${esc(nameOf(p.competency))}: <b>${p.pts} pkt</b> – ${esc(p.justification)} <span class="muted">(informacje: ${p.evidenceIds.length})</span>`;
@@ -869,7 +1027,7 @@
       put("fbMine", feedbackList(fb.feedback, false));
       put("ciMine", ci.checkins.length ? `<ul class="c">${ci.checkins.map(c => `<li>${checkinText(c)}</li>`).join("")}</ul>` : `<p class="muted">Brak rozmów.</p>`);
       put("pqMine", pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych.</p>`);
-    } catch (e) { put("fbMine", `<p class="muted">${esc(e.message)}</p>`); }
+    } catch (e) { put("fbMine", `<p class="muted">${esc(errMsg(e))}</p>`); }
   }
 
   // ---------- Przegląd miesiąca (przełożony): check-in, informacje według wskaźników, feedback ----------
@@ -895,16 +1053,16 @@
       S.monthData = d; S.evidence = d.groups.flatMap(g => g.evidence); S.monthFeedback = d.feedback; S.monthPartials = pq.partials;
       const c = d.checkin || { done: "", attention: "", goal: "", date: "", status: "planowany" };
       const ro = "";
-      box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna (check-in)</h2>
+      box.innerHTML = `<div class="card"><h2 id="ciH">Rozmowa miesięczna</h2>
           <p class="muted">Do 20 minut. Trzy pola i informacje z miesiąca. Bez punktacji i bez oceny osoby.</p>
           <form id="ciForm" aria-labelledby="ciH" novalidate>
             <label class="f" for="ciDone">Co zrobiono</label><textarea id="ciDone" maxlength="600" ${ro}>${esc(c.done)}</textarea>
             <label class="f" for="ciAtt">Co wymaga uwagi</label><textarea id="ciAtt" maxlength="600" ${ro}>${esc(c.attention)}</textarea>
             <label class="f" for="ciGoal">Jeden cel na kolejny miesiąc</label><input id="ciGoal" maxlength="600" value="${esc(c.goal)}" ${ro}>
-            <div class="grid two"><div><label class="f" for="ciDate">Data rozmowy</label><input id="ciDate" type="date" value="${esc(c.date || "")}" max="${new Date().toISOString().slice(0, 10)}"></div>
+            <div class="grid two"><div><label class="f" for="ciDate">Data rozmowy</label>${dateFieldHtml("ciDate", c.date || "")}</div>
               <div><span class="f" id="ciStL">Status</span><label class="choice"><input type="checkbox" id="ciStatus" aria-describedby="ciStL" ${c.status === "odbyty" ? "checked" : ""}><span>Rozmowa odbyta</span></label></div></div>
             <div id="ciErr" role="alert" class="err"></div>
-            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz check-in"}</button>
+            <div class="btns" style="justify-content:flex-start"><button class="btn" type="submit">${d.checkin ? "Zapisz zmiany" : "Zapisz rozmowę miesięczną"}</button>
               <button class="btn g" type="button" data-act="aiCheckin">Zaproponuj pytania do rozmowy (AI)</button>
               <button class="btn g" type="button" data-act="aiBrief" data-emp="${esc(m.employeeId)}">Przygotuj brief do rozmowy</button></div>
           </form><div id="aiCkOut" aria-live="polite"></div>
@@ -912,24 +1070,26 @@
         <div class="card"><div class="row"><h2>Informacje z miesiąca (${d.evidenceCount})</h2>${actBtn("plus", "Informacja", `data-act="addEvidence" data-emp="${esc(m.employeeId)}" data-after="month"`, "")}</div>
           <p class="muted">Pokazujemy tylko wskaźniki z nowymi informacjami w tym miesiącu. Pozostałe są ukryte, żeby nie generować pustych ocen.</p>
           ${d.groups.length ? d.groups.map(g => `<div class="ind"><h3 class="h-comp">${compIc(g.competency)}${esc(nameOf(g.competency))}</h3><p class="muted">${esc(g.text.replace(/\n/g, " "))}</p>
-            <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(e.date)}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
-              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(e.date)}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
-        <div class="card"><div class="row"><h2>Feedback z miesiąca</h2>${actBtn("plus", "Feedback", `data-act="addFeedback"`, "")}</div>
-          <p class="muted">Feedback dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
+            <ul class="c">${g.evidence.map(e => `<li><span class="muted">${esc(isoToPl(e.date))}</span> <b>Sytuacja:</b> ${esc(e.situation)} · <b>Działanie:</b> ${esc(e.action)} · <b>Rezultat:</b> ${esc(e.result)} ${safeLink(e.link)}
+              ${actBtn("edit", "Edytuj", `data-act="editEvidence" data-id="${e.id}" data-after="month" aria-label="Edytuj informację z ${esc(isoToPl(e.date))} – ${esc(indShort(e.indicator))}"`)}</li>`).join("")}</ul></div>`).join("") : `<p class="muted">Brak informacji w tym miesiącu.</p>`}</div>
+        <div class="card"><div class="row"><h2>Informacja zwrotna z miesiąca</h2>${actBtn("plus", "Informacja zwrotna", `data-act="addFeedback"`, "")}</div>
+          <p class="muted">Informacja zwrotna dotyczy rezultatu zadania, nie osoby. Nie zapisujemy czasu pracy, obecności ani aktywności.</p>${feedbackList(d.feedback, true)}</div>
         <div class="card"><div class="row"><h2>Oceny cząstkowe – ${esc(quarterOf(m.month))}</h2>${actBtn("plus", "Ocena cząstkowa", `data-act="addPartial"`, "")}</div>
           <p class="muted">Przypisane do kwartału, nie do miesiąca. Przyznajesz je Ty, z uzasadnieniem i wskazaniem informacji.</p>
           ${pq.partials.length ? `<ul class="c">${pq.partials.map(p => `<li>${partialText(p)} ${actBtn("edit", "Edytuj", `data-act="editPartial" data-id="${p.id}" aria-label="Edytuj ocenę cząstkową: ${esc(nameOf(p.competency))}"`)}</li>`).join("")}</ul>` : `<p class="muted">Brak ocen cząstkowych w tym kwartale.</p>`}</div>`;
       bindActs(box);
+      const cd = bindDate("ciDate");
       $("#ciForm").addEventListener("submit", async e => {
         e.preventDefault();
-        const body = { done: $("#ciDone").value, attention: $("#ciAtt").value, goal: $("#ciGoal").value, date: $("#ciDate").value, status: $("#ciStatus").checked ? "odbyty" : "planowany" };
+        const ciIso = readDate(cd, "ciDate"); if (ciIso === null) { $("#ciDate").focus(); return; }
+        const body = { done: $("#ciDone").value, attention: $("#ciAtt").value, goal: $("#ciGoal").value, date: ciIso, status: $("#ciStatus").checked ? "odbyty" : "planowany" };
         try {
           if (d.checkin) await api("PUT", `/api/checkins/${d.checkin.id}`, body);
           else await api("POST", "/api/checkins", { ...body, employeeId: +m.employeeId, month: m.month });
-          toast("Zapisano check-in."); loadMonth();
+          toast("Zapisano rozmowę miesięczną."); loadMonth();
         } catch (ex) { $("#ciErr").textContent = fieldErrors(ex); }
       });
-    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
   function bindMonthPage() {
     const fm = $("#monthForm"); if (!fm) return;
@@ -938,24 +1098,26 @@
   const RELATIONS = { przelozony: "przełożony bezpośredni", wspolpracownik: "współpracownik (przekazane przełożonemu)", odbiorca: "odbiorca rezultatu (przekazane przełożonemu)" };
   function feedbackModal(fb) {
     const v = fb || { indicator: "", source: "", level: null, justification: "", relation: "przelozony", date: new Date().toISOString().slice(0, 10) };
-    openModal(`<h2 id="fbTitle">${fb ? "Edytuj feedback" : "Nowy feedback"}</h2>
+    openModal(`<h2 id="fbTitle">${fb ? "Edytuj informację zwrotną" : "Nowa informacja zwrotna"}</h2>
       <p class="muted">Opisz rezultat konkretnego zadania. Nie oceniaj osoby. Nie zapisuj czasu pracy, obecności ani aktywności.</p>
       <form id="fbForm" novalidate>
         <label class="f" for="fbInd">Wskaźnik</label><select id="fbInd" required><option value="">Wybierz…</option>${indOptions(v.indicator)}</select>
-        <label class="f" for="fbSrc">Źródło zdarzenia (zadanie, sprawa, artefakt)</label><input id="fbSrc" required maxlength="300" value="${esc(v.source)}">
+        <label class="f" for="fbSrc">Źródło zdarzenia (zadanie, sprawa, dokument)</label><input id="fbSrc" required maxlength="300" value="${esc(v.source)}">
         <label class="f" for="fbJust">Uzasadnienie (wymagane)</label><textarea id="fbJust" required minlength="10" maxlength="2000">${esc(v.justification)}</textarea>
         <label class="f" for="fbRel">Relacja autora do rezultatu</label><select id="fbRel">${Object.entries(RELATIONS).map(([k, l]) => `<option value="${k}" ${v.relation === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <label class="f" for="fbLvl">Poziom (opcjonalnie)</label><select id="fbLvl"><option value="">bez poziomu</option>${PTS5.map((p, i) => `<option value="${p}" ${v.level === p ? "selected" : ""}>${p} pkt – ${LEVELS5[i]}</option>`).join("")}</select>
-        <label class="f" for="fbDate">Data zdarzenia</label><input id="fbDate" type="date" required value="${esc(v.date)}">
+        <label class="f" for="fbDate">Data zdarzenia</label>${dateFieldHtml("fbDate", v.date, "required")}
         <div id="fbErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
+      const fd = bindDate("fbDate");
       $("#fbForm").addEventListener("submit", async e => {
         e.preventDefault();
-        const body = { indicator: $("#fbInd").value, source: $("#fbSrc").value, justification: $("#fbJust").value, relation: $("#fbRel").value, level: $("#fbLvl").value ? +$("#fbLvl").value : null, date: $("#fbDate").value };
+        const fbIso = fd.iso(); if (!fbIso) { $("#fbDate").focus(); return; }
+        const body = { indicator: $("#fbInd").value, source: $("#fbSrc").value, justification: $("#fbJust").value, relation: $("#fbRel").value, level: $("#fbLvl").value ? +$("#fbLvl").value : null, date: fbIso };
         try {
           if (fb) await api("PUT", `/api/feedback/${fb.id}`, body); else await api("POST", "/api/feedback", { ...body, employeeId: +S.month.employeeId });
-          closeModal(); toast("Zapisano feedback."); loadMonth();
+          closeModal(); toast("Zapisano informację zwrotną."); loadMonth();
         } catch (ex) { $("#fbErr").textContent = fieldErrors(ex); }
       });
     }, "fbTitle");
@@ -966,7 +1128,7 @@
     const emp = pr ? pr.employeeId : S.month.employeeId;
     const evs = (await api("GET", `/api/evidence?employeeId=${encodeURIComponent(emp)}&from=${from}&to=${to}`)).evidence;
     const v = pr || { competency: "", pts: null, justification: "", evidenceIds: [] };
-    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
+    const evBoxes = k => { const list = evs.filter(e => e.competency === k); return list.length ? list.map(e => `<label class="choice"><input type="checkbox" name="pqEv" value="${e.id}" ${v.evidenceIds.includes(e.id) ? "checked" : ""}><span><span class="muted">${esc(isoToPl(e.date))}</span> ${esc(e.action)} → ${esc(e.result)}</span></label>`).join("") : `<p class="muted">Brak informacji z tego kryterium w kwartale. Najpierw dodaj informację.</p>`; };
     openModal(`<h2 id="pqTitle">${pr ? "Edytuj ocenę cząstkową" : "Ocena cząstkowa za kwartał"} ${esc(q)}</h2>
       <p class="muted">Ocenę przyznajesz Ty w skali 1/3/5/7/9. System jej nie podpowiada. Wymagane są uzasadnienie i co najmniej jedną informację z kwartału.</p>
       <form id="pqForm" novalidate>
@@ -995,7 +1157,7 @@
     const box = $("#evList"); if (!box) return;
     const q = new URLSearchParams(Object.entries(S.evFilter).filter(([, v]) => v)).toString();
     try { S.evidence = (await api("GET", "/api/evidence" + (q ? "?" + q : ""))).evidence; box.innerHTML = evidenceTable(S.evidence, { editable: S.user.role === "przelozony", showEmp: S.user.role === "przelozony" }); bindActs(box); }
-    catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    catch (e) { box.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   function bindEvidencePage() {
     const fm = $("#evFilter"); if (!fm) return;
@@ -1011,19 +1173,21 @@
       <p class="muted">Jedna obserwacja przy jednym wskaźniku: sytuacja, działanie, rezultat. Zmiana trafia do dziennika.</p>
       <form id="evForm" novalidate>
         ${fixedEmp ? `<p><b>Pracownik:</b> ${empName(v.employeeId) || esc(S.cur?.empName || "")}</p>` : `<label class="f" for="eEmp">Pracownik</label><select id="eEmp" required><option value="">Wybierz…</option>${empOptions(v.employeeId)}</select>`}
-        <label class="f" for="eDate">Data zdarzenia</label><input id="eDate" type="date" required value="${esc(v.date)}">
+        <label class="f" for="eDate">Data zdarzenia</label>${dateFieldHtml("eDate", v.date, "required")}
         <label class="f" for="eInd">Wskaźnik</label><select id="eInd" required><option value="">Wybierz…</option>${indOptions(v.indicator)}</select>
         <label class="f" for="eSit">Sytuacja</label><textarea id="eSit" required maxlength="1000">${esc(v.situation)}</textarea>
         <label class="f" for="eAct">Działanie</label><textarea id="eAct" required maxlength="1000">${esc(v.action)}</textarea>
         <label class="f" for="eRes">Rezultat</label><textarea id="eRes" required maxlength="1000">${esc(v.result)}</textarea>
-        <label class="f" for="eLink">Link do artefaktu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
-        <label class="f" for="eTask">ID zadania lub artefaktu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
+        <label class="f" for="eLink">Link do dokumentu (opcjonalnie)</label><input id="eLink" type="url" maxlength="500" value="${esc(v.link || "")}" placeholder="https://">
+        <label class="f" for="eTask">Nr zadania lub link do dokumentu (opcjonalnie)</label><input id="eTask" maxlength="100" value="${esc(v.taskRef || "")}">
         <div id="evErr" role="alert" class="err"></div>
         <div class="btns"><button type="button" class="btn g" data-act="closeModal">Anuluj</button><button class="btn" type="submit">Zapisz</button></div>
       </form>`, () => {
+      const ed = bindDate("eDate");
       $("#evForm").addEventListener("submit", async e => {
         e.preventDefault();
-        const body = { date: $("#eDate").value, indicator: $("#eInd").value, situation: $("#eSit").value, action: $("#eAct").value, result: $("#eRes").value, link: $("#eLink").value.trim(), taskRef: $("#eTask").value };
+        const eIso = ed.iso(); if (!eIso) { $("#eDate").focus(); return; }
+        const body = { date: eIso, indicator: $("#eInd").value, situation: $("#eSit").value, action: $("#eAct").value, result: $("#eRes").value, link: $("#eLink").value.trim(), taskRef: $("#eTask").value };
         try {
           if (ev) await api("PUT", `/api/evidence/${ev.id}`, body);
           else await api("POST", "/api/evidence", { ...body, employeeId: +(fixedEmp ? v.employeeId : $("#eEmp").value) });
@@ -1034,11 +1198,12 @@
     }, "mTitle");
   }
   // Informacje przy wskaźniku w kreatorze oceny (okres oceny)
+  const indShort = k => { const [ck, wi] = String(k).split("|"); const m = MODEL.find(x => x.k === ck); return (m && m.w[+wi] ? m.w[+wi].w : k).slice(0, 80); };
   function evidenceMini(indKey) {
     const c = S.cur, list = (c.evidence || []).filter(e => e.indicator === indKey);
-    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}">+ Informacja</button>` : "";
+    const add = c.status === "draft" ? `<button type="button" class="btn sm g" data-act="addEvidence" data-ind="${esc(indKey)}" aria-label="Dodaj informację – ${esc(indShort(indKey))}">+ Informacja</button>` : "";
     return `<div class="ev-mini"><div class="row"><span class="muted">Informacje z okresu oceny: <b>${list.length}</b></span>${add}</div>
-      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(e.date)}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
+      ${list.length ? `<ul class="c">${list.slice(0, 5).map(e => `<li><span class="muted">${esc(isoToPl(e.date))}</span> ${esc(e.action)} → ${esc(e.result)}</li>`).join("")}${list.length > 5 ? `<li class="muted">…i ${list.length - 5} więcej</li>` : ""}</ul>` : c.typ !== "pierwsza" ? `<p class="muted">Brak informacji. Przed złożeniem dodaj informację albo zaznacz „Brak podstaw do oceny”.</p>` : ""}</div>`;
   }
   async function refreshWizardEvidence() {
     const c = S.cur; if (!c) return;
@@ -1071,29 +1236,30 @@
     try {
       const s = await api("GET", "/api/summary?" + q);
       box.innerHTML = `<div class="kpis">
-          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie</span></div>
-          <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Check-iny odbyte / zapisane</span></div>
-          <div class="kpi"><b>${s.feedbackTotal}</b><span>Feedback</span></div>
-          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez informacji</span></div></div>
-        <div class="card"><h2>Wskaźniki z informacjami lub feedbackiem</h2>
-          <p class="muted">Okres ${esc(s.from)} – ${esc(s.to)}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
-          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Check-iny z informacjami</th><th scope="col">Feedback (poziomy)</th></tr></thead><tbody>
-            ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(i.firstDate)} – ${esc(i.lastDate)}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
-            </tbody></table></div>` : `<p class="muted">Brak informacji i feedbacku w okresie.</p>`}</div>
+          <div class="kpi"><b>${s.evidenceTotal}</b><span>Informacje w okresie<small>Ile opisanych sytuacji, działań i rezultatów zapisano.</small></span></div>
+          <div class="kpi"><b>${s.checkins.done} / ${s.checkins.total}</b><span>Rozmowy miesięczne odbyte / zapisane<small>Ile rozmów się odbyło z ilu zapisanych w okresie.</small></span></div>
+          <div class="kpi"><b>${s.feedbackTotal}</b><span>Informacja zwrotna<small>Ile wpisów informacji zwrotnej zebrano w okresie.</small></span></div>
+          <div class="kpi"><b>${s.indicatorsWithoutEvidence}</b><span>Wskaźniki bez zapisanych informacji w okresie<small>Warto uzupełnić przed oceną.</small></span></div></div>
+        <div class="card"><h2>Wskaźniki z informacjami lub informacją zwrotną</h2>
+          <p class="muted">Okres ${esc(isoToPl(s.from))} – ${esc(isoToPl(s.to))}. To zestawienie faktów. Nie ma w nim średniej ani sugerowanego wyniku. Ocenę przyznajesz Ty.</p>
+          ${s.indicators.length ? `<div style="overflow-x:auto"><table class="table"><caption class="sr">Zestawienie wskaźników</caption><thead><tr><th scope="col">Wskaźnik</th><th scope="col">Informacje</th><th scope="col">Pierwszy – ostatni</th><th scope="col">Rozmowy miesięczne z informacjami</th><th scope="col">Informacja zwrotna (poziomy)</th></tr></thead><tbody>
+            ${s.indicators.map(i => `<tr><td>${esc(indLabel(i.indicator))}</td><td>${i.evidenceCount}</td><td style="white-space:nowrap">${i.firstDate ? `${esc(isoToPl(i.firstDate))} – ${esc(isoToPl(i.lastDate))}` : "—"}</td><td>${i.checkinsWithEvidence}</td><td>${i.feedbackCount}${i.feedbackCount ? ` ${distChips(i.feedbackLevels)}` : ""}</td></tr>`).join("")}
+            </tbody></table></div>` : `<p class="muted">Brak informacji i informacji zwrotnej w okresie.</p>`}</div>
         <div class="card"><h2>Rozkład poziomów z ocen cząstkowych kwartalnych</h2>
           ${s.competencies.length ? s.competencies.map(c => `<div class="ind"><h3 class="h-comp">${compIc(c.competency)}${esc(nameOf(c.competency))}</h3>${distChips(c.distribution)}
             <p class="muted">${c.partials.map(p => `${esc(p.quarter)}: ${p.pts} pkt`).join(" · ")}</p></div>`).join("") : `<p class="muted">Brak ocen cząstkowych kwartalnych w okresie.</p>`}</div>
-        <div class="card"><h2>Check-iny</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak check-inów w okresie.</p>`}</div>`;
-    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+        <div class="card"><h2>Rozmowy miesięczne</h2>${s.checkins.months.length ? `<p>${s.checkins.months.map(m => `${esc(m.month)} (${m.status})`).join(" · ")}</p>` : `<p class="muted">Brak rozmów miesięcznych w okresie.</p>`}</div>`;
+    } catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(errMsg(e))}</p></div>`; }
   }
 
+  const modState = on => on ? `${KK_ICON("check")}<span>Włączony</span>` : `<svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h8"/></svg><span>Wyłączony</span>`;
   function settingsPage() {
     const mods = S.moduleList || [];
     return `<div class="card"><h2>Moduły spoza rozporządzenia</h2>
-      <p class="muted">Informacje, rozmowy miesięczne, feedback, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
-      <form id="setForm">${mods.map(m => `<label class="choice"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span></label>`).join("")}
+      <p class="muted">Informacje, rozmowy miesięczne, informacja zwrotna, oceny kwartalne i asystent AI nie wynikają wprost z rozporządzenia. Każdy można wyłączyć. Informacje są opcjonalne, ale zachęcamy do ich używania: wspierają przygotowanie oceny.</p>
+      <form id="setForm">${mods.map(m => `<label class="choice mod-row"><input type="checkbox" data-mod="${esc(m.key)}" ${m.on ? "checked" : ""}><span><b>${esc(m.label)}</b></span><span class="mod-state ${m.on ? "on" : "off"}" data-mod-state="${esc(m.key)}">${modState(m.on)}</span></label>`).join("")}
       <div class="btns" style="justify-content:flex-start"><button class="btn" type="button" data-act="saveSettings">Zapisz ustawienia</button></div></form></div>
-      <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B i C), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
+      <div class="card"><h2>Zawsze włączone</h2><p class="muted">Ocena okresowa (Arkusz B – osoby kierujące zespołem, Arkusz C – pozostałe stanowiska), pierwsza ocena, zapoznanie i sprzeciw (art. 83), dziennik zdarzeń.</p></div>`;
   }
 
   // ---------- Kreator oceny: strony Dalej/Wstecz ----------
@@ -1117,13 +1283,13 @@
     else if (st.id === "talk") body = talkStep();
     else if (st.id === "sum") body = sumStep();
     else body = rateOne(st.comp);
-    const prevLabel = idx === 0 ? "Zamknij" : "Wstecz";
+    const prevLabel = idx === 0 ? `<span class="l-long">Zapisz i wróć później</span><span class="l-short">Zapisz</span>` : "Wstecz";
     const last = idx === steps.length - 1;
     const canNext = !(st.id === "crit" && !c.criteria.length);
     const nav = `<nav class="wiz-nav" aria-label="Nawigacja kreatora">
-      <button class="btn g" data-wiz="${idx === 0 ? "close" : "prev"}">${KK_ICON("back")}<span>${prevLabel}</span></button>
+      <button class="btn g" data-wiz="${idx === 0 ? "close" : "prev"}"${idx === 0 ? ' aria-label="Zapisz i wróć później"' : ""}>${KK_ICON("back")}<span>${prevLabel}</span></button>
       <span class="muted wiz-count">${idx + 1} / ${steps.length}</span>
-      ${last ? "" : `<button class="btn" data-wiz="next" ${canNext ? "" : "disabled"}><span>Dalej</span>${KK_ICON("arrow")}</button>`}</nav>`;
+      ${last ? (c.status === "draft" ? `<button class="btn submit" data-act="submitEval" ${(c.missing || []).length === 0 && c.criteria.length > 0 ? "" : "disabled"}>${KK_ICON("check")}<span>Złóż ocenę</span></button>` : "") : `<button class="btn" data-wiz="next" ${canNext ? "" : "disabled"}><span>Dalej</span>${KK_ICON("arrow")}</button>`}</nav>`;
     return { html: `<h1 class="sr">Kreator oceny</h1>` + head + body + nav, title: "Ocena", sub: st.id === "crit" ? "Wybierz, co będziemy oceniać" : st.id === "sum" ? "Sprawdź i złóż ocenę" : st.id === "talk" ? "Przygotuj rozmowę" : "Opisz zachowania, nie osobę", opts: { hidePageHead: true } };
   }
   function bindWizard() {
@@ -1133,6 +1299,15 @@
       S.cur.step += a === "next" ? 1 : -1;
       render(); window.scrollTo(0, 0);
     }));
+    document.querySelectorAll("[data-datef]").forEach(inp => {
+      const h = dateMask(inp, $("#" + inp.id + "Err"));
+      inp.addEventListener("change", () => {
+        if (!S.cur || inp.disabled) return;
+        const iso = inp.value.trim() ? h.iso() : "";
+        if (inp.value.trim() && !iso) return; // niepełna data: komunikat przy polu, nie zapisujemy
+        S.cur.data[inp.dataset.datef] = iso; queueSave();
+      });
+    });
     document.removeEventListener("keydown", wizKeys);
     document.addEventListener("keydown", wizKeys);
   }
@@ -1149,17 +1324,18 @@
       <p class="muted">${isFirst ? "Wybierz kompetencje istotne dla stanowiska. Każdą ocenisz na osobnym kroku." : `Kryteria obowiązkowe są już zaznaczone. Dodatkowe możesz wybrać: ${extra} z ${S.maxExtra}.`}</p>
       <div class="crit-grid">${MODEL.map(m => {
         const dis = !isFirst && isMand(m.k, S.cur && S.cur.typ);
-        return `<label class="choice"><input type="checkbox" data-crit="${esc(m.k)}" ${c.criteria.includes(m.k) ? "checked" : ""} ${dis ? "disabled" : ""}>
-          <span class="crit-h">${compIc(m.k)}<span><b>${esc(nameOf(m.k))}</b>${!isFirst && isMand(m.k, S.cur && S.cur.typ) ? ' <span class="tag">obowiązkowe</span>' : ""}<br><span class="muted">${m.w.length} wskaźników</span></span></span></label>`;
-      }).join("")}</div></div>`;
+        return `<label class="choice${dis ? " is-mand" : ""}"><input type="checkbox" data-crit="${esc(m.k)}" ${c.criteria.includes(m.k) ? "checked" : ""} ${dis ? "disabled" : ""}>
+          <span class="crit-h">${compIc(m.k)}<span><b>${esc(nameOf(m.k))}</b>${dis ? ` <span class="tag mand">${KK_ICON("lock")}<span>Obowiązkowe – zawsze w ocenie</span></span>` : ""}<br><span class="muted">${m.w.length} wskaźników</span></span></span></label>`;
+      }).join("")}</div><p class="muted mand-note">Kryteria obowiązkowe wg rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r. (załącznik – arkusz B/C).</p></div>`;
   }
   function rateOne(comp) {
     const c = S.cur, isFirst = c.typ === "pierwsza";
     const L = isFirst ? LEVELS3.map((l, i) => [l, PTS3[i], i + 1]) : LEVELS5.map((l, i) => [l, PTS5[i], i]);
-    const done = comp.w.filter((_, wi) => c.ratings[comp.k + "|" + wi]).length;
+    const done = comp.w.filter((_, wi) => { const r = c.ratings[comp.k + "|" + wi]; return r && r.lvl !== undefined; }).length;
     return `<div class="card"><div class="row"><h2 class="h-comp">${compIc(comp.k)}${esc(nameOf(comp.k))}</h2><span class="tag info">${done}/${comp.w.length} ocenione</span></div>
+      <p class="note scale-hint"><b>Punkt wyjścia to 5 pkt – na poziomie oczekiwań.</b> Wyżej lub niżej tylko na podstawie zapisanych informacji.</p>
       <p class="muted">Wybierz poziom, który najlepiej opisuje to, co faktycznie obserwowałeś/aś. Dodaj jeden konkretny przykład: sytuacja, działanie, rezultat.</p>
-      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Wstaw przykłady z informacji (puste pola)</button></div>` : ""}</div>
+      ${c.status === "draft" && (c.evidence || []).some(e => e.competency === comp.k) ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="fillFromEvidence" data-comp="${esc(comp.k)}">Uzupełnij przykłady z zapisanych informacji</button></div>` : ""}</div>
       ${comp.w.map((w, wi) => {
         const id = comp.k + "|" + wi, r = c.ratings[id] || {};
         const exId = "ex" + comp.k.length + "_" + wi;
@@ -1222,7 +1398,7 @@
             <button class="btn g" data-act="aiBrief" data-emp="${c.employeeId}">Przygotuj brief do rozmowy</button>
         <button class="btn g" data-act="aiFormal">Sprawdź język uzasadnień</button>` : `<p class="muted">Asystent AI jest wyłączony w ustawieniach.</p>`}</div>
       <h3 style="margin-top:14px">Przygotowanie do spotkania</h3>${prepPanel(c)}
-      <div id="aiOut">${c.aiText ? `<div class="ai-out">${esc(c.aiText)}</div><p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
+      <div id="aiOut">${c.aiText ? `${aiRich(c.aiText)}<p class="muted">Źródło: ${c.aiSource === "ai" ? "model AI" : "reguły"}</p>` : ""}</div>
       <p class="note">Model działa na Twoim komputerze, dane nie opuszczają urządzenia. To propozycja do przemyślenia. Ocenę wystawiasz Ty.</p></div>`;
   }
   function sumStep() {
@@ -1236,8 +1412,8 @@
     const d = c.data, ro = c.status !== "draft" ? "disabled" : "";
     const form = `<div class="card"><h2>Rozmowa i wynik oceny</h2>
       <div class="grid two">
-        <div><label class="f" for="fRozm">Data rozmowy oceniającej</label><input id="fRozm" type="date" data-field="rozmowa" value="${esc(d.rozmowa || "")}" ${ro}></div>
-        <div><label class="f" for="fTerm">Termin sporządzenia oceny</label><input id="fTerm" type="date" data-field="terminOceny" value="${esc(d.terminOceny || "")}" ${ro}></div>
+        <div><label class="f" for="fRozm">Data rozmowy oceniającej</label><input id="fRozm" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="DD.MM.RRRR" data-datef="rozmowa" aria-describedby="fRozmErr" value="${esc(isoToPl(d.rozmowa || ""))}" ${ro}><div class="err" id="fRozmErr" role="alert"></div></div>
+        <div><label class="f" for="fTerm">Termin sporządzenia oceny</label><input id="fTerm" type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="DD.MM.RRRR" data-datef="terminOceny" aria-describedby="fTermErr" value="${esc(isoToPl(d.terminOceny || ""))}" ${ro}><div class="err" id="fTermErr" role="alert"></div></div>
       </div>
       <label class="f" for="fUzas">Uzasadnienie oceny (obowiązkowe przy ocenie negatywnej)</label>
       <textarea id="fUzas" data-field="uzasadnienie" ${ro}>${esc(d.uzasadnienie || "")}</textarea>
@@ -1246,15 +1422,14 @@
         <label class="choice"><input type="radio" name="wynik" value="negatywna" data-field="wynik" ${d.wynik === "negatywna" ? "checked" : ""} ${ro}><span><b>Negatywna</b></span></label>
       </fieldset>`}</div>
       ${timingNote(c)}
-      ${c.status === "draft" ? draftLinks(c.id) : ""}
-      ${docLinks(c.id)}`;
+      ${docLinks(c.id, c.status === "draft" ? draftLinks(c.id) : "")}`;
     return form + `<div class="card"><h2>Podsumowanie</h2>
       <p>Średnia: <b data-to="${overall ?? 0}" data-dec="1">${overall === null ? "—" : fmt(overall)}</b> pkt</p>
       ${scoreBars(scores)}
       ${c.status === "draft" ? (miss.length
         ? `<div class="note warn"><b>Do uzupełnienia przed złożeniem (${miss.length}):</b><ul class="c">${miss.slice(0, 8).map(m => `<li>${esc(m)}</li>`).join("")}${miss.length > 8 ? `<li>…i ${miss.length - 8} więcej</li>` : ""}</ul></div>`
         : `<p><span class="tag ok">Kompletna – możesz złożyć</span></p>`) : ""}
-      ${c.status === "draft" ? `<div class="btns" style="justify-content:flex-start"><button class="btn" data-act="submitEval" ${canSubmit ? "" : "disabled"}>Złóż ocenę</button></div>` : ""}
+      ${c.status === "draft" && !canSubmit ? `<p class="muted">Przycisk „Złóż ocenę” w dolnym pasku będzie aktywny po uzupełnieniu brakujących elementów.</p>` : ""}
     </div>
     ${c.status === "submitted" ? `<div class="card"><h2>Po rozmowie</h2><p class="muted">Zapisz wnioski rozwojowe i oznacz ocenę jako omówioną.</p>
       <label class="f" for="devN">Wnioski rozwojowe</label><textarea id="devN">${esc(c.data.dev || "")}</textarea>
@@ -1271,27 +1446,27 @@
   // Termin: reguła 6 miesięcy między ocenami okresowymi i cykl 24 miesięcy
   function timingNote(c) {
     const t = c.timing; if (!t) return "";
-    if (t.exception) return `<div class="note">Wyjątek od reguły ${t.earliest ? `6 miesięcy (najwcześniej ${esc(t.earliest)})` : "6 miesięcy"} zapisany ${esc(String(t.exception.at).slice(0, 10))}: ${esc(t.exception.reason)}</div>`;
-    if (!t.ok) return `<div class="note warn" role="alert"><b>Zbyt wczesna ocena.</b> Poprzednia ocena okresowa: ${esc(t.prevDate)}. Najwcześniejszy termin: ${esc(t.earliest)}. Złożenie będzie zablokowane bez wyjątku.
+    if (t.exception) return `<div class="note">Wyjątek od reguły ${t.earliest ? `6 miesięcy (najwcześniej ${esc(isoToPl(t.earliest))})` : "6 miesięcy"} zapisany ${esc(isoToPl(String(t.exception.at).slice(0, 10)))}: ${esc(t.exception.reason)}</div>`;
+    if (!t.ok) return `<div class="note warn" role="alert"><b>Zbyt wczesna ocena.</b> Poprzednia ocena okresowa: ${esc(isoToPl(t.prevDate))}. Najwcześniejszy termin: ${esc(isoToPl(t.earliest))}. Złożenie będzie zablokowane bez wyjątku.
       ${c.status === "draft" ? `<div class="btns" style="justify-content:flex-start"><button type="button" class="btn sm g" data-act="earlyException">Zapisz wyjątek z uzasadnieniem</button></div>` : ""}</div>`;
-    return t.nextDue ? `<p class="muted">Termin cyklu (24 miesiące od poprzedniej oceny): ${esc(t.nextDue)}.</p>` : "";
+    return t.nextDue ? `<p class="muted">Termin cyklu (24 miesiące od poprzedniej oceny): ${esc(isoToPl(t.nextDue))}.</p>` : "";
   }
   function draftLinks(id) {
     const base = `/api/evals/${id}/document?variant=szkic`;
-    return `<div class="docs"><h3>Szkic z informacji i check-inów</h3><p class="muted">Materiał roboczy: informacje i rozmowy miesięczne z okresu oceny, bez poziomów i bez wyniku. Ocenę uzupełniasz i zatwierdzasz Ty.</p>
-      <div class="btns" style="justify-content:flex-start">
-        <a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
-        <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>
-      </div></div>`;
+    return `<a class="btn g" href="${base}&format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd szkicu PDF</span><span class="sr"> (nowa karta)</span></a>
+        <a class="btn g" href="${base}&format=xml" download>${KK_ICON("file")}<span>Szkic XML</span></a>`;
   }
-  function docLinks(id) {
+  function docLinks(id, extra = "") {
     const base = `/api/evals/${id}/document`;
-    return `<div class="docs"><h3>Dokumenty</h3><p class="muted">Arkusz generowany z danych tej oceny. Podgląd i pobieranie w PDF lub XML.</p>
+    return `<div class="docs"><h3>Dokumenty</h3><p class="muted">Arkusz generowany z danych tej oceny.</p>
       <div class="btns" style="justify-content:flex-start">
-        <a class="btn g" href="${base}?format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd PDF</span></a>
+        <a class="btn" href="${base}?format=pdf&inline=1" target="_blank" rel="noopener">${KK_ICON("file")}<span>Podgląd PDF arkusza</span><span class="sr"> (nowa karta)</span></a>
         <a class="btn g" href="${base}?format=pdf" download>${KK_ICON("file")}<span>Pobierz PDF</span></a>
+      </div>
+      <details class="adv"><summary>Dokumenty i formaty (dla zaawansowanych)</summary>
+        <div class="btns" style="justify-content:flex-start">
         <a class="btn g" href="${base}?format=xml" download>${KK_ICON("file")}<span>Pobierz XML</span></a>
-      </div></div>`;
+        ${extra}</div></details></div>`;
   }
   function evalReadPage() {
     const e = S.readEval; if (!e) return `<p class="muted">Ładowanie…</p>`;
@@ -1311,13 +1486,13 @@
     const m = S.readMeta || {};
     const who = `<dl class="meta"><dt>Oceniany</dt><dd>${first(m.employee?.name)}${m.employee?.position ? ", " + esc(m.employee.position) : ""}</dd>
       <dt>Oceniający</dt><dd>${first(m.evaluator?.name)}${m.evaluator?.position ? ", " + esc(m.evaluator.position) : ""}</dd>
-      <dt>Utworzono</dt><dd>${esc((e.created || "").slice(0, 16).replace("T", " "))}</dd>
-      <dt>Ostatnia zmiana</dt><dd>${esc((e.updated || "").slice(0, 16).replace("T", " "))}</dd>
-      <dt>Zapoznanie ocenianego</dt><dd>${e.ack_at ? esc(e.ack_at.slice(0, 16).replace("T", " ")) : "jeszcze nie"}</dd>
-      <dt>Sprzeciw</dt><dd>${e.objection_at ? esc(e.objection_at.slice(0, 16).replace("T", " ")) + (e.objection_result ? " – " + esc(e.objection_result) : " – do rozpatrzenia") : "brak"}</dd></dl>`;
+      <dt>Utworzono</dt><dd>${esc(plDT(e.created))}</dd>
+      <dt>Ostatnia zmiana</dt><dd>${esc(plDT(e.updated))}</dd>
+      <dt>Zapoznanie ocenianego</dt><dd>${e.ack_at ? esc(plDT(e.ack_at)) : "jeszcze nie"}</dd>
+      <dt>Sprzeciw</dt><dd>${e.objection_at ? esc(plDT(e.objection_at)) + (e.objection_result ? " – " + esc(e.objection_result) : " – do rozpatrzenia") : "brak"}</dd></dl>`;
     return `<div class="card">${who}<div class="row"><h2>${esc(TYP[e.typ])}</h2>${pill(e.status)}</div>
-      <p class="muted">Okres ${esc(e.period_from || "")} – ${esc(e.period_to || "")}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11)" : ""}` : ""}</p>
-      <div class="grid two"><div>${radar(scores)}</div><div>${scoreBars(scores)}</div></div></div>
+      <p class="muted">Okres ${esc(isoToPl(e.period_from || ""))} – ${esc(isoToPl(e.period_to || ""))}${e.data.wynik ? ` · Ocena: <b>${esc(e.data.wynik)}</b>${e.data.wynikSource === "wyliczony" ? " (wyliczona wg § 11 rozporządzenia Prezesa Rady Ministrów z 4 kwietnia 2016 r.)" : ""}` : ""}</p>
+      <div class="eval-chart">${radar(scores, true)}</div></div>
       ${items}
       ${e.data.dev ? `<div class="card"><h2>Wnioski rozwojowe</h2><p>${esc(e.data.dev)}</p></div>` : ""}
       <div class="card" id="sigBox"><h2>Podpisy i zapoznanie</h2><p class="muted">Ładowanie…</p></div>
@@ -1329,13 +1504,13 @@
   let saveTimer = null;
   function queueSave() {
     clearTimeout(saveTimer);
+    const c = S.cur; if (!c) return;
     const sv = $("#saved"); if (sv) sv.textContent = "Zapisywanie…";
     saveTimer = setTimeout(async () => {
       try {
-        const c = S.cur;
         const r = await api("PUT", `/api/evals/${c.id}`, { data: c.data, periodFrom: c.periodFrom, periodTo: c.periodTo });
         c.missing = r.missing; const s2 = $("#saved"); if (s2) s2.textContent = "Zapisano";
-      } catch (e) { const s2 = $("#saved"); if (s2) s2.textContent = "Nie zapisano"; toast(e.message); }
+      } catch (e) { const s2 = $("#saved"); if (s2) s2.textContent = "Nie zapisano"; toast(errMsg(e)); }
     }, 500);
   }
   async function openWizard(id) {
@@ -1370,7 +1545,7 @@
     try {
       const r = await api("POST", kind === "talk" ? "/api/ai/talk" : "/api/ai/formal", { evalId: S.cur.id });
       stop(); S.cur.aiText = r.text; S.cur.aiSource = r.source; render();
-    } catch (e) { stop(); toast(e.message); }
+    } catch (e) { stop(); toast(errMsg(e)); }
   }
   // Podpisy i zapoznanie z oceną – stan z serwera
   async function loadSigs(id, status) {
@@ -1395,17 +1570,53 @@
           ${r.objectionAt ? `<p class="note warn">Sprzeciw został złożony. Przełożony rozpatrzy go zgodnie z procedurą.</p>` : ""}` : ""}`;
       box.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => act(b.dataset.act, b, e)));
       animateIn(box);
-    } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(e.message)}</p>`; }
+    } catch (e) { box.innerHTML = `<h2>Podpisy i zapoznanie</h2><p class="muted">${esc(errMsg(e))}</p>`; }
+  }
+  const EVT = { login: "Logowanie", login_fail: "Nieudane logowanie", login_blocked: "Logowanie zablokowane", password_change: "Zmiana hasła", password_change_fail: "Nieudana zmiana hasła", account_activated: "Aktywacja konta", activation_issued: "Wydanie linku aktywacyjnego", create_employee: "Dodanie pracownika",
+    create_eval: "Utworzenie oceny", update_eval: "Zmiana oceny", submit_eval: "Złożenie oceny", eval_early_exception: "Wyjątek od reguły 6 miesięcy", discuss_eval: "Omówienie oceny", sign_eval: "Podpis oceniającego", acknowledge_eval: "Zapoznanie z oceną", objection_eval: "Sprzeciw", objection_decision: "Rozpatrzenie sprzeciwu",
+    download_doc: "Pobranie dokumentu", download_draft: "Pobranie szkicu", create_evidence: "Dodanie informacji", update_evidence: "Zmiana informacji", create_kickoff: "Rozmowa rozpoczynająca", update_kickoff: "Zmiana rozmowy rozpoczynającej", acknowledge_kickoff: "Zapoznanie z rozmową rozpoczynającą",
+    create_goal: "Nowy cel", update_goal: "Zmiana celu", goal_step_confirm: "Potwierdzenie kroku celu", goal_step_report: "Zgłoszenie wykonania kroku celu", update_devplan: "Plan rozwoju pracownika", create_checkin: "Rozmowa miesięczna", update_checkin: "Zmiana rozmowy miesięcznej",
+    create_feedback: "Informacja zwrotna", update_feedback: "Zmiana informacji zwrotnej", create_partial: "Ocena cząstkowa", update_partial: "Zmiana oceny cząstkowej", view_summary: "Podgląd zestawienia", view_month: "Podgląd miesiąca", setting: "Zmiana ustawień",
+    ai_talk: "Podpowiedź AI: pytania do rozmowy", ai_formal: "Podpowiedź AI: uzasadnienie formalne", ai_development: "Podpowiedź AI: działania rozwojowe", ai_checkin: "Podpowiedź AI: rozmowa miesięczna", ai_brief: "Podpowiedź AI: brief do rozmowy", ai_prep: "Podpowiedź AI: przygotowanie do rozmowy", ai_criteria: "Podpowiedź AI: dobór kryteriów" };
+  const evtName = a => EVT[a] || (a ? String(a).replace(/_/g, " ").replace(/^./, c => c.toUpperCase()) : "");
+  // Czytelny cel wpisu dziennika (np. „5:pdf” → „Ocena nr 5 – PDF”)
+  function targetLabel(a) {
+    const t = String(a.target || ""), act = a.action || "";
+    let m;
+    if ((m = /^(evidence|goal|kickoff|devplan|checkin|feedback|partial):(\d+)$/.exec(t))) return { evidence: `Informacja nr ${m[2]}`, goal: `Cel nr ${m[2]}`, kickoff: `Rozmowa rozpoczynająca nr ${m[2]}`, devplan: `Plan rozwoju pracownika nr ${m[2]}`, checkin: `Rozmowa miesięczna nr ${m[2]}`, feedback: `Informacja zwrotna nr ${m[2]}`, partial: `Ocena cząstkowa nr ${m[2]}` }[m[1]];
+    if ((m = /^(\d+):(pdf|xml)$/i.exec(t))) return `Ocena nr ${m[1]} – ${m[2].toUpperCase()}`;
+    if ((m = /^(\d+):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, okres ${isoToPl(m[2])} – ${isoToPl(m[3])}`;
+    if ((m = /^(\d+):(\d{4})-(\d{2})$/.exec(t))) return `Pracownik nr ${m[1]}, miesiąc ${m[3]}.${m[2]}`;
+    if ((m = /^(\d+):(\w+)(?:: (.*))?$/.exec(t)) && act === "objection_decision") return `Ocena nr ${m[1]} – ${m[2]}${m[3] ? ": " + m[3] : ""}`;
+    if ((m = /^(\w+)=([01])$/.exec(t)) && act === "setting") return `${m[1]}: ${m[2] === "1" ? "włączony" : "wyłączony"}`;
+    if (t === "session_rotated") return "Nowa sesja";
+    if (/^\d+$/.test(t)) return /eval|download|^ai_(talk|formal)$/.test(act) ? `Ocena nr ${t}` : /employee|activat|password/.test(act) ? `Konto nr ${t}` : `Nr ${t}`;
+    return t;
+  }
+  const plTime = at => { const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(at || ""); return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : at || ""; };
+  // Dziennik: „pole: przed → po” z pól prev_value / new_value (JSON); długi opis trafia do <details>
+  function auditChange(a) {
+    const parse = t => { if (t === null || t === undefined || t === "") return undefined; try { return JSON.parse(t); } catch { return String(t); } };
+    const val = v => v === undefined || v === null ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    const pv = parse(a.prev_value), nv = parse(a.new_value), isO = v => v && typeof v === "object" && !Array.isArray(v);
+    let lines = [];
+    if (isO(pv) || isO(nv)) {
+      const o = isO(pv) ? pv : {}, n = isO(nv) ? nv : {};
+      [...new Set([...Object.keys(o), ...Object.keys(n)])].forEach(k => { if (JSON.stringify(o[k]) !== JSON.stringify(n[k])) lines.push(`${k}: ${val(o[k])} → ${val(n[k])}`); });
+    } else if (pv !== undefined || nv !== undefined) lines.push(`${val(pv)} → ${val(nv)}`);
+    if (!lines.length) return `<span class="muted">—</span>`;
+    const full = lines.join("\n"), short = full.length > 120 ? full.slice(0, 117).replace(/\s+\S*$/, "") + "…" : full;
+    return full.length > 120 ? `<span class="chg">${esc(short)}</span><details class="chg-more"><summary>Pokaż całość</summary><pre class="chg-full">${esc(full)}</pre></details>` : `<span class="chg">${esc(full).replace(/\n/g, "<br>")}</span>`;
   }
   async function loadLog() {
     const b = $("#logBody"); if (!b) return;
     try {
       const r = await api("GET", "/api/audit");
       b.innerHTML = `<p>Integralność dziennika (łańcuch skrótów SHA-256 i pieczęć HMAC): <span class="tag ${r.chainOk ? "ok" : "bad"}">${r.chainOk ? "zgodny" : "naruszony od wpisu " + r.brokenAt}</span></p>`
-        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Cel</th><th scope="col">Kiedy</th></tr></thead><tbody>${r.audit.map(a => `<tr><td>${esc(a.action)}</td><td>${esc(a.target || "")}</td><td>${esc(a.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
+        + (r.audit.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Zdarzenie</th><th scope="col">Czego dotyczy</th><th scope="col">Kiedy</th><th scope="col">Zmiana</th></tr></thead><tbody>${r.audit.map(a => `<tr><td data-label="Zdarzenie">${esc(evtName(a.action))}</td><td data-label="Czego dotyczy">${esc(targetLabel(a))}</td><td data-label="Kiedy">${esc(plTime(a.at))}</td><td data-label="Zmiana">${auditChange(a)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak wpisów.</p>`)
         + `<h2 style="margin-top:18px">Podpowiedzi AI (przejrzystość i nadzór)</h2><p class="muted">Każda podpowiedź AI jest zapisana i oznaczona. Nie zmienia ocen bez decyzji człowieka.</p>`
-        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(x.action)}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(x.at)}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
-    } catch (e) { b.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+        + (r.ai.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th scope="col">Rodzaj</th><th scope="col">Model</th><th scope="col">Źródło</th><th scope="col">Kiedy</th><th scope="col">Treść</th></tr></thead><tbody>${r.ai.map(x => `<tr><td>${esc(({ talk: "Pytania do rozmowy", formal: "Uzasadnienie formalne", development: "Działania rozwojowe", checkin: "Rozmowa miesięczna", brief: "Brief do rozmowy", prep: "Przygotowanie do rozmowy", criteria: "Dobór kryteriów" })[x.action] || String(x.action || "").replace(/_/g, " "))}</td><td>${esc(x.model || "")}</td><td>${x.source === "ai" ? `AI ${aiWhere()}` : "reguły"}</td><td>${esc(plTime(x.at))}</td><td>${esc(x.output || "")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Brak podpowiedzi AI.</p>`);
+    } catch (e) { b.innerHTML = `<p class="muted">${esc(errMsg(e))}</p>`; }
   }
   // Strona Asystent AI: czat jak w komunikatorze. Odpowiada tylko o systemie i procedurach oceny.
   function chatBubble(m) {
@@ -1457,13 +1668,13 @@
     readEval: async b => { const r = await api("GET", `/api/evals/${b.dataset.id}`); S.readEval = r.eval; S.readMeta = r; S.readFocus = b.dataset.comp || null; S.view = "evalView"; render(); window.scrollTo(0, 0); },
     submitEval: async () => {
       if (!confirm("Złożyć ocenę? Po złożeniu nie będzie można jej edytować.")) return;
-      try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; toast("Ocena złożona."); render(); surveyModal(S.cur.id); }
-      catch (e) { toast(e.message); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
+      try { await api("POST", `/api/evals/${S.cur.id}/submit`); S.cur.status = "submitted"; render(); surveyModal(S.cur.id); }
+      catch (e) { toast(errMsg(e)); if (e.data?.missing) { S.cur.missing = e.data.missing; render(); } }
     },
     discussEval: async () => {
       const dev = $("#devN")?.value || "";
       try { await api("POST", `/api/evals/${S.cur.id}/discuss`, { dev }); S.cur.status = "discussed"; S.cur.data.dev = dev; toast("Oznaczono jako omówioną."); render(); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     aiChat: async b => {
       const inp = $("#aiQ"); const q = (inp?.value || "").trim();
@@ -1474,7 +1685,7 @@
       try {
         const r = await api("POST", "/api/ai/chat", { message: q, history });
         S.aiChat = [...S.aiChat, { role: "assistant", text: r.text, source: r.source }];
-      } catch (e) { S.aiChat = [...S.aiChat, { role: "assistant", text: "Nie udało się uzyskać odpowiedzi. " + e.message, source: "rules" }]; }
+      } catch (e) { S.aiChat = [...S.aiChat, { role: "assistant", text: "Nie udało się uzyskać odpowiedzi. " + errMsg(e), source: "rules" }]; }
       S.aiPending = false; render(); $("#aiQ")?.focus(); scrollChat();
     },
     aiClear: () => { S.aiChat = []; render(); $("#aiQ")?.focus(); },
@@ -1483,30 +1694,31 @@
     aiDev: async () => {
       const btn = $("#aiDevBtn"); btn.disabled = true; btn.textContent = "Model myśli…";
       const outEl = $("#aiDevOut"); outEl.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa działania rozwojowe…`); const stop = startThinking(outEl);
-      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
-      catch (e) { stop(); outEl.innerHTML = ""; toast(e.message); }
+      outEl.scrollIntoView({ block: "nearest" });
+      try { const r = await api("POST", "/api/ai/development", {}); stop(); outEl.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"}</p>`; }
+      catch (e) { stop(); outEl.innerHTML = ""; toast(errMsg(e)); }
       btn.disabled = false; btn.textContent = "Zapytaj asystenta";
     },
-    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(ex.message); } },
+    toggleGoal: async b => { try { await api("PATCH", `/api/goals/${b.dataset.id}`, { done: b.dataset.done === "1" }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); } },
     addStep: async b => {
       const t = prompt("Nowy krok – coś, co da się sprawdzić (np. „Wysłany raport do akceptacji”):");
       if (!t || !t.trim()) return;
-      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(ex.message); }
+      try { await api("PATCH", `/api/goals/${b.dataset.id}`, { addStep: t.trim() }); await refreshGoals(); } catch (ex) { toast(errMsg(ex)); }
     },
     goalReport: async b => {
       try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, reported: b.dataset.val === "1" }); toast(b.dataset.val === "1" ? "Zgłoszono wykonanie kroku. Przełożony je potwierdzi." : "Cofnięto zgłoszenie."); await refreshGoals(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     goalConfirm: async b => {
       try { await api("PATCH", `/api/goals/${b.dataset.goal}`, { step: +b.dataset.step, confirmed: b.dataset.val === "1" }); await refreshGoals(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
-    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(ex.message)),
+    mgrGoals: b => goalsModal(+b.dataset.emp).catch(ex => toast(errMsg(ex))),
     aiBrief: b => briefModal(+b.dataset.emp),
     aiPrep: async b => {
       const out = $("#aiPrepOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
-      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(ex.message)}</p>`; }
+      try { const r = await api("POST", "/api/ai/prep", {}); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (ex) { stop(); out.innerHTML = `<p class="muted">${esc(errMsg(ex))}</p>`; }
       b.disabled = false;
     },
     briefTab: b => { document.querySelectorAll("[data-brief-pane]").forEach(p => { p.hidden = p.dataset.briefPane !== b.dataset.tab; }); document.querySelectorAll('[data-act="briefTab"]').forEach(t => t.setAttribute("aria-selected", t === b ? "true" : "false")); },
@@ -1568,18 +1780,18 @@
         try {
           const r = await api("POST", "/api/employees", { name: $("#eName").value, email: $("#eMail").value, position: $("#ePos").value });
           closeModal(); await refreshData(); render(); activationInfo(r.activation);
-        } catch (ex) { toast(ex.message); }
+        } catch (ex) { toast(errMsg(ex)); }
       });
     }),
     resendActivation: async b => {
       try { const r = await api("POST", `/api/employees/${b.dataset.emp}/activation`); activationInfo(r.activation); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     kickoff: b => kickoffModal(+b.dataset.emp),
     ackKickoff: async b => {
       if (!confirm("Potwierdzasz zapoznanie z obowiązkami, kryteriami i celami na ten okres oceny?")) return;
       try { await api("POST", `/api/kickoffs/${b.dataset.id}/acknowledge`); toast("Zapisano zapoznanie."); await refreshData(); render(); }
-      catch (ex) { toast(ex.message); }
+      catch (ex) { toast(errMsg(ex)); }
     },
     closeModal: () => closeModal(),
     addEvidence: b => {
@@ -1605,8 +1817,8 @@
     },
     aiCheckin: async b => {
       const out = $("#aiCkOut"); b.disabled = true; out.innerHTML = thinkingHtml(`Model AI ${aiWhere()} układa pytania do rozmowy…`); const stop = startThinking(out);
-      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `<div class="ai-out">${esc(r.text)}</div><p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
-      catch (e) { stop(); out.innerHTML = ""; toast(e.message); }
+      try { const r = await api("POST", "/api/ai/checkin", { employeeId: +S.month.employeeId, month: S.month.month }); stop(); out.innerHTML = `${aiRich(r.text)}<p class="muted">Źródło: ${r.source === "ai" ? `model AI ${aiWhere()}` : "reguły"} · propozycja do przemyślenia</p>`; }
+      catch (e) { stop(); out.innerHTML = ""; toast(errMsg(e)); }
       b.disabled = false;
     },
     editFeedback: b => { const f = (S.monthFeedback || []).find(x => x.id === +b.dataset.id); if (f) feedbackModal(f); },
@@ -1621,20 +1833,20 @@
         toast(r.reopened ? "Ocena wróciła do poprawy." : "Zapisano decyzję.");
         if (r.reopened) return openWizard(+b.dataset.id);
         loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status);
-      } catch (e) { toast(e.message); }
+      } catch (e) { toast(errMsg(e)); }
     },
     saveSettings: async () => {
       const modules = Object.fromEntries([...document.querySelectorAll("[data-mod]")].map(cb => [cb.dataset.mod, cb.checked]));
       try { await api("PUT", "/api/settings", { modules }); await load(); toast("Zapisano ustawienia."); render(); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     signEval: async b => {
       try { const r = await api("POST", `/api/evals/${b.dataset.id}/sign`); toast("Podpisano."); loadSigs(+b.dataset.id, S.cur?.status || S.readEval?.status); void r; }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     ackEval: async b => {
       try { await api("POST", `/api/evals/${b.dataset.id}/acknowledge`); toast("Zapoznanie zarejestrowane."); loadSigs(+b.dataset.id, S.readEval?.status); }
-      catch (e) { toast(e.message); }
+      catch (e) { toast(errMsg(e)); }
     },
     objectionEval: b => openModal(`
       <h2>Sprzeciw wobec oceny</h2>
@@ -1647,13 +1859,13 @@
       $("#objForm").addEventListener("submit", async e => {
         e.preventDefault();
         try { await api("POST", `/api/evals/${b.dataset.id}/objection`, { text: $("#objText").value }); closeModal(); toast("Sprzeciw złożony."); loadSigs(+b.dataset.id, S.readEval?.status); }
-        catch (ex) { toast(ex.message); }
+        catch (ex) { toast(errMsg(ex)); }
       });
     }),
   };
   function act(name, el) {
     if (!actions[name]) return;
-    Promise.resolve(actions[name](el)).catch(e => toast(e.message));
+    Promise.resolve(actions[name](el)).catch(e => toast(errMsg(e)));
   }
   const bindActs = root => root.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", e => act(b.dataset.act, b, e)));
   let modalReturn = null;
@@ -1669,13 +1881,15 @@
     // Pułapka fokusu: Tab nie wychodzi poza okno dialogowe
     m.addEventListener("keydown", e => {
       if (e.key !== "Tab") return;
-      const f = [...m.querySelectorAll("button,input,select,textarea,a[href]")].filter(x => !x.disabled);
+      const f = [...m.querySelectorAll("button,input,select,textarea,a[href],summary")].filter(x => !x.disabled);
       if (!f.length) return;
       if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
       else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
     });
     document.body.appendChild(m); bindActs(m); bind && bind();
     m.querySelector("input,select,textarea")?.focus();
+    const card = m.firstElementChild, hint = () => card.classList.toggle("more-below", card.scrollHeight - card.clientHeight - card.scrollTop > 6);
+    card.addEventListener("scroll", hint); hint(); setTimeout(hint, 150); window.addEventListener("resize", hint);
   }
   function closeModal() {
     const m = document.getElementById("modal"); if (!m) return;
@@ -1687,6 +1901,7 @@
 
   // Zdarzenia formularzy w kreatorze i celach
   document.addEventListener("change", async e => {
+    if (e.target.dataset && e.target.dataset.mod) { const st = document.querySelector(`[data-mod-state="${CSS.escape(e.target.dataset.mod)}"]`); if (st) { st.innerHTML = modState(e.target.checked); st.className = "mod-state " + (e.target.checked ? "on" : "off"); } }
     const t = e.target;
     if (t.dataset.crit && S.cur) {
       const k = t.dataset.crit;
@@ -1721,7 +1936,8 @@
     const act = /^#aktywacja=([a-f0-9]{64})$/.exec(location.hash);
     if (act) return renderActivation(act[1]);
     try {
-      const me = await api("GET", "/api/me");
+      const me = await fetch("/api/session", { credentials: "same-origin" }).then(r => r.json()).catch(() => ({ user: null }));
+      if (!me.user) return renderLogin();
       S.user = me.user; S.ai = me.ai;
       if (me.user.mustChange) return renderPasswordChange();
       await load(); render();

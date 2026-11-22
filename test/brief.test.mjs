@@ -71,3 +71,36 @@ test('nic się nie zapisuje poza ai_log; pracownik i osoba spoza zespołu → 40
   assert.equal((await mgr.post('/api/ai/brief', { employeeId: 99999 })).status, 404);
   assert.equal((await mgr.post('/api/ai/brief', { employeeId: emp.id, from: '2026-12-01', to: '2026-01-01' })).status, 400);
 });
+
+test('format briefu: model z Markdownem → bez # i **, cztery nagłówki w kolejności, „(bez źródła)”, braki z JSON', async () => {
+  const emp = (await mgr.get('/api/dashboard')).body.team[3];
+  const saved = reply;
+  reply = '### Brief do rozmowy\n\n#### 1. Tematy:\n**Komunikacja**\n* współpraca w zespole\n\n\n\n**Przykład**\n1. Uzgodnił harmonogram [I999]\n\n#### Pytania\n- Co pomogło?';
+  try {
+    const r = (await mgr.post('/api/ai/brief', { employeeId: emp.id, from: '2020-01-01' })).body;
+    assert.equal(r.source, 'ai');
+    assert.ok(!/#|\*\*|__/.test(r.brief), r.brief);
+    assert.ok(!/\n\n\n/.test(r.brief));
+    const heads = ['Tematy do omówienia:', 'Przykłady z okresu:', 'Pytania otwarte:', 'Kryteria bez informacji:'];
+    const pos = heads.map(h => r.brief.indexOf(h));
+    assert.ok(pos.every(x => x >= 0) && pos.every((x, i) => !i || x > pos[i - 1]), r.brief);
+    assert.match(r.brief, /- Komunikacja/);
+    assert.match(r.brief, /harmonogram\s*\(bez źródła\)/);
+    const tail = r.brief.slice(pos[3]).split('\n').slice(1).filter(Boolean);
+    const exp = r.json.braki.length ? r.json.braki.map(k => `- ${k.toLowerCase()}`) : ['- brak'];
+    assert.deepEqual(tail, exp);
+    assert.ok(r.brief.split('\n').every(l => !l.trim() || heads.includes(l) || l.startsWith('- ')));
+  } finally { reply = saved; }
+});
+
+test('brief: dwie informacje o tej samej treści dają jeden fakt', async () => {
+  const emp = (await mgr.get('/api/dashboard')).body.team[0];
+  const ind = Object.keys((await mgr.get('/api/evals')).body.evals.find(e => e.employeeId === emp.id || e.employee_id === emp.id)?.data.ratings || {})[0] || 'MYŚLENIE ANALITYCZNE|0';
+  const body = { employeeId: emp.id, date: '2026-03-03', indicator: ind, situation: 'Sytuacja testowa X', action: 'Działanie testowe X', result: 'Rezultat testowy X' };
+  const a = await mgr.post('/api/evidence', body), b = await mgr.post('/api/evidence', body);
+  assert.equal(a.status, 201, a.text); assert.equal(b.status, 201, b.text);
+  const r = await mgr.post('/api/ai/brief', { employeeId: emp.id, from: '2026-01-01', to: '2026-12-31' });
+  const same = r.body.json.fakty.filter(f => f.sytuacja === 'Sytuacja testowa X');
+  assert.equal(same.length, 1);
+  assert.equal(same[0].takze?.length, 1);
+});
