@@ -1,3 +1,52 @@
+# Podsumowanie dla Janka (koniec nocnej iteracji, 22.11.2026 07:46)
+
+**Wynik rubryki: 6,4 → 8,4 / 10** (cykl 0 → cykl 7). Persony (haiku): juror 6→7, Krystyna 5→7, Michał 6→7, Ewa 6→6, klawiatura 6→6.
+
+| Punkt | Start | Koniec | Dowód |
+|---|---|---|---|
+| 1 Ścieżki (a)(b)(c) | 6 | 9 | 5 skryptów person: komplet kroków desktop 1440 i mobile 390 (krystyna 21/21 ze złożeniem oceny, ewa 13/13 z PDF i podpisami, michal 9/9 z zapoznaniem, juror 9/9, klawiatura 18/18 wyłącznie klawiaturą) |
+| 2 Konsola / stany | 6 | 9 | 0 błędów konsoli i 0 odpowiedzi 5xx we wszystkich przebiegach; persona `awaria` (PERSONA_AI=down) – komunikat regułowy zamiast pustki |
+| 3 Testy | 7 | 9 | `npm test` 137/137 (121 na starcie); ścieżka MUST w test/demo-flow.test.mjs |
+| 4 Wydajność | 8 | 9 | start ~0,6 s, żaden ekran nawigacyjny > 2 s; AI z licznikiem sekund |
+| 5 WCAG 2.1 AA | 6 | 8 | kontrast 0 błędów (kontrola sprawdzona na szarym tekście 2,32:1), 0 pułapek klawiaturowych, 0 niewidocznego fokusu, nazwy dostępne bez powtórzeń, skip link na każdym ekranie; brak ręcznego audytu czytnikiem |
+| 6 Design gov.pl / mObywatel | 5 | 8 | Open Sans, tło #F5F6F7, karty 8 px, przyciski ≥ 44 px, prosty język, daty DD.MM.RRRR; bez godła i logotypów |
+| 7 AI | 7 | 8 | podpowiedź kryteriów tylko z modelu (walidacja + fallback), brief w 4 sekcjach z odnośnikami do faktów, prompty bez nazwisk; testowane WYŁĄCZNIE na atrapach (zasada: zero prawdziwych wywołań) |
+| 8 Prezencja przed jury | 6 | 7 | logowanie z wartością produktu, „Ocena w 3 krokach” na Start, dane demo gotowe (szkice da się złożyć) |
+
+**Najważniejsze zmiany:** podpowiedź AI doboru kryteriów (POST /api/ai/criteria + UI), design w stylu gov.pl/mObywatel, ekran logowania i karta „Ocena w 3 krokach”, menu mobilne (4 + „Więcej”) i tabele jako karty na telefonie, kreator („Złóż ocenę” w stopce, wskazówka 5 pkt, XML schowany), brief w sekcjach ze źródłami, dziennik zdarzeń (strona nie działała – naprawiona; polskie nazwy, „przed → po”), daty DD.MM.RRRR, dane demo dla jury, /api/session (start bez 401), Playwright + 5 person + persona awarii AI.
+
+**Decyzje do przejrzenia:**
+- Playwright jako devDependency (oficjalny rejestr npm) + Chromium przez `npx playwright install chromium`.
+- Zero prawdziwych wywołań API (Twoja zasada) – pkt 7 oceniony na atrapach; prawdziwy model niesprawdzony po zmianach promptów.
+- Kierunek designu: gov.pl/mObywatel (rubryka), NIE projekt „Kompas” z Claude Design.
+- Seed demo: szkice mają informacje przy każdym wskaźniku i poziomy wokół 5 pkt (szkic wygląda na „wstępnie wypełniony” – Krystyna zgłasza ryzyko nieświadomego „Dalej”).
+- Test „złożenie oceny wymaga informacji…” przesuwa okres szkicu na lata bez informacji (niezależność od seedu); asercja dziennika czyta pełną wartość z bazy (siła bez zmian).
+- Menu mobilne: pierwsze 4 pozycje, reszta w „Więcej”.
+
+**Znane problemy:**
+- Szkice demo mają wstępnie ustawione poziomy (5 pkt) – rozważyć puste poziomy (wymaga zmian w testach opartych na kluczach `ratings`).
+- Filtry dat w Informacjach i Zestawieniu – natywne pola (format zależy od języka systemu).
+- Podpisy: „Podpisz ocenę” bez wyjaśnienia skutków; dziennik pokazuje tylko własne działania zalogowanego.
+- Dużo Tabów do celu (ścieżka c ~33–38) – brak skrótów poza „Przejdź do treści”.
+- Commit WIP b97e900 był uszkodzony – naprawiony w d45f8b3 (historia zawiera oba).
+- `stash@{0}` (stara wersja app/app.css z cyklu 2) zostawiony na Twoje polecenie – jego treść jest scalona, można usunąć.
+- Brak ręcznego testu z czytnikiem ekranu (NVDA/VoiceOver) i brak testu z prawdziwym modelem AI.
+
+**Jak uruchomić demo dla jury:**
+1. `npm install` (dociągnie Playwright tylko do testów person).
+2. Świeże dane demo: zatrzymaj serwer, przenieś/usuń `data/` (seed działa tylko na pustej bazie), `node server.mjs` → http://localhost:8080.
+3. Bez klucza AI działa tryb regułowy; z modelem: `node --env-file=.env server.mjs` (Twoja decyzja – w nocy nie używane).
+4. Scenariusz: logowanie „Demo: przełożony” → Start „Ocena w 3 krokach” → (a) „Ustal kryteria” → wybierz arkusz → „Zaproponuj kryteria (AI)” → (b) „Zbierz informacje i oceń” → szkic → kroki → „Złóż ocenę” → (c) Miesiąc → „Przygotuj brief do rozmowy”; potem „Demo: pracownik” → Start → „Przygotuj się do rozmowy”, Mój profil (plan rozwoju).
+
+**Co sprawdzić przed scaleniem z main:**
+- `npm test` (137/137) i `node e2e/personas/run.mjs all` na czystej kopii.
+- Ręcznie w przeglądarce: kreator na telefonie, okno rozmowy rozpoczynającej, brief, dziennik.
+- Smoke test z prawdziwym modelem (format briefu i propozycji kryteriów).
+- Konflikty z main (Mateusz) – gałąź z main @ d4c19cf.
+- Czy zostawić `e2e/` i Playwright w repo, czy tylko lokalnie.
+
+---
+
 # NOTES – nocna iteracja (pamięć orkiestratora)
 
 ## PRZERWANE – przekazanie (04:55)
@@ -55,6 +104,7 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 | 4 | 07:15 | 8 | 9 | 9 | 9 | 8 | 7 | 8 | 6 | 8,0 | juror 6, Michał 6, Ewa 6 |
 | 5 | 07:27 | 9 | 9 | 9 | 9 | 8 | 7 | 8 | 7 | 8,3 | juror 7, Krystyna 6, klawiatura 7 |
 | 6 | 07:38 | 9 | 9 | 9 | 9 | 8 | 8 | 8 | 7 | 8,4 | juror 6, Michał 7, Ewa 6 |
+| 7 (końcowy) | 07:46 | 9 | 9 | 9 | 9 | 8 | 8 | 8 | 7 | 8,4 | juror 7, Krystyna 7, Michał 7, Ewa 6, klawiatura 6 |
 
 ## Decyzje do przejrzenia
 - Zasada Janka (04:2x): żadnych prawdziwych wywołań API i żadnego użycia klucza z `.env`. Serwer deweloperski uruchamiany bez klucza, rubryka pkt 7 oceniana na atrapach (smoke testy z prawdziwym API pominięte).
@@ -115,4 +165,9 @@ Pętla zatrzymana na polecenie Janka w trakcie cyklu 3. Ostatni wykonany krok: c
 - Dowody: `npm test` 137/137; persony – komplet kroków desktop/mobile (submitOk, pdfOk, ackOk), konsola 0, kontrast 0, powtórzone nazwy 0, pułapki 0.
 - Persony: juror 6 (brief: kody faktów bez objaśnienia, małe linki „źródło”, cienka treść – częściowo efekt sztywnej atrapy AI w skrypcie; radar – nakładanie podpisów), Michał 7 (wie, co dalej; na telefonie radar w podglądzie oceny, plan rozwoju nisko, różne rozmiary czcionki w krokach celu, metadane w wąskiej kolumnie), Ewa 6 (daty ISO w liście ocen i podglądzie; dziennik – nieprzetłumaczone zdarzenia `download_doc` i surowe cele „5:pdf”; „§ 11” bez nazwy aktu; wyłączony moduł nieodróżnialny).
 - Retro: oceny haiku wahają się ±1 między przebiegami przy tej samej wersji (juror 7 → 6 przy lepszej wersji) – do rubryki liczyć dowody automatyczne (kroki, konsola, kontrast, czasy, testy), oceny person jako sygnał jakościowy.
+
+### Cykl 7 (07:36–07:46, końcowy)
+- Zmiany: daty DD.MM.RRRR w całej aplikacji, dziennik w pełni po polsku z czytelnymi celami, podgląd oceny z pełną podstawą § 11 i listą na telefonie, brief z opisem źródeł, plan rozwoju na górze profilu, status zapoznania na liście ocen, wyraźny stan wyłączonego modułu; atrapa AI person bliższa dobremu modelowi; kroki zgodności Ewy; poprawka nakładania się statusów kroków celu na telefonie.
+- Dowody: `npm test` 137/137; wszystkie persony komplet kroków desktop/mobile, konsola 0, kontrast 0, pułapki 0.
+- Persony: juror 7, Krystyna 7, Michał 7, Ewa 6, klawiatura 6.
 
