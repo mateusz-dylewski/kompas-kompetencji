@@ -839,6 +839,8 @@
   // ---------- Przełożony ----------
   function mgrPage(v) {
     if (v === "settings") return settingsPage();
+    // Dziennik zdarzeń: kto, kiedy i co zmienił (z poprzednią i nową wartością) – wypełnia loadLog()
+    if (v === "log") return `<div class="card"><h2>Dziennik zdarzeń</h2><p class="muted">Każda zmiana ocen, informacji, feedbacku, celów i planów rozwoju – z autorem, czasem oraz poprzednią i nową wartością. Integralność chroni łańcuch skrótów.</p><div id="logBody" aria-live="polite"><p class="muted">Wczytywanie…</p></div></div>`;
     const d = S.dash, c = d.counts;
     if (v === "home") {
       const todo = d.team.filter(t => t.status === "none" || t.status === "draft");
